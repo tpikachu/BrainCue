@@ -1,12 +1,48 @@
-# BrainCue Copilot
+<p align="center">
+  <img src="resources/icon.png" alt="BrainCue Copilot" width="128" height="128" />
+</p>
 
-A desktop (Electron) interview assistant. **Local-first data, bring-your-own
-OpenAI key.** It transcribes interviews, detects questions, and surfaces
-grounded answer suggestions in a floating, always-on-top **Cue Card** using your
-resume / job description / notes (local RAG).
+<h1 align="center">BrainCue Copilot</h1>
 
-> Use this only where AI assistance is permitted. Your data stays on your
-> machine; only the retrieved context + question is sent to OpenAI.
+<p align="center">
+  <strong>Your AI copilot for live interviews.</strong><br />
+  Real-time transcription, question detection, and grounded answer cues — in a
+  floating, <em>screen-share-invisible</em> panel.<br />
+  Local-first. Bring your own OpenAI key.
+</p>
+
+<p align="center">
+  <a href="https://github.com/tpikachu/Interview-Copilot/releases"><img alt="Download" src="https://img.shields.io/badge/download-Releases-5C6BC0?style=flat-square" /></a>
+  <img alt="Platforms" src="https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-2D2D2D?style=flat-square" />
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-3FB950?style=flat-square" />
+  <img alt="Built with Electron" src="https://img.shields.io/badge/Electron-React%20%C2%B7%20TypeScript-47848F?style=flat-square" />
+</p>
+
+<!-- Screenshots welcome here once captured. Privacy Mode hides the app from screen
+     capture, so turn it off (Settings) before grabbing a shot, then re-enable it:
+<p align="center"><img src="docs/images/dashboard.png" alt="BrainCue dashboard" width="820" /></p>
+-->
+
+---
+
+> ⚠️ **Use only where AI assistance is permitted.** Your data stays on your
+> machine; only the retrieved context + the current question is sent to OpenAI.
+
+## Why BrainCue
+
+- 🎙️ **Live transcription & question detection** — hears the interviewer (system
+  audio) and flags the question being asked, in real time.
+- 💡 **Grounded answer cues** — suggestions are drawn from *your* resume, the job
+  description, and your notes via on-device retrieval (local RAG), not generic
+  filler.
+- 🪟 **Floating Cue Card** — an always-on-top panel that's **excluded from screen
+  sharing & recording**, so it's there for you and invisible to everyone else.
+- 🧪 **Mock interview mode** — an AI interviewer asks questions aloud and gives
+  you feedback and a coaching report afterward.
+- ⌨️ **Global hotkeys** — toggle the Cue Card, solve a copied problem, or
+  drag-select a region of the screen to read and answer.
+- 🔒 **Local-first & private** — data lives on your machine in a local database;
+  your OpenAI key is encrypted by the OS keychain and never leaves the main process.
 
 ## Download
 
@@ -110,7 +146,8 @@ artifacts instead.
   `window.api` preload bridge.
 - `.env` is gitignored; the key is never logged (logger redacts `sk-…`).
 
-## Status
-Skeleton implements M0 (plumbing) and most of the M1/M2 service layer. See
-[docs/09-MVP-PLAN.md](docs/09-MVP-PLAN.md). Items marked in code as M1/M2/M4 are
-where the remaining UI wiring lands.
+## Project status
+Actively developed. The core flows are in place — profiles, live session with
+grounded answers, the Cue Card, region/clipboard solve, mock interviews, and
+coaching reports. See the [changelog](changelog/) for what ships in each release
+and [docs/09-MVP-PLAN.md](docs/09-MVP-PLAN.md) for the roadmap.
