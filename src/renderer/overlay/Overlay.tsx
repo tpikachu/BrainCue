@@ -108,12 +108,38 @@ export default function Overlay() {
     setMode(m);
     void api.overlay.setMode(m);
   };
-  const toggleClickthrough = () => {
-    const next = !clickthrough;
-    setClickthrough(next);
-    void api.overlay.setClickthrough(next);
-  };
+  const toggleClickthrough = () => setClickthrough((c) => !c);
   const togglePause = () => void api.session.togglePauseActive();
+
+  // The global shortcut (Ctrl+Shift+\) toggles click-through via the main process.
+  useEffect(() => api.events.onOverlayClickthrough(() => setClickthrough((c) => !c)), []);
+
+  // Per-region click-through. Electron ignores the mouse per-WINDOW, so making the
+  // whole Cue Card click-through would trap its own buttons. Instead, while it's on
+  // we flip ignore as the cursor enters/leaves the control bar — mouse-move is still
+  // forwarded while ignoring ({forward:true}) — so the header stays clickable and
+  // only the answer area passes clicks through to the app behind.
+  useEffect(() => {
+    if (!clickthrough) {
+      void api.overlay.setClickthrough(false);
+      return;
+    }
+    let ignoring = false;
+    const onMove = (e: MouseEvent) => {
+      const overUI = !!(
+        document.elementFromPoint(e.clientX, e.clientY) as Element | null
+      )?.closest('[data-ct-interactive]');
+      if (!overUI !== ignoring) {
+        ignoring = !overUI;
+        void api.overlay.setClickthrough(ignoring);
+      }
+    };
+    document.addEventListener('mousemove', onMove);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      void api.overlay.setClickthrough(false);
+    };
+  }, [clickthrough]);
 
   const noDrag = { WebkitAppRegion: 'no-drag' } as React.CSSProperties;
 
@@ -122,8 +148,10 @@ export default function Overlay() {
       className="flex h-screen flex-col bg-neutral-900 p-2.5 text-neutral-100"
       style={{ fontSize: `${fontSize}px` }}
     >
-      {/* Header / drag handle */}
+      {/* Header / drag handle. Marked interactive so it stays clickable when
+          click-through is on (only the answer area below passes clicks through). */}
       <div
+        data-ct-interactive
         className="mb-2 flex items-center justify-between text-[11px] text-neutral-400"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >

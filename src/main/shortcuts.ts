@@ -3,16 +3,16 @@ import {
   SHORTCUT_DEFAULTS,
   type ShortcutAction,
 } from '@shared/shortcuts';
+import { EVENTS } from '@shared/ipc';
 import { SETTINGS_KEYS, settingsRepo } from './db/repositories/settings.repo';
-import { createOverlayWindow, getOverlayWindow } from './windows/overlayWindow';
+import { createOverlayWindow } from './windows/overlayWindow';
+import { broadcast } from './ipc/broadcast';
 import { togglePrivacyGuarded } from './services/session/privacy';
 import { sessionManager } from './services/session/sessionManager';
 import { openSelector } from './windows/selectionWindow';
 import { quickSolveFromClipboard } from './services/capture/codingMode';
 import { quitApp } from './quit';
 import { log } from './services/security/logger';
-
-let clickthrough = false;
 
 /** Effective accelerators: user overrides (persisted) merged over the defaults,
  *  ignoring any stored key that is no longer a known action. */
@@ -36,11 +36,11 @@ function handle(action: ShortcutAction): void {
       w.isVisible() ? w.hide() : w.show();
       break;
     }
-    case 'overlay:toggle-clickthrough': {
-      clickthrough = !clickthrough;
-      getOverlayWindow()?.setIgnoreMouseEvents(clickthrough, { forward: true });
+    case 'overlay:toggle-clickthrough':
+      // Let the overlay renderer toggle it, so click-through stays per-region
+      // (the control bar remains clickable) instead of locking the whole window.
+      broadcast(EVENTS.overlayClickthrough, {}, ['overlay']);
       break;
-    }
     case 'privacy:toggle':
       void togglePrivacyGuarded();
       break;

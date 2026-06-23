@@ -208,6 +208,7 @@ const api = {
     onDataChanged: (cb: (p: unknown) => void) => on(EVENTS.dataChanged, cb),
     onSelectionReset: (cb: (p: { image: string }) => void) => on(EVENTS.selectionReset, cb),
     onUpdateStatus: (cb: (p: UpdateStatus) => void) => on(EVENTS.updateStatus, cb),
+    onOverlayClickthrough: (cb: () => void) => on(EVENTS.overlayClickthrough, cb),
   },
 };
 

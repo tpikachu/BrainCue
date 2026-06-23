@@ -129,6 +129,7 @@ export const EVENTS = {
   dataChanged: 'data:changed',
   selectionReset: 'selection:reset',
   updateStatus: 'update:status',
+  overlayClickthrough: 'overlay:clickthrough', // global shortcut -> overlay toggles click-through
 } as const;
 
 export type IpcEventChannel = (typeof EVENTS)[keyof typeof EVENTS];
