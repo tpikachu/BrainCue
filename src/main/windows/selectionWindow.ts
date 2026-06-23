@@ -73,9 +73,15 @@ export async function openSelector(): Promise<void> {
       width,
       height,
       frame: false,
-      // Transparent so the user selects directly over the LIVE desktop (robust
-      // regardless of screenshot quality). We still crop the frozen frame for OCR.
-      transparent: true,
+      // Opaque (NOT transparent): the renderer paints the frozen screenshot as
+      // the full-screen background and the user selects over that. Transparent
+      // windows are unreliable on Windows — combined with content protection
+      // (Privacy Mode) they can fail to composite, leaving the selector
+      // invisible so the app looks like it "disappeared" (main/overlay hidden,
+      // selector see-through). A solid window always paints. WYSIWYG cropping is
+      // also more accurate against the frozen frame than the live desktop.
+      transparent: false,
+      backgroundColor: '#000000',
       resizable: false,
       movable: false,
       skipTaskbar: true,

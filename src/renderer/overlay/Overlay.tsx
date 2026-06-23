@@ -3,6 +3,18 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import type { AnswerMetaEvent, ContextSentEvent } from '@shared/types';
 import { Markdown } from '../components/Markdown';
+import {
+  ChevronRightIcon,
+  CloseIcon,
+  CompactIcon,
+  CursorIcon,
+  ExpandIcon,
+  EyeIcon,
+  EyeOffIcon,
+  HeadphonesIcon,
+  PauseIcon,
+  PlayIcon,
+} from '../components/icons';
 
 export default function Overlay() {
   const [question, setQuestion] = useState('');
@@ -74,6 +86,7 @@ export default function Overlay() {
         setFontSize(s.fontSize);
         setMode(s.mode);
       }),
+      api.events.onPrivacyChanged((p) => setPrivacy((p as { enabled: boolean }).enabled)),
     );
     void api.privacy.get().then((p) => setPrivacy((p as { enabled: boolean }).enabled));
     return () => {
@@ -123,23 +136,38 @@ export default function Overlay() {
           AI Assistant
           {live && !paused && !streaming && <EqualizerBars />}
         </span>
-        <div className="flex items-center gap-1" style={noDrag}>
-          <Btn onClick={() => setFontSize((f) => Math.max(10, f - 1))}>A-</Btn>
-          <Btn onClick={() => setFontSize((f) => Math.min(28, f + 1))}>A+</Btn>
-          <Btn active={mode === 'compact'} onClick={() => applyMode('compact')}>▢</Btn>
-          <Btn active={mode === 'expanded'} onClick={() => applyMode('expanded')}>▣</Btn>
+        <div className="flex items-center gap-0.5" style={noDrag}>
+          <Btn onClick={() => setFontSize((f) => Math.max(10, f - 1))} title="Smaller text">
+            <span className="text-[11px] font-semibold leading-none">A−</span>
+          </Btn>
+          <Btn onClick={() => setFontSize((f) => Math.min(28, f + 1))} title="Larger text">
+            <span className="text-[13px] font-semibold leading-none">A+</span>
+          </Btn>
+          <span className="mx-0.5 h-4 w-px bg-neutral-700" />
+          <Btn active={mode === 'compact'} onClick={() => applyMode('compact')} title="Compact view">
+            <CompactIcon className="h-3.5 w-3.5" />
+          </Btn>
+          <Btn active={mode === 'expanded'} onClick={() => applyMode('expanded')} title="Expanded view">
+            <ExpandIcon className="h-3.5 w-3.5" />
+          </Btn>
+          <span className="mx-0.5 h-4 w-px bg-neutral-700" />
           <Btn
-            active={privacy}
+            active={!privacy}
+            tone={privacy ? 'default' : 'warn'}
             onClick={togglePrivacy}
-            title={privacy ? 'Hidden from screen share' : 'VISIBLE to screen share — click to hide'}
+            title={privacy ? 'Hidden from screen share — click to reveal' : 'VISIBLE to screen share — click to hide'}
           >
-            {privacy ? '🛡 Hidden' : '👁 Shown'}
+            {privacy ? <EyeOffIcon className="h-3.5 w-3.5" /> : <EyeIcon className="h-3.5 w-3.5" />}
           </Btn>
-          <Btn active={clickthrough} onClick={toggleClickthrough} title="Click-through">⤧</Btn>
-          <Btn active={paused} onClick={togglePause} title="Pause/resume AI">
-            {paused ? '▶' : '⏸'}
+          <Btn active={clickthrough} onClick={toggleClickthrough} title="Click-through (mouse passes through)">
+            <CursorIcon className="h-3.5 w-3.5" />
           </Btn>
-          <Btn onClick={() => api.overlay.hide()}>✕</Btn>
+          <Btn active={paused} onClick={togglePause} title={paused ? 'Resume AI' : 'Pause AI'}>
+            {paused ? <PlayIcon className="h-3.5 w-3.5" /> : <PauseIcon className="h-3.5 w-3.5" />}
+          </Btn>
+          <Btn onClick={() => api.overlay.hide()} title="Hide overlay">
+            <CloseIcon className="h-3.5 w-3.5" />
+          </Btn>
         </div>
       </div>
 
@@ -172,8 +200,8 @@ export default function Overlay() {
               </>
             ) : (
               <>
-                <span className="text-2xl">🎧</span>
-                <span className="mt-1 text-xs">
+                <HeadphonesIcon className="h-7 w-7 text-neutral-600" />
+                <span className="mt-2 text-xs">
                   Ready. Start a Live Session or use the “Ask” box —
                   <br />
                   suggested answers will stream here.
@@ -221,9 +249,12 @@ export default function Overlay() {
         <div className="mt-2 shrink-0 text-[11px]" style={noDrag}>
           <button
             onClick={() => setShowData((s) => !s)}
-            className="text-neutral-500 hover:text-neutral-300"
+            className="inline-flex items-center gap-1 text-neutral-500 hover:text-neutral-300"
           >
-            {showData ? '▾' : '▸'} Data sent to OpenAI ({context.chunks.length} chunks)
+            <ChevronRightIcon
+              className={`h-3 w-3 transition-transform ${showData ? 'rotate-90' : ''}`}
+            />
+            Data sent to OpenAI ({context.chunks.length} chunks)
           </button>
           {showData && (
             <div className="mt-1 max-h-28 space-y-1 overflow-auto rounded bg-neutral-950/60 p-2 text-neutral-400">
@@ -260,16 +291,19 @@ function Btn(props: {
   children: React.ReactNode;
   onClick: () => void;
   active?: boolean;
+  tone?: 'default' | 'warn';
   title?: string;
 }) {
+  const base =
+    'inline-flex h-6 min-w-6 items-center justify-center rounded-md px-1.5 transition-colors';
+  const tone =
+    props.tone === 'warn'
+      ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+      : props.active
+        ? 'bg-neutral-700 text-white'
+        : 'text-neutral-400 hover:bg-neutral-700/70 hover:text-neutral-200';
   return (
-    <button
-      title={props.title}
-      onClick={props.onClick}
-      className={`rounded px-1.5 py-0.5 text-[11px] leading-none hover:bg-neutral-700 ${
-        props.active ? 'bg-neutral-700 text-white' : 'text-neutral-400'
-      }`}
-    >
+    <button title={props.title} onClick={props.onClick} className={`${base} ${tone}`}>
       {props.children}
     </button>
   );

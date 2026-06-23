@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
+import { NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useTourStore } from '../store/useTourStore';
@@ -10,23 +10,50 @@ import SessionPage from './pages/SessionPage';
 import MockPage from './pages/MockPage';
 import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
+import WhatsNewPage from './pages/WhatsNewPage';
+import { APP_VERSION } from './changelog';
+import {
+  MockIcon,
+  OverlayIcon,
+  ReportIcon,
+  SettingsIcon,
+  MicIcon,
+  UserIcon,
+} from '../components/icons';
+import { Logo } from '../components/Logo';
 
 const navItems = [
-  { to: '/profiles', label: 'Profiles', icon: '👤', tour: 'nav-profiles' },
-  { to: '/session', label: 'Live Session', icon: '🎙', tour: 'nav-session' },
-  { to: '/mock', label: 'Mock Interview', icon: '🧑‍🏫', tour: 'nav-mock' },
-  { to: '/reports', label: 'Reports', icon: '📄', tour: 'nav-reports' },
-  { to: '/settings', label: 'Settings', icon: '⚙', tour: 'nav-settings' },
+  { to: '/profiles', label: 'Profiles', Icon: UserIcon, tour: 'nav-profiles' },
+  { to: '/session', label: 'Live Session', Icon: MicIcon, tour: 'nav-session' },
+  { to: '/mock', label: 'Mock Interview', Icon: MockIcon, tour: 'nav-mock' },
+  { to: '/reports', label: 'Reports', Icon: ReportIcon, tour: 'nav-reports' },
+  { to: '/settings', label: 'Settings', Icon: SettingsIcon, tour: 'nav-settings' },
 ];
 
 export default function App() {
   const [overlayVisible, setOverlayVisible] = useState(false);
   const { settings, load: loadSettings } = useSettingsStore();
   const { running, start, stop } = useTourStore();
+  const navigate = useNavigate();
 
   useEffect(() => {
     void loadSettings();
   }, [loadSettings]);
+
+  // Reflect the overlay's real visibility (it can be toggled from the hotkey,
+  // the tray, the overlay's own close button, or a session ending), and let the
+  // tray "Settings" item route the dashboard here.
+  useEffect(() => {
+    void api.overlay.isVisible().then((s) => setOverlayVisible((s as { visible: boolean }).visible));
+    const offVis = api.events.onOverlayVisibility((p) =>
+      setOverlayVisible((p as { visible: boolean }).visible),
+    );
+    const offNav = api.events.onNavigate((p) => navigate((p as { path: string }).path));
+    return () => {
+      offVis();
+      offNav();
+    };
+  }, [navigate]);
 
   // Auto-launch the tour once for a brand-new user (tourDone is persisted, so
   // finishing/skipping prevents it from showing again).
@@ -49,9 +76,7 @@ export default function App() {
     <div className="flex h-screen bg-gradient-to-b from-neutral-950 to-neutral-900 text-neutral-100">
       <aside className="flex w-60 shrink-0 flex-col border-r border-white/5 bg-neutral-950/60 p-4">
         <div className="mb-8 flex items-center gap-2.5 px-1">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-sm font-bold shadow-lg shadow-indigo-900/40">
-            AI
-          </span>
+          <Logo className="h-9 w-9" />
           <div className="leading-tight">
             <h1 className="text-sm font-semibold">Interview</h1>
             <p className="text-xs text-neutral-500">Assistant</p>
@@ -76,7 +101,7 @@ export default function App() {
                   {isActive && (
                     <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r bg-indigo-400" />
                   )}
-                  <span className="text-base">{n.icon}</span>
+                  <n.Icon className="h-[18px] w-[18px]" />
                   {n.label}
                 </>
               )}
@@ -94,7 +119,7 @@ export default function App() {
               : 'text-neutral-400 hover:bg-white/5 hover:text-neutral-200'
           }`}
         >
-          <span className="text-base">🪟</span>
+          <OverlayIcon className="h-[18px] w-[18px]" />
           {overlayVisible ? 'Hide overlay' : 'Show overlay'}
         </button>
 
@@ -102,6 +127,16 @@ export default function App() {
           Use only where AI assistance is allowed. Data stays local; only retrieved
           context is sent to OpenAI.
         </p>
+        <NavLink
+          to="/whats-new"
+          className={({ isActive }) =>
+            `mt-2 rounded-md px-2 py-1 text-xs transition-colors ${
+              isActive ? 'text-indigo-300' : 'text-neutral-600 hover:text-neutral-400'
+            }`
+          }
+        >
+          v{APP_VERSION} · What's new
+        </NavLink>
       </aside>
 
       <main className="flex-1 overflow-hidden">
@@ -113,6 +148,7 @@ export default function App() {
           <Route path="/mock" element={<MockPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/whats-new" element={<WhatsNewPage />} />
         </Routes>
       </main>
 

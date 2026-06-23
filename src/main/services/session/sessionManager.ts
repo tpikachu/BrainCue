@@ -137,6 +137,16 @@ export const sessionManager = {
     );
   },
 
+  /** Release the live transcription websocket on app exit so its socket/helper
+   *  process doesn't linger. Does not touch the DB (the session row keeps its
+   *  last status). Safe to call when nothing is live. */
+  shutdown(): void {
+    if (live) {
+      live.transcriber?.stop();
+      live = null;
+    }
+  },
+
   togglePause(sessionId: string): { paused: boolean } {
     if (live?.sessionId !== sessionId) return { paused: true };
     live.paused = !live.paused;

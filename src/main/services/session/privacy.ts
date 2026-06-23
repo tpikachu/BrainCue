@@ -1,5 +1,8 @@
 import { BrowserWindow } from 'electron';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
+import { broadcast } from '../../ipc/broadcast';
+import { EVENTS } from '@shared/ipc';
+import { appEvents, APP_EVENT } from '../../appEvents';
 
 /** Privacy Mode excludes ALL app windows (dashboard, overlay, region selector,
  *  any future modal/window) from OS screen capture, so nothing appears when the
@@ -25,6 +28,11 @@ export function applyPrivacyToWindow(win: BrowserWindow): void {
 export function setPrivacy(enabled: boolean): boolean {
   settingsRepo.set(SETTINGS_KEYS.privacyMode, enabled ? '1' : '0');
   applyContentProtectionToAll(enabled);
+  // Notify all renderer windows so their indicators stay in sync regardless of
+  // who triggered the change (global shortcut, overlay button, or Settings).
+  broadcast(EVENTS.privacyChanged, { enabled });
+  // ...and the tray menu (main-process, not a renderer) so its checkbox matches.
+  appEvents.emit(APP_EVENT.privacyChanged, enabled);
   return enabled;
 }
 

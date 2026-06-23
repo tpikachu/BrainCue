@@ -1,4 +1,5 @@
 import type React from 'react';
+import { ChevronLeftIcon, ChevronRightIcon, SearchIcon } from './icons';
 
 /* Small shared UI kit so pages look consistent. Tailwind-only, no deps. */
 
@@ -109,6 +110,16 @@ export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return <select {...props} className={`${inputBase} ${props.className ?? ''}`} />;
 }
 
+/** Text input with a leading search icon — for filter/search boxes. */
+export function SearchInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <div className="relative">
+      <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-500" />
+      <input {...props} className={`${inputBase} pl-9 ${props.className ?? ''}`} />
+    </div>
+  );
+}
+
 /** Page with a FIXED header (title/subtitle/actions) and an independently
  *  scrolling body, so the header stays put while content scrolls. */
 export function Page({
@@ -156,13 +167,13 @@ export function Pager({
   return (
     <div className="flex items-center justify-center gap-3 pt-3 text-sm text-neutral-400">
       <Button variant="ghost" disabled={page <= 0} onClick={() => onPage(page - 1)}>
-        ← Prev
+        <ChevronLeftIcon /> Prev
       </Button>
       <span>
         {page + 1} / {totalPages}
       </span>
       <Button variant="ghost" disabled={page >= totalPages - 1} onClick={() => onPage(page + 1)}>
-        Next →
+        Next <ChevronRightIcon />
       </Button>
     </div>
   );

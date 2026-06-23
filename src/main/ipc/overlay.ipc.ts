@@ -4,6 +4,7 @@ import { handle, NoInput } from './helpers';
 import {
   createOverlayWindow,
   getOverlayWindow,
+  isOverlayVisible,
   setOverlayMode,
 } from '../windows/overlayWindow';
 import { getPrivacy, setPrivacy, togglePrivacy } from '../services/session/privacy';
@@ -25,6 +26,8 @@ export function registerOverlayIpc(): void {
     visible ? w.show() : w.hide();
     return { visible };
   });
+
+  handle(IPC.overlay.isVisible, NoInput, () => ({ visible: isOverlayVisible() }));
 
   handle(IPC.overlay.setMode, z.object({ mode: z.enum(['compact', 'expanded']) }), ({ mode }) => {
     setOverlayMode(mode);

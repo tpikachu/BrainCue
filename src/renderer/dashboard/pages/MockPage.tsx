@@ -6,6 +6,7 @@ import { useSettingsStore } from '../../store/useSettingsStore';
 import { useAnswerRecorder } from '../../lib/useAnswerRecorder';
 import type { InterviewType, Job, SessionReport } from '@shared/types';
 import { Badge, BusyOverlay, Button, Card, Page, Select, TextArea } from '../../components/ui';
+import { MicIcon, PlayIcon } from '../../components/icons';
 
 const VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
 const INTERVIEW_TYPES: InterviewType[] = [
@@ -220,7 +221,7 @@ export default function MockPage() {
             </p>
           )}
           <Button variant="primary" className="mt-4" onClick={start} disabled={!profileId}>
-            ▶ Start mock interview
+            <PlayIcon /> Start mock interview
           </Button>
         </Card>
       )}
@@ -236,11 +237,23 @@ export default function MockPage() {
             </Button>
           </div>
 
-          <p className="mb-4 text-lg font-medium text-blue-200">🎙 {question}</p>
+          <p className="mb-4 flex items-start gap-2 text-lg font-medium text-blue-200">
+            <MicIcon className="mt-1 h-5 w-5 shrink-0 text-blue-300" />
+            {question}
+          </p>
 
           <div className="flex flex-wrap items-center gap-2">
             <Button variant={rec.recording ? 'danger' : 'success'} onClick={toggleRecord}>
-              {rec.recording ? '■ Stop & submit answer' : '● Record answer'}
+              {rec.recording ? (
+                <>
+                  <span className="inline-block h-2.5 w-2.5 rounded-[2px] bg-white" /> Stop & submit
+                  answer
+                </>
+              ) : (
+                <>
+                  <span className="inline-block h-2.5 w-2.5 rounded-full bg-white" /> Record answer
+                </>
+              )}
             </Button>
             <span className="text-xs text-neutral-500">or type your answer below</span>
           </div>

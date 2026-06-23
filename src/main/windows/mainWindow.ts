@@ -1,7 +1,9 @@
 import { BrowserWindow, shell } from 'electron';
 import { join } from 'path';
+import { EVENTS } from '@shared/ipc';
 import { attachDiagnostics, loadRenderer } from './loadRenderer';
 import { applyPrivacyToWindow } from '../services/session/privacy';
+import { isQuitting } from '../quit';
 import { log } from '../services/security/logger';
 
 let win: BrowserWindow | null = null;
@@ -52,6 +54,16 @@ export function createMainWindow(): BrowserWindow {
     return { action: 'deny' };
   });
 
+  // Closing the dashboard does NOT quit the app — it keeps living in the tray
+  // (closing only frees the taskbar button). A real quit (tray "Exit", Cmd+Q)
+  // sets `isQuitting()` first, so we let the window actually close then.
+  win.on('close', (e) => {
+    if (!isQuitting() && win && !win.isDestroyed()) {
+      e.preventDefault();
+      win.hide();
+    }
+  });
+
   attachDiagnostics(win, 'dashboard');
   loadRenderer(win, 'dashboard');
 
@@ -61,4 +73,23 @@ export function createMainWindow(): BrowserWindow {
 
 export function getMainWindow(): BrowserWindow | null {
   return win;
+}
+
+/** Bring the dashboard to the front, recreating it if it was destroyed. */
+export function showMainWindow(): BrowserWindow {
+  const w = win && !win.isDestroyed() ? win : createMainWindow();
+  if (w.isMinimized()) w.restore();
+  w.show();
+  w.focus();
+  return w;
+}
+
+/** Show the dashboard and ask the renderer to navigate to a route (tray menu). */
+export function navigateMainWindow(path: string): void {
+  const w = showMainWindow();
+  const send = (): void => {
+    if (!w.isDestroyed()) w.webContents.send(EVENTS.navigate, { path });
+  };
+  if (w.webContents.isLoading()) w.webContents.once('did-finish-load', send);
+  else send();
 }

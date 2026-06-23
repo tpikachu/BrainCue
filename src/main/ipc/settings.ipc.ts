@@ -7,6 +7,14 @@ import { apiKeyStore } from '../services/security/apiKey';
 import { listModels, testApiKey } from '../services/openai/client';
 import { defaultModels } from '../services/openai/models';
 import { SETTINGS_KEYS, settingsRepo } from '../db/repositories/settings.repo';
+import {
+  getShortcuts,
+  registerGlobalShortcuts,
+  resetShortcuts,
+  setShortcuts,
+  unregisterGlobalShortcuts,
+} from '../shortcuts';
+import { SHORTCUT_DEFAULTS } from '@shared/shortcuts';
 import { broadcast } from './broadcast';
 import { EVENTS } from '@shared/ipc';
 
@@ -21,6 +29,8 @@ function readSettings(): AppSettings {
     privacyMode: settingsRepo.get(SETTINGS_KEYS.privacyMode) !== '0',
     dataConsentAck: settingsRepo.get(SETTINGS_KEYS.dataConsentAck) === '1',
     tourDone: settingsRepo.get(SETTINGS_KEYS.tourDone) === '1',
+    shortcuts: getShortcuts(),
+    shortcutDefaults: { ...SHORTCUT_DEFAULTS },
   };
 }
 
@@ -71,4 +81,24 @@ export function registerSettingsIpc(): void {
   handle(IPC.settings.testApiKey, NoInput, () => testApiKey());
 
   handle(IPC.settings.listModels, NoInput, () => listModels());
+
+  // Re-binds the global shortcuts live (no restart needed).
+  handle(
+    IPC.settings.setShortcuts,
+    z.object({ shortcuts: z.record(z.string()) }),
+    ({ shortcuts }) => ({ shortcuts: setShortcuts(shortcuts) }),
+  );
+
+  handle(IPC.settings.resetShortcuts, NoInput, () => ({ shortcuts: resetShortcuts() }));
+
+  // While the Settings UI records a new binding, suspend global shortcuts so the
+  // keystroke reaches the renderer instead of firing an existing global.
+  handle(IPC.settings.suspendShortcuts, NoInput, () => {
+    unregisterGlobalShortcuts();
+    return { suspended: true as const };
+  });
+  handle(IPC.settings.resumeShortcuts, NoInput, () => {
+    registerGlobalShortcuts();
+    return { resumed: true as const };
+  });
 }

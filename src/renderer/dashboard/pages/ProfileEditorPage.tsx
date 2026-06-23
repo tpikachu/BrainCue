@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import type { AppSettings, Profile } from '@shared/types';
 import { Badge, BusyOverlay, Button, Card, Field, Page, TextArea, TextInput } from '../../components/ui';
+import { ChevronLeftIcon, UploadIcon } from '../../components/icons';
 
 export default function ProfileEditorPage() {
   const { id } = useParams<{ id: string }>();
@@ -72,7 +73,9 @@ export default function ProfileEditorPage() {
       width="max-w-2xl"
       actions={
         <Link to="/profiles">
-          <Button variant="ghost">← Profiles</Button>
+          <Button variant="ghost">
+            <ChevronLeftIcon /> Profiles
+          </Button>
         </Link>
       }
     >
@@ -105,7 +108,7 @@ export default function ProfileEditorPage() {
           {profile.parsedResume ? <Badge tone="green">parsed ✓</Badge> : <Badge tone="amber">not parsed</Badge>}
         </div>
         <Button variant="default" className="mb-3" onClick={pickFile}>
-          ⬆ Upload file (PDF / DOCX / TXT / MD)
+          <UploadIcon /> Upload file (PDF / DOCX / TXT / MD)
         </Button>
         <Field label="…or paste resume text">
           <TextArea

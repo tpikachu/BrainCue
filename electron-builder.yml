@@ -11,6 +11,9 @@ files:
 extraResources:
   - from: drizzle
     to: drizzle
+  # Tray icon is loaded at runtime by nativeImage from process.resourcesPath.
+  - from: resources/icon.png
+    to: icon.png
 asarUnpack:
   # native module must stay unpacked
   - "**/node_modules/better-sqlite3/**"

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useProfileStore } from '../../store/useProfileStore';
 import { usePagedSearch } from '../../lib/usePagedSearch';
-import { Badge, Button, Card, Field, Page, Pager, TextInput } from '../../components/ui';
+import { Badge, Button, Card, Field, Page, Pager, SearchInput, TextInput } from '../../components/ui';
+import { PlusIcon } from '../../components/icons';
 
 export default function ProfilesPage() {
   const { profiles, load, create, remove } = useProfileStore();
@@ -57,13 +58,13 @@ export default function ProfilesPage() {
           </Field>
         </div>
         <Button variant="primary" className="mt-4" onClick={onCreate} disabled={!name} loading={creating}>
-          Create & add resume
+          <PlusIcon /> Create & add resume
         </Button>
       </Card>
 
       {profiles.length > 0 && (
         <div className="mb-3">
-          <TextInput
+          <SearchInput
             value={paged.query}
             onChange={(e) => paged.setQuery(e.target.value)}
             placeholder="Search profiles by name or role…"

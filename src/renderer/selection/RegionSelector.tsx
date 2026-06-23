@@ -1,6 +1,7 @@
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
+import { CloseIcon } from '../components/icons';
 
 interface Point {
   x: number;
@@ -104,8 +105,18 @@ export default function RegionSelector() {
       onMouseMove={onMouseMove}
       onMouseUp={() => void finish()}
     >
-      {/* Window is transparent: the live desktop shows through. We dim it and
-          "cut out" the selection. The frozen frame is used only for cropping. */}
+      {/* The window is opaque: paint the frozen screenshot as the full-screen
+          background so the selector is always visible. The user drag-selects
+          over this frozen frame (WYSIWYG), and the same image is cropped for the
+          solve. Sized 1:1 to the window so selection coordinates map directly. */}
+      {frame && (
+        <img
+          src={frame}
+          alt=""
+          draggable={false}
+          className="pointer-events-none absolute inset-0 h-full w-full select-none object-fill"
+        />
+      )}
 
       {/* Dim everything, then "cut out" the selection with a giant box-shadow */}
       {rect ? (
@@ -149,9 +160,9 @@ export default function RegionSelector() {
           cancel();
         }}
         onMouseDown={(e) => e.stopPropagation()}
-        className="fixed right-6 top-6 rounded-full bg-neutral-900/90 px-3 py-2 text-sm text-neutral-100 shadow-lg hover:bg-neutral-800"
+        className="fixed right-6 top-6 inline-flex items-center gap-1.5 rounded-full bg-neutral-900/90 px-3 py-2 text-sm text-neutral-100 shadow-lg hover:bg-neutral-800"
       >
-        ✕ Cancel
+        <CloseIcon /> Cancel
       </button>
     </div>
   );

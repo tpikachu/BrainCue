@@ -24,12 +24,17 @@
            L332 778 L378 670 H326 A104 104 0 0 1 222 566 V354 A104 104 0 0 1 326 250 Z"
         fill="#FFFFFF"/>
 
-  <!-- AI sparkle (4-point) centered in the bubble -->
-  <path d="M512 318 Q533 439 640 446 Q533 453 512 574 Q491 453 384 446 Q491 439 512 318 Z"
-        fill="url(#spark)"/>
-  <!-- Small accent sparkles -->
-  <path d="M662 360 Q672 408 712 416 Q672 424 662 472 Q652 424 612 416 Q652 408 662 360 Z"
+  <!-- "B" brand monogram, woven into the bubble as the AI mark.
+       Drawn as rounded strokes (stem + two right-bulging bowls). -->
+  <g stroke="url(#spark)" stroke-width="40" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M452 350 V566"/>
+    <path d="M452 350 H512 C566 350 566 454 512 454 H452"/>
+    <path d="M452 454 H536 C594 454 594 566 536 566 H452"/>
+  </g>
+
+  <!-- Small accent sparkles flanking the monogram (the "AI" spark) -->
+  <path d="M648 356 Q658 404 698 412 Q658 420 648 468 Q638 420 598 412 Q638 404 648 356 Z"
         fill="#A5A6FB"/>
-  <path d="M372 506 Q379 540 408 546 Q379 552 372 586 Q365 552 336 546 Q365 540 372 506 Z"
+  <path d="M392 522 Q399 556 428 562 Q399 568 392 602 Q385 568 356 562 Q385 556 392 522 Z"
         fill="#C7C8FD"/>
 </svg>
