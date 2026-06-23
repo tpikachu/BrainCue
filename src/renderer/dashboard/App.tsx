@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useTourStore } from '../store/useTourStore';
@@ -35,6 +35,11 @@ export default function App() {
   const { settings, load: loadSettings } = useSettingsStore();
   const { running, start, stop } = useTourStore();
   const navigate = useNavigate();
+  const [version, setVersion] = useState('');
+
+  useEffect(() => {
+    void api.app.getInfo().then((i) => setVersion(i.version));
+  }, []);
 
   useEffect(() => {
     void loadSettings();
@@ -63,13 +68,26 @@ export default function App() {
       <UpdateBanner />
       <div className="flex min-h-0 flex-1">
       <aside className="flex w-60 shrink-0 flex-col border-r border-white/5 bg-neutral-950/60 p-4">
-        <div className="mb-8 flex items-center gap-2.5 px-1">
-          <Logo className="h-9 w-9" />
+        <Link
+          to="/whats-new"
+          title="What’s new"
+          className="brand group mb-8 flex items-center gap-2.5 rounded-xl px-1.5 py-1.5 transition-colors hover:bg-white/5"
+        >
+          <span className="logo-glow relative inline-flex transition-transform duration-300 group-hover:scale-105">
+            <Logo className="h-9 w-9" />
+          </span>
           <div className="leading-tight">
-            <h1 className="text-sm font-semibold">BrainCue</h1>
-            <p className="text-xs text-neutral-500">Copilot</p>
+            <h1 className="brand-gradient text-sm font-semibold tracking-tight">BrainCue</h1>
+            <div className="mt-0.5 flex items-center gap-1.5">
+              <span className="text-xs text-neutral-500">Copilot</span>
+              {version && (
+                <span className="version-pill rounded-full border border-white/10 bg-white/5 px-1.5 py-px text-[10px] font-medium tabular-nums text-neutral-400">
+                  v{version}
+                </span>
+              )}
+            </div>
           </div>
-        </div>
+        </Link>
         <nav className="space-y-1">
           {navItems.map((n) => (
             <NavLink

@@ -71,6 +71,71 @@
   }
 }
 
+/* Soft, slowly-pulsing glow behind the sidebar logo. */
+@keyframes logo-glow {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.08);
+  }
+}
+.logo-glow::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  z-index: -1;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(124, 125, 247, 0.55), transparent 70%);
+  filter: blur(8px);
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .logo-glow::after {
+    animation: logo-glow 3.6s ease-in-out infinite;
+  }
+}
+/* The brand block lifts the logo's glow on hover. */
+.brand:hover .logo-glow::after {
+  opacity: 0.85;
+}
+
+/* Animated gradient wordmark. */
+@keyframes brand-pan {
+  to {
+    background-position: 200% center;
+  }
+}
+.brand-gradient {
+  background: linear-gradient(100deg, #c7c8fd, #7c7df7, #a5a6fb, #7c7df7, #c7c8fd);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .brand-gradient {
+    animation: brand-pan 6s linear infinite;
+  }
+}
+
+/* Version pill — subtle by default, glows indigo on brand hover. */
+.version-pill {
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease;
+}
+.brand:hover .version-pill {
+  color: rgb(199 200 253);
+  background-color: rgb(79 70 229 / 0.18);
+  border-color: rgb(124 125 247 / 0.5);
+}
+
 /* Custom titlebar drag regions (frameless dashboard window). The bar is
    draggable; interactive controls opt out so clicks aren't swallowed. */
 .app-drag {
