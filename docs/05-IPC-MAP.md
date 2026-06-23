@@ -76,8 +76,10 @@ independently.
 | Channel | Request | Response |
 |---|---|---|
 | `jobs:list` | `{ profileId }` | `Job[]` |
+| `jobs:page` | `{ profileId, query?, limit=5, offset=0 }` | `{ items: Job[], total }` (server-side pagination + search — `LIKE` on title/company, sorted by `updatedAt` desc. Backs the searchable jobs table) |
 | `jobs:get` | `{ id }` | `Job` |
-| `jobs:save` | `{ id?, profileId, title, company, jdUrl, jdText, companyUrl }` | `{ job, keyMissing, embedded, companyResearched, companyError }` (create or update; parses JD + indexes when a key exists. `jdUrl` is reference-only. If `companyUrl` is set, best-effort scrapes + parses the company site into `parsed_company` and indexes it as `company` chunks; failures surface in `companyError`, not as an error) |
+| `jobs:save` | `{ id?, profileId, title, company, jdUrl, jdText, companyUrl, notes }` | `{ job, keyMissing, embedded, companyResearched, companyError }` (create or update; parses JD + indexes when a key exists. `jdUrl` is reference-only. If `companyUrl` is set, best-effort scrapes + parses the company site into `parsed_company` and indexes it as `company` chunks; failures surface in `companyError`, not as an error) |
+| `jobs:set-notes` | `{ id, notes }` | `{ job }` (updates the free-form client notes) |
 | `jobs:delete` | `{ id }` | `{ deleted: true }` |
 
 ### notes
