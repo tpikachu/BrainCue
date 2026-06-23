@@ -2,6 +2,7 @@ import { BrowserWindow, shell } from 'electron';
 import { join } from 'path';
 import { attachDiagnostics, loadRenderer } from './loadRenderer';
 import { applyPrivacyToWindow } from '../services/session/privacy';
+import { log } from '../services/security/logger';
 
 let win: BrowserWindow | null = null;
 
@@ -25,10 +26,24 @@ export function createMainWindow(): BrowserWindow {
   // on Windows, display affinity is most reliable once the window is realized.
   applyPrivacyToWindow(win);
 
-  win.on('ready-to-show', () => {
-    applyPrivacyToWindow(win!);
-    win?.show();
-  });
+  // Reveal the window exactly once. On some hybrid-GPU laptops (e.g. NVIDIA
+  // Optimus on MSI machines) `ready-to-show` can be delayed or never fire, which
+  // would leave the app running with no visible window. So we reveal on the first
+  // of: ready-to-show, did-finish-load, or a safety-net timeout — the app must
+  // never be an invisible process.
+  let shown = false;
+  const reveal = (reason: string) => {
+    if (shown || !win || win.isDestroyed()) return;
+    shown = true;
+    applyPrivacyToWindow(win);
+    win.show();
+    win.focus();
+    log.info(`main window shown (${reason})`);
+  };
+  win.once('ready-to-show', () => reveal('ready-to-show'));
+  win.webContents.once('did-finish-load', () => reveal('did-finish-load'));
+  setTimeout(() => reveal('fallback-timeout'), 5000);
+
   win.on('show', () => applyPrivacyToWindow(win!));
 
   // Open external links in the OS browser, never in-app.

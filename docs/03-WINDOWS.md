@@ -59,16 +59,35 @@ calls `capture:solve-image` (Vision reads the crop), then closes. Loads
 ## Window lifecycle
 
 ```
+requestSingleInstanceLock()        // duplicate launch focuses the 1st window & quits
 app.whenReady()
   ├─ initDb()            // open SQLite, run migrations
   ├─ registerIpc()       // all ipcMain.handle / ipcMain.on
   ├─ createMainWindow()
+  ├─ createOverlayWindow()  // created up front, kept hidden, so it's subscribed early
   ├─ registerGlobalShortcuts()
-  └─ (overlay created lazily on first session start, kept hidden otherwise)
+  └─ getPrivacy()        // apply privacy mode
 
+app.on('second-instance')   -> focus the existing main window
 app.on('window-all-closed') -> quit (except macOS convention)
-app.on('before-quit')       -> unregister shortcuts, close db
+app.on('before-quit')       -> unregister shortcuts
 ```
+
+**Single instance:** the app takes `requestSingleInstanceLock()` before creating
+windows. A second launch can't (it would fail to register the global shortcuts
+held by the first instance and hit "Access is denied" on the shared GPU/disk
+cache), so it focuses the existing window and exits.
+
+**Window reveal (never-invisible guarantee):** the main window is created with
+`show:false` and revealed on the **first** of `ready-to-show`, `did-finish-load`,
+or a 5s fallback timeout. On some hybrid-GPU laptops (e.g. NVIDIA Optimus on MSI)
+`ready-to-show` can be delayed or never fire — the fallback guarantees the app is
+never a visible-less process.
+
+**GPU escape hatch:** if a machine renders the window surface incorrectly (blank
+window), launch with `--disable-gpu` or set `AI_DISABLE_GPU=1` to fall back to
+software rendering (`app.disableHardwareAcceleration()`). GPU-process crashes are
+logged via `child-process-gone`.
 
 ## Global shortcuts (defaults, user-rebindable later)
 

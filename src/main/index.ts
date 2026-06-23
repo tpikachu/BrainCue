@@ -2,12 +2,47 @@ import { app, BrowserWindow, desktopCapturer, session } from 'electron';
 import { electronApp, is, optimizer } from '@electron-toolkit/utils';
 import { initDb } from './db';
 import { registerIpc } from './ipc';
-import { createMainWindow } from './windows/mainWindow';
+import { createMainWindow, getMainWindow } from './windows/mainWindow';
 import { createOverlayWindow } from './windows/overlayWindow';
 import { registerGlobalShortcuts, unregisterGlobalShortcuts } from './shortcuts';
 import { getPrivacy } from './services/session/privacy';
 import { log } from './services/security/logger';
 
+// Escape hatch for hybrid-GPU laptops (e.g. NVIDIA Optimus) where the GPU surface
+// won't display the window: launch with `--disable-gpu` or set `AI_DISABLE_GPU=1`
+// to fall back to software rendering. Must run before the app is ready.
+if (process.env.AI_DISABLE_GPU === '1' || process.argv.includes('--disable-gpu')) {
+  app.disableHardwareAcceleration();
+  log.info('GPU hardware acceleration disabled (AI_DISABLE_GPU / --disable-gpu)');
+}
+
+// A crashing GPU process can leave a blank/hidden window — log it so it's diagnosable.
+app.on('child-process-gone', (_e, details) => {
+  if (details.type === 'GPU' || details.reason !== 'clean-exit') {
+    log.warn(`child-process-gone: ${details.type} (${details.reason})`);
+  }
+});
+
+// Enforce a single instance. A second launch would fail to register the global
+// shortcuts (held by the first) and hit "Access is denied" on the shared disk
+// cache — so instead we focus the existing window and quit the duplicate.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    const win = getMainWindow();
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    } else {
+      createMainWindow();
+    }
+  });
+  startApp();
+}
+
+function startApp(): void {
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.aiinterview.assistant');
 
@@ -78,3 +113,4 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   unregisterGlobalShortcuts();
 });
+}
