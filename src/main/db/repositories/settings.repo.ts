@@ -51,6 +51,7 @@ export const SETTINGS_KEYS = {
   dataConsentAck: 'data_consent_ack',
   tourDone: 'tour_done',
   shortcuts: 'shortcuts',
+  overlayBounds: 'overlay_bounds',
 } as const;
 
 /** Non-secret settings cleared by a factory reset (everything except the API key). */
@@ -61,4 +62,5 @@ const APP_SETTING_KEYS: string[] = [
   SETTINGS_KEYS.dataConsentAck,
   SETTINGS_KEYS.tourDone,
   SETTINGS_KEYS.shortcuts,
+  SETTINGS_KEYS.overlayBounds,
 ];
