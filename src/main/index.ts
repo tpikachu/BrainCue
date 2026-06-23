@@ -4,6 +4,7 @@ import { initDb } from './db';
 import { registerIpc } from './ipc';
 import { createMainWindow, showMainWindow } from './windows/mainWindow';
 import { createOverlayWindow, showOverlay } from './windows/overlayWindow';
+import { createSelectionWindow } from './windows/selectionWindow';
 import { createTray } from './windows/tray';
 import { registerGlobalShortcuts } from './shortcuts';
 import { performShutdown } from './quit';
@@ -89,6 +90,9 @@ app.whenReady().then(() => {
     // be toggled with the global shortcut or the tray; closing it hides it.
     createOverlayWindow();
     showOverlay();
+    // Pre-create the region selector (hidden) so its renderer is loaded and ready;
+    // creating it on demand right after a screen capture made it fail to load.
+    createSelectionWindow();
     createTray();
     registerGlobalShortcuts();
     // Build marker: if you DON'T see this line on `npm run dev`, the main process

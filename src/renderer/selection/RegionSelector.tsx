@@ -17,20 +17,32 @@ export default function RegionSelector() {
   const [phase, setPhase] = useState<Phase>('select');
   const [message, setMessage] = useState('Drag to select the problem area');
 
+  // Load a frame into the selector and reset the drag/selection state. The window
+  // is pre-created at startup and reused, so each capture pushes a fresh frame via
+  // the `selectionReset` event (and we also fetch once on mount as a fallback).
+  const loadFrame = useCallback((image: string | null) => {
+    if (!image) {
+      setPhase('error');
+      setMessage('Could not capture the screen. Press Esc and try again.');
+      return;
+    }
+    setStart(null);
+    setCur(null);
+    setPhase('select');
+    setMessage('Drag to select the problem area');
+    setFrame(image);
+    const img = new Image();
+    img.onload = () => (imgRef.current = img);
+    img.src = image;
+  }, []);
+
   useEffect(() => {
     void (async () => {
       const { image } = (await api.capture.getFrame()) as { image: string | null };
-      if (!image) {
-        setPhase('error');
-        setMessage('Could not capture the screen. Press Esc and try again.');
-        return;
-      }
-      setFrame(image);
-      const img = new Image();
-      img.onload = () => (imgRef.current = img);
-      img.src = image;
+      if (image) loadFrame(image);
     })();
-  }, []);
+    return api.events.onSelectionReset((p) => loadFrame(p.image));
+  }, [loadFrame]);
 
   const cancel = useCallback(() => void api.capture.closeSelector(), []);
 

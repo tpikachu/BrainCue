@@ -33,10 +33,22 @@ export async function captureScreen(display?: Display): Promise<CaptureResult> {
   const size = source.thumbnail.getSize();
   const empty = source.thumbnail.isEmpty();
   // Diagnostics: a blank region selector almost always traces back to here —
-  // log what the OS gave us so it's clear whether capture worked.
+  // log what the OS gave us so it's clear whether capture worked. A cheap
+  // average-brightness sample distinguishes a real image from an all-black one.
+  let brightness = -1;
+  if (!empty) {
+    const bmp = source.thumbnail.toBitmap();
+    let sum = 0,
+      n = 0;
+    for (let i = 0; i < bmp.length; i += 4 * 97) {
+      sum += bmp[i] + bmp[i + 1] + bmp[i + 2];
+      n++;
+    }
+    brightness = n ? Math.round(sum / (n * 3)) : -1;
+  }
   log.info(
     `capture: ${sources.length} source(s), chose display_id=${source.display_id || '(none)'}, ` +
-      `thumb=${size.width}x${size.height}, empty=${empty}`,
+      `thumb=${size.width}x${size.height}, empty=${empty}, avgBrightness=${brightness}`,
   );
   if (empty || size.width === 0 || size.height === 0) {
     throw new Error('Captured screen image was empty — likely a GPU/driver screen-capture issue.');

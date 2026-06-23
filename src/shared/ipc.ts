@@ -121,6 +121,7 @@ export const EVENTS = {
   navigate: 'app:navigate',
   windowMaximized: 'window:maximized',
   dataChanged: 'data:changed',
+  selectionReset: 'selection:reset',
 } as const;
 
 export type IpcEventChannel = (typeof EVENTS)[keyof typeof EVENTS];

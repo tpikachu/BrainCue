@@ -12,6 +12,7 @@ import { getOverlayWindow } from './overlayWindow';
 let selectionWin: BrowserWindow | null = null;
 let pendingFrame: string | null = null;
 let toRestore: BrowserWindow[] = [];
+let isOpen = false;
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -32,14 +33,74 @@ export function getPendingFrame(): string | null {
 }
 
 /**
- * Capture the primary screen and open a full-screen overlay for the user to
- * drag-select a region. App windows are hidden before the capture so they are
- * never in the frame (and don't appear as black under content protection); they
- * are restored when the selector closes.
+ * Create the region-selector window ONCE at startup (hidden) and keep it alive,
+ * exactly like the overlay. Creating it on demand — right after a GPU-heavy
+ * screen capture — made its renderer fail to load from the dev server, leaving an
+ * on-top blank black window. Pre-loading it here means a capture only has to push
+ * the new frame and show the window, with no fragile load to race.
+ */
+export function createSelectionWindow(): BrowserWindow {
+  if (selectionWin && !selectionWin.isDestroyed()) return selectionWin;
+
+  const { x, y, width, height } = screen.getPrimaryDisplay().bounds;
+  selectionWin = new BrowserWindow({
+    x,
+    y,
+    width,
+    height,
+    frame: false,
+    show: false,
+    // Opaque (NOT transparent): the renderer paints the frozen screenshot as the
+    // full-screen background and the user selects over that. Transparent windows
+    // are unreliable on Windows (esp. with content protection) — a solid window
+    // always paints, and WYSIWYG cropping is more accurate against the frozen frame.
+    transparent: false,
+    backgroundColor: '#000000',
+    resizable: false,
+    movable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    fullscreenable: false,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+
+  selectionWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  applyPrivacyToWindow(selectionWin);
+  attachDiagnostics(selectionWin, 'selector');
+
+  // SAFETY NET: cancel from the main process on Escape, even if the renderer's own
+  // key handler never ran. Without this, a stuck selector is an always-on-top
+  // full-screen window the user can't escape.
+  selectionWin.webContents.on('before-input-event', (_e, input) => {
+    if (input.type === 'keyDown' && input.key === 'Escape') closeSelector();
+  });
+
+  selectionWin.on('closed', () => {
+    selectionWin = null;
+    if (isOpen) restoreWindows();
+    isOpen = false;
+    pendingFrame = null;
+  });
+
+  loadRenderer(selectionWin, 'selection');
+  log.info('selection window created (hidden, pre-loaded)');
+  return selectionWin;
+}
+
+/**
+ * Capture the screen and show the pre-created selector for the user to drag-select
+ * a region. App windows are hidden before the capture so they're never in the
+ * frame; they're restored when the selector closes.
  */
 export async function openSelector(): Promise<void> {
-  if (selectionWin && !selectionWin.isDestroyed()) {
-    selectionWin.focus();
+  const win = createSelectionWindow(); // ensure it exists (and is loaded)
+  if (isOpen && win.isVisible()) {
+    win.focus();
     return;
   }
 
@@ -51,99 +112,36 @@ export async function openSelector(): Promise<void> {
       w.hide();
     }
   }
+  log.info(`openSelector: hid ${toRestore.length} app window(s) before capture`);
   await delay(220); // let the OS repaint before grabbing the screen
 
-  // Everything past here can throw (capture/permission/window creation). If it
-  // does after we've hidden the app windows, restore them — otherwise the app
-  // looks like it vanished (windows hidden, no selector, no error). Surface the
-  // real cause to the log and the dashboard.
   try {
-    // Select on whichever display the cursor is on (where the user is working),
-    // not always the primary one — otherwise on multi-monitor setups the app
-    // windows hide everywhere but the selector only appears on the primary screen.
+    // Select on whichever display the cursor is on (where the user is working).
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
     const { dataUrl } = await withTimeout(captureScreen(display), 8000, 'screen capture');
     pendingFrame = dataUrl;
+    isOpen = true;
 
-    const { x, y, width, height } = display.bounds;
+    // Cover the active display, hand the renderer the fresh frame + reset its
+    // selection state, then reveal once it has had a moment to paint.
+    win.setBounds(display.bounds);
+    win.webContents.send(EVENTS.selectionReset, { image: dataUrl });
+    await delay(120); // let the renderer paint the frame before the window appears
 
-    selectionWin = new BrowserWindow({
-      x,
-      y,
-      width,
-      height,
-      frame: false,
-      // Reveal only once the renderer has painted the frozen frame (see below),
-      // so the window never appears as a blank black rectangle.
-      show: false,
-      // Opaque (NOT transparent): the renderer paints the frozen screenshot as
-      // the full-screen background and the user selects over that. Transparent
-      // windows are unreliable on Windows — combined with content protection
-      // (Privacy Mode) they can fail to composite, leaving the selector
-      // invisible so the app looks like it "disappeared" (main/overlay hidden,
-      // selector see-through). A solid window always paints. WYSIWYG cropping is
-      // also more accurate against the frozen frame than the live desktop.
-      transparent: false,
-      backgroundColor: '#000000',
-      resizable: false,
-      movable: false,
-      skipTaskbar: true,
-      alwaysOnTop: true,
-      fullscreenable: false,
-      webPreferences: {
-        preload: join(__dirname, '../preload/index.js'),
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-      },
-    });
-
-    selectionWin.setAlwaysOnTop(true, 'screen-saver');
-    selectionWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    applyPrivacyToWindow(selectionWin);
-    attachDiagnostics(selectionWin, 'selector');
-
-    // SAFETY NET: cancel from the main process on Escape, even if the renderer's
-    // own key handler never ran (failed load / JS error). Without this, a broken
-    // selector is an always-on-top full-screen window the user can't escape.
-    selectionWin.webContents.on('before-input-event', (_e, input) => {
-      if (input.type === 'keyDown' && input.key === 'Escape') closeSelector();
-    });
-
-    // Reveal only after the content is ready so the user never sees a blank black
-    // screen; fall back to a timeout in case ready-to-show is delayed on some GPUs.
-    let shown = false;
-    const reveal = (): void => {
-      if (shown || !selectionWin || selectionWin.isDestroyed()) return;
-      shown = true;
-      selectionWin.show();
-      // Force the selector to the foreground. When triggered after the overlay was
-      // active, BrainCue can lose the foreground token, so a plain show()/focus()
-      // leaves the selector BEHIND the user's active window — it looks "blank"
-      // (you see your desktop, can't drag). app.focus({steal:true}) defeats the
-      // Windows foreground lock; re-assert always-on-top + moveTop for good measure.
-      selectionWin.setAlwaysOnTop(true, 'screen-saver');
-      selectionWin.moveTop();
-      app.focus({ steal: true });
-      selectionWin.focus();
-      log.info('selector shown');
-    };
-    selectionWin.once('ready-to-show', reveal);
-    selectionWin.webContents.once('did-finish-load', reveal);
-    setTimeout(reveal, 1500);
-
-    loadRenderer(selectionWin, 'selection');
-
-    selectionWin.on('closed', () => {
-      selectionWin = null;
-      pendingFrame = null;
-      restoreWindows();
-    });
+    win.show();
+    // Force foreground: triggered from a global shortcut the app isn't foreground,
+    // so a plain show() could leave the selector behind the user's active window.
+    win.setAlwaysOnTop(true, 'screen-saver');
+    win.moveTop();
+    app.focus({ steal: true });
+    win.focus();
+    log.info(
+      `selector shown: visible=${win.isVisible()} focused=${win.isFocused()} onTop=${win.isAlwaysOnTop()}`,
+    );
   } catch (e) {
     log.error('openSelector failed; restoring windows', e);
     pendingFrame = null;
-    if (selectionWin && !selectionWin.isDestroyed()) selectionWin.destroy();
-    selectionWin = null;
+    isOpen = false;
     restoreWindows();
     broadcast(
       EVENTS.sessionError,
@@ -159,9 +157,10 @@ function restoreWindows(): void {
   toRestore = [];
 }
 
+/** Hide the selector (kept alive for next time) and restore the app windows. */
 export function closeSelector(): void {
-  if (selectionWin && !selectionWin.isDestroyed()) selectionWin.close();
-  else restoreWindows();
-  selectionWin = null;
+  isOpen = false;
   pendingFrame = null;
+  if (selectionWin && !selectionWin.isDestroyed()) selectionWin.hide();
+  restoreWindows();
 }

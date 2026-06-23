@@ -198,6 +198,7 @@ const api = {
     onWindowMaximized: (cb: (p: { maximized: boolean }) => void) =>
       on(EVENTS.windowMaximized, cb),
     onDataChanged: (cb: (p: unknown) => void) => on(EVENTS.dataChanged, cb),
+    onSelectionReset: (cb: (p: { image: string }) => void) => on(EVENTS.selectionReset, cb),
   },
 };
 
