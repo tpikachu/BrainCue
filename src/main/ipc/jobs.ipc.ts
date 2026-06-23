@@ -13,6 +13,17 @@ export function registerJobsIpc(): void {
     jobsRepo.list(profileId),
   );
 
+  handle(
+    IPC.jobs.page,
+    z.object({
+      profileId: z.string().min(1),
+      query: z.string().default(''),
+      limit: z.number().int().min(1).max(100).default(5),
+      offset: z.number().int().min(0).default(0),
+    }),
+    ({ profileId, query, limit, offset }) => jobsRepo.page({ profileId, query, limit, offset }),
+  );
+
   handle(IPC.jobs.get, zId, ({ id }) => {
     const job = jobsRepo.get(id);
     if (!job) throw new Error('Job not found');

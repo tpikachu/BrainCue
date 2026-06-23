@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, like, or, sql } from 'drizzle-orm';
 import { db, schema } from '../index';
 import type { Job } from '@shared/types';
 
@@ -36,6 +36,31 @@ export const jobsRepo = {
   get(id: string): Job | null {
     const r = db().select().from(schema.jobs).where(eq(schema.jobs.id, id)).get();
     return r ? toJob(r) : null;
+  },
+
+  /** A page of jobs for a profile, newest first, optionally filtered by a search
+   *  over title + company. Server-side LIMIT/OFFSET so the UI never loads them all. */
+  page(opts: { profileId: string; query?: string; limit: number; offset: number }): {
+    items: Job[];
+    total: number;
+  } {
+    const q = (opts.query ?? '').trim();
+    const base = eq(schema.jobs.profileId, opts.profileId);
+    const where = q
+      ? and(base, or(like(schema.jobs.title, `%${q}%`), like(schema.jobs.company, `%${q}%`)))
+      : base;
+    const items = db()
+      .select()
+      .from(schema.jobs)
+      .where(where)
+      .orderBy(desc(schema.jobs.updatedAt))
+      .limit(opts.limit)
+      .offset(opts.offset)
+      .all()
+      .map(toJob);
+    const total =
+      db().select({ c: sql<number>`count(*)` }).from(schema.jobs).where(where).get()?.c ?? 0;
+    return { items, total };
   },
 
   create(input: {

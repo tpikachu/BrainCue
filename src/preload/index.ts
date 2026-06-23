@@ -85,6 +85,13 @@ const api = {
   },
   jobs: {
     list: (profileId: string) => invoke(IPC.jobs.list, { profileId }),
+    page: (profileId: string, query: string, limit: number, offset: number) =>
+      invoke<{ items: unknown[]; total: number }>(IPC.jobs.page, {
+        profileId,
+        query,
+        limit,
+        offset,
+      }),
     get: (id: string) => invoke(IPC.jobs.get, { id }),
     save: (input: {
       id?: string;

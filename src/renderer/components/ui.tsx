@@ -1,5 +1,54 @@
 import type React from 'react';
-import { ChevronLeftIcon, ChevronRightIcon, SearchIcon } from './icons';
+import { useEffect } from 'react';
+import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, SearchIcon } from './icons';
+
+/** Centered modal dialog. Closes on overlay click or Escape. */
+export function Modal({
+  open,
+  onClose,
+  title,
+  width = 'max-w-2xl',
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title?: string;
+  width?: string;
+  children: React.ReactNode;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-6 backdrop-blur-sm"
+      onMouseDown={onClose}
+    >
+      <div
+        className={`my-8 w-full ${width} rounded-2xl border border-white/10 bg-neutral-900 shadow-2xl shadow-black/40`}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-white/5 px-5 py-3">
+          <h3 className="font-medium">{title}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1 text-neutral-400 transition-colors hover:bg-white/10 hover:text-neutral-200"
+            aria-label="Close"
+          >
+            <CloseIcon className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="p-5">{children}</div>
+      </div>
+    </div>
+  );
+}
 
 /* Small shared UI kit so pages look consistent. Tailwind-only, no deps. */
 

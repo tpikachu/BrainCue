@@ -47,6 +47,7 @@ export const IPC = {
   },
   jobs: {
     list: 'jobs:list',
+    page: 'jobs:page',
     get: 'jobs:get',
     save: 'jobs:save', // create or update + parse + index
     setNotes: 'jobs:set-notes', // update just the client notes (no re-parse)

@@ -5,16 +5,13 @@ import { useProfileStore } from '../../store/useProfileStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useLiveSession, type AudioSource, type Line } from '../../store/useLiveSession';
 import type { AnswerStyle, InterviewType, Job, SessionDetail, SessionListItem } from '@shared/types';
-import { Badge, Button, Card, Field, Page, Select, TextArea, TextInput } from '../../components/ui';
+import { Badge, Button, Card, Field, Page, Select, TextInput } from '../../components/ui';
+import { DataTable, type Column } from '../../components/DataTable';
+import { JobFormModal } from '../JobFormModal';
 import { Waveform } from '../../components/Waveform';
-import {
-  BoltIcon,
-  FrameIcon,
-  PauseIcon,
-  PlayIcon,
-  PlusIcon,
-  UploadIcon,
-} from '../../components/icons';
+import { BoltIcon, FrameIcon, PauseIcon, PlayIcon, PlusIcon } from '../../components/icons';
+
+const JOBS_PER_PAGE = 5;
 
 const interviewTypes: InterviewType[] = [
   'behavioral',
@@ -41,32 +38,23 @@ export default function SessionPage() {
   const { session, transcript, interim, paused } = live;
 
   const [profileId, setProfileId] = useState('');
-  const [jobs, setJobs] = useState<Job[]>([]);
   const [jobId, setJobId] = useState('');
-  const [newJob, setNewJob] = useState({
-    title: '',
-    company: '',
-    jdUrl: '',
-    jdText: '',
-    companyUrl: '',
-    notes: '',
-  });
-  const [showNewJob, setShowNewJob] = useState(false);
-  const [savingJob, setSavingJob] = useState(false);
-  const [fetchingJd, setFetchingJd] = useState(false);
-  const [jdNotice, setJdNotice] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
-  const [saveNotice, setSaveNotice] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
+  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+
+  // Jobs table (server-paginated + searchable — never loads the full list).
+  const [jobRows, setJobRows] = useState<Job[]>([]);
+  const [jobTotal, setJobTotal] = useState(0);
+  const [jobQuery, setJobQuery] = useState('');
+  const [jobPage, setJobPage] = useState(0);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editJob, setEditJob] = useState<Job | null>(null); // null => create
 
   const [interviewType, setInterviewType] = useState<InterviewType>('behavioral');
   const [answerStyle, setAnswerStyle] = useState<AnswerStyle>('concise');
   const [source, setSource] = useState<AudioSource>('system');
 
   const [ask, setAsk] = useState('');
-
-  // Inline editor for the selected client's notes.
-  const [notesDraft, setNotesDraft] = useState('');
-  const [notesSaving, setNotesSaving] = useState(false);
-  const [notesSaved, setNotesSaved] = useState(false);
 
   // The most recent past session for the selected profile+job, offered for resume.
   const [lastSession, setLastSession] = useState<SessionListItem | null>(null);
@@ -82,7 +70,55 @@ export default function SessionPage() {
     void loadSettings();
   }, [load, loadSettings]);
 
-  const refreshJobs = async (pid: string) => setJobs((await api.jobs.list(pid)) as Job[]);
+  // Fetch the current page of jobs. Server-paginated + searchable, so we never
+  // load the whole list — stays fast even with thousands of jobs.
+  const loadJobs = async () => {
+    if (!profileId) {
+      setJobRows([]);
+      setJobTotal(0);
+      return;
+    }
+    setJobsLoading(true);
+    try {
+      const { items, total } = await api.jobs.page(
+        profileId,
+        jobQuery.trim(),
+        JOBS_PER_PAGE,
+        jobPage * JOBS_PER_PAGE,
+      );
+      setJobRows(items as Job[]);
+      setJobTotal(total);
+    } finally {
+      setJobsLoading(false);
+    }
+  };
+
+  const selectJob = (job: Job) => {
+    setJobId(job.id);
+    setSelectedJob(job);
+  };
+
+  const openNew = () => {
+    setEditJob(null);
+    setFormOpen(true);
+  };
+  const openDetail = (job: Job) => {
+    setEditJob(job);
+    setFormOpen(true);
+  };
+  const onJobSaved = (job: Job) => {
+    // Reflect the edit/create immediately and keep it selected.
+    setSelectedJob(job);
+    setJobId(job.id);
+    void loadJobs();
+  };
+  const onJobDeleted = (id: string) => {
+    if (jobId === id) {
+      setJobId('');
+      setSelectedJob(null);
+    }
+    void loadJobs();
+  };
 
   // Find the most recent past round of THIS interview type for the selected job, to
   // offer "resume". Matching on type keeps e.g. behavioral and technical rounds as
@@ -101,106 +137,67 @@ export default function SessionPage() {
     })();
   }, [profileId, jobId, interviewType, session]);
 
+  // Reset the selection + paging whenever the profile changes.
   useEffect(() => {
     setJobId('');
-    setShowNewJob(false);
-    if (!profileId) {
-      setJobs([]);
-      return;
-    }
-    void refreshJobs(profileId);
+    setSelectedJob(null);
+    setJobPage(0);
+    setJobQuery('');
   }, [profileId]);
 
+  // (Re)load the current page on profile/search/page change. The search is
+  // debounced so typing doesn't fire a query per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => void loadJobs(), 200);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileId, jobQuery, jobPage]);
+
   const selectedProfile = profiles.find((p) => p.id === profileId);
-  const selectedJob = jobs.find((j) => j.id === jobId);
   const canStart =
     !!profileId && !!jobId && !!settings?.apiKeyPresent && !!selectedProfile?.parsedResume;
 
-  const saveJob = async () => {
-    if (!profileId || (!newJob.title.trim() && !newJob.jdText.trim())) return;
-    setSavingJob(true);
-    setSaveNotice(null);
-    try {
-      const res = await api.jobs.save({
-        profileId,
-        title: newJob.title.trim() || 'Untitled role',
-        company: newJob.company.trim() || null,
-        jdUrl: newJob.jdUrl.trim() || null,
-        jdText: newJob.jdText.trim() || null,
-        companyUrl: newJob.companyUrl.trim() || null,
-        notes: newJob.notes.trim() || null,
-      });
-      await refreshJobs(profileId);
-      setJobId((res.job as Job).id);
-      setNewJob({ title: '', company: '', jdUrl: '', jdText: '', companyUrl: '', notes: '' });
-      setJdNotice(null);
-      setShowNewJob(false);
-      // Surface the outcome of the (best-effort) company research.
-      if (res.companyError) {
-        setSaveNotice({
-          tone: 'err',
-          text: `Interview saved, but company research failed: ${res.companyError}`,
-        });
-      } else if (res.companyResearched) {
-        setSaveNotice({ tone: 'ok', text: 'Interview saved & company researched ✓' });
-      }
-    } finally {
-      setSavingJob(false);
-    }
-  };
-
-  const uploadJd = async () => {
-    const { filePath } = await api.dialog.openFile();
-    if (!filePath) return;
-    const { text } = await api.documents.extractFile(filePath);
-    setNewJob((j) => ({ ...j, jdText: text }));
-  };
-
-  // Best-effort: pull the JD text from the pasted link into the text box. Job
-  // sites that block bots or render client-side will fail — the user can then
-  // paste the description manually.
-  const fetchJd = async () => {
-    const url = newJob.jdUrl.trim();
-    if (!url) return;
-    setFetchingJd(true);
-    setJdNotice(null);
-    try {
-      const { text, title } = await api.documents.fetchUrl(url);
-      setNewJob((j) => ({ ...j, jdText: text, title: j.title || title || '' }));
-      setJdNotice({ tone: 'ok', text: 'Fetched the page text — review & trim it below, then Save.' });
-    } catch (e) {
-      setJdNotice({
-        tone: 'err',
-        text: `${(e as Error).message} Please paste the job description below so it can be parsed precisely.`,
-      });
-    } finally {
-      setFetchingJd(false);
-    }
-  };
-
-  const deleteJob = async (id: string) => {
-    await api.jobs.delete(id);
-    if (jobId === id) setJobId('');
-    await refreshJobs(profileId);
-  };
-
-  // Load the selected client's notes into the editor whenever the selection changes.
-  useEffect(() => {
-    setNotesDraft(selectedJob?.notes ?? '');
-    setNotesSaved(false);
-  }, [jobId, selectedJob?.notes]);
-
-  const saveNotes = async () => {
-    if (!jobId) return;
-    setNotesSaving(true);
-    try {
-      await api.jobs.setNotes(jobId, notesDraft.trim() || null);
-      await refreshJobs(profileId);
-      setNotesSaved(true);
-    } finally {
-      setNotesSaving(false);
-    }
-  };
+  // Columns for the jobs table. Kept here so the row actions can reach the page's
+  // selection + modal handlers.
+  const jobColumns: Column<Job>[] = [
+    {
+      key: 'title',
+      header: 'Interview',
+      render: (j) => (
+        <div>
+          <div className="font-medium text-neutral-100">{j.title || 'Untitled role'}</div>
+          {j.company && <div className="text-xs text-neutral-500">{j.company}</div>}
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      className: 'w-40',
+      render: (j) => (
+        <div className="flex flex-wrap gap-1.5">
+          {j.parsedJd ? <Badge tone="green">JD ✓</Badge> : <Badge tone="amber">no JD</Badge>}
+          {j.parsedCompany && <Badge tone="blue">company ✓</Badge>}
+        </div>
+      ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      className: 'w-24 text-right',
+      render: (j) => (
+        <Button
+          variant="ghost"
+          onClick={(e) => {
+            e.stopPropagation();
+            openDetail(j);
+          }}
+        >
+          Detail
+        </Button>
+      ),
+    },
+  ];
 
   const start = async () => {
     if (!canStart) return;
@@ -304,219 +301,42 @@ export default function SessionPage() {
             )}
           </Card>
 
-          {/* Interviews (jobs) */}
+          {/* Interviews (jobs) — server-paginated, searchable table. Click a row to
+              select it for this session; "Detail" opens the edit modal. */}
           {profileId && (
             <Card>
-              <div className="mb-3 flex items-center justify-between">
+              <div className="mb-3">
                 <h3 className="font-medium">Interview (job)</h3>
-                <Button variant="ghost" onClick={() => setShowNewJob((v) => !v)}>
-                  {showNewJob ? 'Cancel' : <><PlusIcon /> New interview</>}
-                </Button>
+                <p className="mt-1 text-xs text-neutral-500">
+                  Pick a saved interview to set up this round, or add a new one. Search by role or
+                  client; most recent first.
+                </p>
               </div>
 
-              {jobs.length === 0 && !showNewJob && (
-                <p className="text-sm text-neutral-500">
-                  No interviews yet. Create one with a job description — it’s saved and reused for
-                  every round of that job.
-                </p>
-              )}
-
-              {jobs.length > 0 && (
-                <div className="space-y-2">
-                  {jobs.map((j) => (
-                    <label
-                      key={j.id}
-                      className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm ${
-                        jobId === j.id
-                          ? 'border-indigo-500 bg-indigo-500/10'
-                          : 'border-neutral-800 bg-neutral-950/50 hover:border-neutral-700'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="radio"
-                          name="job"
-                          checked={jobId === j.id}
-                          onChange={() => setJobId(j.id)}
-                          className="accent-indigo-500"
-                        />
-                        <div>
-                          <div className="font-medium">
-                            {j.title || 'Untitled role'}
-                            {j.company ? ` · ${j.company}` : ''}
-                          </div>
-                          <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                            {j.parsedJd ? (
-                              <Badge tone="green">JD parsed ✓</Badge>
-                            ) : (
-                              <Badge tone="amber">no JD</Badge>
-                            )}
-                            {j.parsedCompany && <Badge tone="blue">company ✓</Badge>}
-                            {j.jdUrl && (
-                              <a
-                                href={j.jdUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className="truncate text-xs text-indigo-300 hover:underline"
-                                title={j.jdUrl}
-                              >
-                                🔗 posting
-                              </a>
-                            )}
-                            {j.companyUrl && (
-                              <a
-                                href={j.companyUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className="truncate text-xs text-indigo-300 hover:underline"
-                                title={j.companyUrl}
-                              >
-                                🏢 site
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          void deleteJob(j.id);
-                        }}
-                        className="text-xs text-red-300 hover:text-red-200"
-                      >
-                        delete
-                      </button>
-                    </label>
-                  ))}
-                </div>
-              )}
-
-              {/* Notes for the selected client — visible here + in the Cue Card. */}
-              {jobId && !showNewJob && (
-                <div className="mt-3 rounded-lg border border-neutral-800 bg-neutral-950/40 p-3">
-                  <Field
-                    label="Notes about this client"
-                    hint="On hand while you pick this client and inside the Cue Card during the session."
-                  >
-                    <TextArea
-                      rows={3}
-                      value={notesDraft}
-                      onChange={(e) => {
-                        setNotesDraft(e.target.value);
-                        setNotesSaved(false);
-                      }}
-                      placeholder="e.g. Recruiter: Jane. Panel of 3. They care about system design. Remote."
-                    />
-                  </Field>
-                  <div className="mt-2 flex items-center gap-2">
-                    <Button
-                      variant="default"
-                      onClick={saveNotes}
-                      loading={notesSaving}
-                      disabled={notesDraft.trim() === (selectedJob?.notes ?? '')}
-                    >
-                      Save notes
-                    </Button>
-                    {notesSaved && <span className="text-xs text-green-400">Saved ✓</span>}
-                  </div>
-                </div>
-              )}
-
-              {showNewJob && (
-                <div className="mt-3 space-y-3 rounded-lg border border-neutral-800 p-3">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Interview name / role">
-                      <TextInput
-                        value={newJob.title}
-                        onChange={(e) => setNewJob((j) => ({ ...j, title: e.target.value }))}
-                        placeholder="e.g. Acme — Senior PM"
-                      />
-                    </Field>
-                    <Field label="Company">
-                      <TextInput
-                        value={newJob.company}
-                        onChange={(e) => setNewJob((j) => ({ ...j, company: e.target.value }))}
-                        placeholder="e.g. Acme"
-                      />
-                    </Field>
-                  </div>
-                  <Field
-                    label="JD link (optional)"
-                    hint="Paste the job-posting URL — we’ll try to pull the description in. Some sites block this; you can always paste below."
-                  >
-                    <div className="flex gap-2">
-                      <TextInput
-                        type="url"
-                        value={newJob.jdUrl}
-                        onChange={(e) => setNewJob((j) => ({ ...j, jdUrl: e.target.value }))}
-                        onKeyDown={(e) => e.key === 'Enter' && fetchJd()}
-                        placeholder="https://company.com/careers/123"
-                        className="flex-1"
-                      />
-                      <Button
-                        variant="default"
-                        onClick={fetchJd}
-                        loading={fetchingJd}
-                        disabled={!newJob.jdUrl.trim()}
-                      >
-                        Fetch
-                      </Button>
-                    </div>
-                  </Field>
-                  {jdNotice && (
-                    <p
-                      className={`text-xs ${jdNotice.tone === 'err' ? 'text-amber-400' : 'text-green-400'}`}
-                    >
-                      {jdNotice.text}
-                    </p>
-                  )}
-                  <Button variant="default" onClick={uploadJd}>
-                    <UploadIcon /> Upload JD file
+              <DataTable<Job>
+                columns={jobColumns}
+                rows={jobRows}
+                rowKey={(j) => j.id}
+                total={jobTotal}
+                page={jobPage}
+                pageSize={JOBS_PER_PAGE}
+                onPage={setJobPage}
+                query={jobQuery}
+                onQuery={(q) => {
+                  setJobQuery(q);
+                  setJobPage(0);
+                }}
+                searchPlaceholder="Search interviews by role or client…"
+                onRowClick={selectJob}
+                isSelected={(j) => j.id === jobId}
+                loading={jobsLoading}
+                empty="No interviews yet. Add one with a job description — it’s saved and reused for every round of that job."
+                actions={
+                  <Button variant="primary" onClick={openNew}>
+                    <PlusIcon /> New interview
                   </Button>
-                  <Field label="Job description (parsed for grounding)">
-                    <TextArea
-                      rows={6}
-                      value={newJob.jdText}
-                      onChange={(e) => setNewJob((j) => ({ ...j, jdText: e.target.value }))}
-                      placeholder="Paste the job description"
-                    />
-                  </Field>
-                  <Field
-                    label="Company website (optional)"
-                    hint="On save we’ll research the site (about, careers, …) so answers can speak to the company’s products, values & culture. Needs an OpenAI key."
-                  >
-                    <TextInput
-                      type="url"
-                      value={newJob.companyUrl}
-                      onChange={(e) => setNewJob((j) => ({ ...j, companyUrl: e.target.value }))}
-                      placeholder="https://company.com"
-                    />
-                  </Field>
-                  <Field
-                    label="Notes about this client (optional)"
-                    hint="Anything you want on hand during the interview — recruiter name, panel, comp, quirks. Shown when you pick this client and in the Cue Card."
-                  >
-                    <TextArea
-                      rows={3}
-                      value={newJob.notes}
-                      onChange={(e) => setNewJob((j) => ({ ...j, notes: e.target.value }))}
-                      placeholder="e.g. Recruiter: Jane. Panel of 3. They care about system design. Remote."
-                    />
-                  </Field>
-                  {saveNotice && (
-                    <p
-                      className={`text-xs ${saveNotice.tone === 'err' ? 'text-amber-400' : 'text-green-400'}`}
-                    >
-                      {saveNotice.text}
-                    </p>
-                  )}
-                  <Button variant="primary" onClick={saveJob} loading={savingJob}>
-                    {newJob.companyUrl.trim() ? 'Save & research' : 'Save interview'}
-                  </Button>
-                </div>
-              )}
+                }
+              />
             </Card>
           )}
 
@@ -674,6 +494,16 @@ export default function SessionPage() {
           </Card>
         </>
       )}
+
+      {/* Create / edit an interview. `editJob` null => create mode. */}
+      <JobFormModal
+        open={formOpen}
+        profileId={profileId}
+        job={editJob}
+        onClose={() => setFormOpen(false)}
+        onSaved={onJobSaved}
+        onDeleted={onJobDeleted}
+      />
     </Page>
   );
 }
