@@ -8,6 +8,37 @@ resume / job description / notes (local RAG).
 > Use this only where AI assistance is permitted. Your data stays on your
 > machine; only the retrieved context + question is sent to OpenAI.
 
+## System requirements
+
+BrainCue Copilot is a local desktop app that streams live audio to OpenAI for
+transcription and answers, so a steady internet connection and a microphone
+matter more than raw compute.
+
+| | Minimum | Recommended |
+|---|---|---|
+| **OS** | Windows 10 64-bit (version 2004 / build 19041+), macOS 11, or a modern 64-bit Linux | Windows 11, macOS 13+ |
+| **CPU** | Dual-core x64 / Apple Silicon | Quad-core or better |
+| **RAM** | 4 GB | 8 GB+ |
+| **Disk** | ~600 MB (app) + room for local data | 2 GB+ free (profiles, vectors, transcripts) |
+| **GPU** | Any (integrated is fine) | Discrete or modern integrated |
+| **Display** | 1280 × 800 | 1920 × 1080 or larger |
+| **Audio** | Microphone | Mic + system-audio loopback (to hear the interviewer) |
+| **Network** | Broadband internet | Low-latency broadband (for real-time transcription) |
+
+You also need your **own OpenAI API key** (set in Settings) and an OpenAI account
+with access to the models in use (Realtime/STT, Responses, embeddings, TTS, Vision).
+
+**Notes**
+- **Privacy Mode** (hiding the app from screen sharing/recording) is most reliable
+  on **Windows 10 version 2004+** and Windows 11; on older builds the window may
+  show as black to viewers instead of being cleanly excluded.
+- **System-audio capture** (the interviewer's voice in online calls) uses Windows
+  loopback automatically. On **macOS**, capturing system audio needs a virtual
+  audio device (e.g. BlackHole); the microphone path works without one.
+- **Hybrid-GPU laptops** (e.g. NVIDIA Optimus): if a window shows up blank/black,
+  launch with `--disable-gpu` (or set `AI_DISABLE_GPU=1`) to fall back to software
+  rendering.
+
 ## Stack
 Electron · React · TypeScript · Vite (electron-vite) · TailwindCSS · Zustand ·
 SQLite (better-sqlite3) · Drizzle ORM · OpenAI Node SDK (Responses, embeddings,
