@@ -6,6 +6,7 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 | Version | Date | Highlights |
 | --- | --- | --- |
+| [0.5.0](./0.5.0.md) | 2026-06-23 | First downloadable installers; region-capture fixes + hidden from screen share |
 | [0.4.1](./0.4.1.md) | 2026-06-23 | Cue Card opens bottom-right, taller, and remembers size/position |
 | [0.4.0](./0.4.0.md) | 2026-06-23 | Rebrand to BrainCue Copilot, Cue Card (default-on), guarded Privacy Mode |
 | [0.3.0](./0.3.0.md) | 2026-06-23 | Custom titlebar, sidebar status panel, reset/wipe, exit hotkey |
