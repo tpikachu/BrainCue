@@ -33,8 +33,10 @@ class ErrorBoundary extends React.Component<
 // HashRouter (#/...), which is independent of the ?view= query.
 const view = new URLSearchParams(window.location.search).get('view');
 
-// The selection window is transparent — let the live desktop show through.
-if (view === 'selection') document.body.style.background = 'transparent';
+// The selection window is OPAQUE and paints the frozen screenshot as its
+// background (see selectionWindow.ts). Match the body to the window's solid
+// black so there's never a transparent/flashing gap before the frame paints.
+if (view === 'selection') document.body.style.background = '#000000';
 
 function Root() {
   if (view === 'overlay')

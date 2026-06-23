@@ -1,8 +1,8 @@
-import { app, Menu, nativeImage, Tray } from 'electron';
-import { join } from 'path';
+import { Menu, Tray } from 'electron';
 import { appEvents, APP_EVENT } from '../appEvents';
 import { getPrivacy, requestPrivacy } from '../services/session/privacy';
 import { getShortcuts } from '../shortcuts';
+import { appIconImage } from './appIcon';
 import { showOverlay } from './overlayWindow';
 import { navigateMainWindow, showMainWindow } from './mainWindow';
 import { confirmQuit } from '../quit';
@@ -10,14 +10,9 @@ import { log } from '../services/security/logger';
 
 let tray: Tray | null = null;
 
-/** The app icon on disk, resolvable in both dev and a packaged build.
- *  `resources/icon.png` is shipped via electron-builder `extraResources`. */
+/** Tray-sized app icon (source is 1024×1024). */
 function iconImage(): Electron.NativeImage {
-  const path = app.isPackaged
-    ? join(process.resourcesPath, 'icon.png')
-    : join(app.getAppPath(), 'resources', 'icon.png');
-  // Resize to a tray-appropriate size; the source is 1024×1024.
-  return nativeImage.createFromPath(path).resize({ width: 16, height: 16 });
+  return appIconImage().resize({ width: 16, height: 16 });
 }
 
 function buildMenu(): Menu {

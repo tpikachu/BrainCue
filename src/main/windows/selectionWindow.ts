@@ -73,6 +73,9 @@ export async function openSelector(): Promise<void> {
       width,
       height,
       frame: false,
+      // Reveal only once the renderer has painted the frozen frame (see below),
+      // so the window never appears as a blank black rectangle.
+      show: false,
       // Opaque (NOT transparent): the renderer paints the frozen screenshot as
       // the full-screen background and the user selects over that. Transparent
       // windows are unreliable on Windows — combined with content protection
@@ -97,9 +100,34 @@ export async function openSelector(): Promise<void> {
 
     selectionWin.setAlwaysOnTop(true, 'screen-saver');
     selectionWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    selectionWin.focus();
     applyPrivacyToWindow(selectionWin);
     attachDiagnostics(selectionWin, 'selector');
+
+    // SAFETY NET: cancel from the main process on Escape, even if the renderer's
+    // own key handler never ran (failed load / JS error). Without this, a broken
+    // selector is an always-on-top full-screen window the user can't escape.
+    selectionWin.webContents.on('before-input-event', (_e, input) => {
+      if (input.type === 'keyDown' && input.key === 'Escape') closeSelector();
+    });
+
+    // Reveal only after the content is ready so the user never sees a blank black
+    // screen; fall back to a timeout in case ready-to-show is delayed on some GPUs.
+    let shown = false;
+    const reveal = (): void => {
+      if (shown || !selectionWin || selectionWin.isDestroyed()) return;
+      shown = true;
+      selectionWin.show();
+      // Re-assert top + focus: when opened from a global shortcut the app isn't
+      // foreground, so a plain show() can leave the selector behind other windows.
+      selectionWin.setAlwaysOnTop(true, 'screen-saver');
+      selectionWin.moveTop();
+      selectionWin.focus();
+      log.info('selector shown');
+    };
+    selectionWin.once('ready-to-show', reveal);
+    selectionWin.webContents.once('did-finish-load', reveal);
+    setTimeout(reveal, 1500);
+
     loadRenderer(selectionWin, 'selection');
 
     selectionWin.on('closed', () => {

@@ -1,4 +1,5 @@
 import { desktopCapturer, screen, type Display } from 'electron';
+import { log } from '../security/logger';
 
 export interface CaptureResult {
   /** Screenshot of the requested display as a PNG data URL (resolution-capped). */
@@ -30,5 +31,16 @@ export async function captureScreen(display?: Display): Promise<CaptureResult> {
   if (!source) throw new Error('No screen source available for capture.');
 
   const size = source.thumbnail.getSize();
+  const empty = source.thumbnail.isEmpty();
+  // Diagnostics: a blank region selector almost always traces back to here —
+  // log what the OS gave us so it's clear whether capture worked.
+  log.info(
+    `capture: ${sources.length} source(s), chose display_id=${source.display_id || '(none)'}, ` +
+      `thumb=${size.width}x${size.height}, empty=${empty}`,
+  );
+  if (empty || size.width === 0 || size.height === 0) {
+    throw new Error('Captured screen image was empty — likely a GPU/driver screen-capture issue.');
+  }
+
   return { dataUrl: source.thumbnail.toDataURL(), width: size.width, height: size.height };
 }

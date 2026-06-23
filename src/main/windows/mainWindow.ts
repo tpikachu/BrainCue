@@ -4,6 +4,7 @@ import { EVENTS } from '@shared/ipc';
 import { attachDiagnostics, loadRenderer } from './loadRenderer';
 import { applyPrivacyToWindow } from '../services/session/privacy';
 import { broadcastMaximizeState } from '../ipc/window.ipc';
+import { appIconImage } from './appIcon';
 import { isQuitting } from '../quit';
 import { log } from '../services/security/logger';
 
@@ -17,6 +18,9 @@ export function createMainWindow(): BrowserWindow {
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,
+    // App icon for the taskbar / Alt-Tab (otherwise the default Electron icon
+    // shows in dev). In a packaged build the exe icon is set by electron-builder.
+    icon: appIconImage(),
     // Hide the OS titlebar but KEEP the native resizable frame/shadow/snapping
     // (unlike frame:false). The dashboard draws its own titlebar (Titlebar.tsx)
     // with custom min/maximize/close controls and a drag region.
