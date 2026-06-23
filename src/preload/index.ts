@@ -40,6 +40,12 @@ const api = {
     clearApiKey: () => invoke(IPC.settings.clearApiKey),
     testApiKey: () => invoke(IPC.settings.testApiKey),
     listModels: () => invoke<string[]>(IPC.settings.listModels),
+    setShortcuts: (shortcuts: Record<string, string>) =>
+      invoke<{ shortcuts: Record<string, string> }>(IPC.settings.setShortcuts, { shortcuts }),
+    resetShortcuts: () =>
+      invoke<{ shortcuts: Record<string, string> }>(IPC.settings.resetShortcuts),
+    suspendShortcuts: () => invoke<{ suspended: true }>(IPC.settings.suspendShortcuts),
+    resumeShortcuts: () => invoke<{ resumed: true }>(IPC.settings.resumeShortcuts),
   },
   profiles: {
     list: () => invoke(IPC.profiles.list),
@@ -152,6 +158,7 @@ const api = {
     show: () => invoke(IPC.overlay.show),
     hide: () => invoke(IPC.overlay.hide),
     toggle: () => invoke(IPC.overlay.toggle),
+    isVisible: () => invoke<{ visible: boolean }>(IPC.overlay.isVisible),
     setMode: (mode: 'compact' | 'expanded') => invoke(IPC.overlay.setMode, { mode }),
     setOpacity: (opacity: number) => invoke(IPC.overlay.setOpacity, { opacity }),
     setClickthrough: (enabled: boolean) => invoke(IPC.overlay.setClickthrough, { enabled }),
@@ -172,6 +179,9 @@ const api = {
     onSessionError: (cb: (p: unknown) => void) => on(EVENTS.sessionError, cb),
     onOverlayApplySettings: (cb: (p: unknown) => void) => on(EVENTS.overlayApplySettings, cb),
     onShortcutFired: (cb: (p: unknown) => void) => on(EVENTS.shortcutFired, cb),
+    onPrivacyChanged: (cb: (p: unknown) => void) => on(EVENTS.privacyChanged, cb),
+    onOverlayVisibility: (cb: (p: unknown) => void) => on(EVENTS.overlayVisibility, cb),
+    onNavigate: (cb: (p: unknown) => void) => on(EVENTS.navigate, cb),
   },
 };
 

@@ -2,9 +2,11 @@ import { app, BrowserWindow, desktopCapturer, session } from 'electron';
 import { electronApp, is, optimizer } from '@electron-toolkit/utils';
 import { initDb } from './db';
 import { registerIpc } from './ipc';
-import { createMainWindow, getMainWindow } from './windows/mainWindow';
+import { createMainWindow, showMainWindow } from './windows/mainWindow';
 import { createOverlayWindow } from './windows/overlayWindow';
-import { registerGlobalShortcuts, unregisterGlobalShortcuts } from './shortcuts';
+import { createTray } from './windows/tray';
+import { registerGlobalShortcuts } from './shortcuts';
+import { performShutdown } from './quit';
 import { getPrivacy } from './services/session/privacy';
 import { log } from './services/security/logger';
 
@@ -30,14 +32,9 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    const win = getMainWindow();
-    if (win) {
-      if (win.isMinimized()) win.restore();
-      win.show();
-      win.focus();
-    } else {
-      createMainWindow();
-    }
+    // A duplicate launch just surfaces the existing instance (which may be
+    // hidden in the tray) instead of starting a new process.
+    showMainWindow();
   });
   startApp();
 }
@@ -92,6 +89,7 @@ app.whenReady().then(() => {
     // broadcast their question/answer before the lazily-created overlay had
     // subscribed, and the events would be silently dropped.
     createOverlayWindow();
+    createTray();
     registerGlobalShortcuts();
     // Build marker: if you DON'T see this line on `npm run dev`, the main process
     // is stale — fully quit Electron and restart so window changes take effect.
@@ -106,11 +104,14 @@ app.whenReady().then(() => {
   });
 });
 
+// The app intentionally lives in the tray after the dashboard is closed, so we
+// do NOT quit when all windows are gone. A real exit goes through the tray
+// "Exit" (or OS quit), which sets isQuitting and runs `performShutdown`.
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  /* keep running in the tray */
 });
 
-app.on('before-quit', () => {
-  unregisterGlobalShortcuts();
-});
+// Single place that releases every long-lived resource (Realtime websocket,
+// global shortcuts, tray, windows) so no orphaned child processes survive exit.
+app.on('before-quit', performShutdown);
 }

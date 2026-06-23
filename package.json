@@ -1,6 +1,6 @@
 {
   "name": "ai-interview-assistant",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Desktop AI Interview Assistant (Electron + React + OpenAI). Local-first data, BYO OpenAI key.",
   "author": "",
   "license": "MIT",

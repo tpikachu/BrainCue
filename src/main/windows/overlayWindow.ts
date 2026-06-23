@@ -1,10 +1,19 @@
 import { BrowserWindow } from 'electron';
 import { join } from 'path';
+import { EVENTS } from '@shared/ipc';
 import { attachDiagnostics, loadRenderer } from './loadRenderer';
 import { applyPrivacyToWindow } from '../services/session/privacy';
+import { getMainWindow } from './mainWindow';
 import type { OverlayMode } from '@shared/types';
 
 let overlay: BrowserWindow | null = null;
+
+/** Tell the dashboard whether the overlay is currently visible, so its
+ *  "Show/Hide overlay" button reflects toggles from the hotkey, tray, the
+ *  overlay's own close button, or a session ending. */
+function notifyVisibility(visible: boolean): void {
+  getMainWindow()?.webContents.send(EVENTS.overlayVisibility, { visible });
+}
 
 const SIZES: Record<OverlayMode, { width: number; height: number }> = {
   compact: { width: 420, height: 200 },
@@ -45,13 +54,22 @@ export function createOverlayWindow(): BrowserWindow {
   // Respect Privacy Mode immediately (excluded from screen capture; default on).
   // Re-apply on show — display affinity is most reliable once realized.
   applyPrivacyToWindow(overlay);
-  overlay.on('show', () => overlay && applyPrivacyToWindow(overlay));
+  overlay.on('show', () => {
+    if (overlay) applyPrivacyToWindow(overlay);
+    notifyVisibility(true);
+  });
+  overlay.on('hide', () => notifyVisibility(false));
 
   attachDiagnostics(overlay, 'overlay');
   loadRenderer(overlay, 'overlay');
 
   overlay.on('closed', () => (overlay = null));
   return overlay;
+}
+
+/** Whether the floating overlay is currently shown. */
+export function isOverlayVisible(): boolean {
+  return !!overlay && !overlay.isDestroyed() && overlay.isVisible();
 }
 
 /** Create (if needed) and show the overlay once its content has loaded, so it

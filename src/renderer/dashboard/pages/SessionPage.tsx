@@ -7,6 +7,14 @@ import { useSettingsStore } from '../../store/useSettingsStore';
 import type { AnswerStyle, InterviewType, Job, Session } from '@shared/types';
 import { Badge, Button, Card, Field, Page, Select, TextArea, TextInput } from '../../components/ui';
 import { Waveform } from '../../components/Waveform';
+import {
+  BoltIcon,
+  FrameIcon,
+  PauseIcon,
+  PlayIcon,
+  PlusIcon,
+  UploadIcon,
+} from '../../components/icons';
 
 const interviewTypes: InterviewType[] = [
   'behavioral',
@@ -191,10 +199,10 @@ export default function SessionPage() {
               onClick={() => api.capture.quickSolve()}
               title="Copy the problem text, then click (or Ctrl+Shift+Enter)"
             >
-              ⚡ Solve from clipboard
+              <BoltIcon /> Solve from clipboard
             </Button>
             <Button variant="ghost" onClick={() => api.capture.openSelector()} title="Ctrl+Shift+S">
-              📐 Select region
+              <FrameIcon /> Select region
             </Button>
           </div>
       }
@@ -240,7 +248,7 @@ export default function SessionPage() {
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="font-medium">Interview (job)</h3>
                 <Button variant="ghost" onClick={() => setShowNewJob((v) => !v)}>
-                  {showNewJob ? 'Cancel' : '+ New interview'}
+                  {showNewJob ? 'Cancel' : <><PlusIcon /> New interview</>}
                 </Button>
               </div>
 
@@ -372,7 +380,7 @@ export default function SessionPage() {
                     </p>
                   )}
                   <Button variant="default" onClick={uploadJd}>
-                    ⬆ Upload JD file
+                    <UploadIcon /> Upload JD file
                   </Button>
                   <Field label="Job description (parsed for grounding)">
                     <TextArea
@@ -446,7 +454,7 @@ export default function SessionPage() {
                 </Field>
               </div>
               <Button variant="success" className="mt-4" onClick={start} disabled={!canStart}>
-                ● Start session
+                <PlayIcon /> Start session
               </Button>
               {selectedJob && (
                 <p className="mt-2 text-xs text-neutral-500">
@@ -465,7 +473,7 @@ export default function SessionPage() {
               </Badge>
               {paused && <Badge tone="amber">paused</Badge>}
               <Button onClick={() => api.session.togglePause(session.id)}>
-                {paused ? 'Resume AI' : 'Pause AI'}
+                {paused ? <><PlayIcon /> Resume AI</> : <><PauseIcon /> Pause AI</>}
               </Button>
               <Button variant="danger" onClick={stop}>
                 Stop

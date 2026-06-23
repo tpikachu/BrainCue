@@ -206,6 +206,8 @@ export interface AppSettings {
   privacyMode: boolean;
   dataConsentAck: boolean;
   tourDone: boolean; // first-run guided tour completed/skipped
+  shortcuts: Record<string, string>; // effective global-shortcut accelerators per action
+  shortcutDefaults: Record<string, string>; // built-in default accelerator per action
 }
 
 // ---- main -> renderer push event payloads ----

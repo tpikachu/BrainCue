@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../lib/api';
 import type { SessionListItem, SessionReport } from '@shared/types';
-import { Badge, Button, Card, Page, Pager, Spinner, TextInput } from '../../components/ui';
+import { Badge, Button, Card, Page, Pager, SearchInput, Spinner } from '../../components/ui';
 import { Markdown } from '../../components/Markdown';
 
 const GROUPS_PER_PAGE = 4;
@@ -88,7 +88,7 @@ export default function ReportsPage() {
     >
       {sessions.length > 0 && (
         <div className="mb-4">
-          <TextInput
+          <SearchInput
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);

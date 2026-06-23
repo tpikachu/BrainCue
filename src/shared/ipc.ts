@@ -15,6 +15,10 @@ export const IPC = {
     clearApiKey: 'settings:clear-api-key',
     testApiKey: 'settings:test-api-key',
     listModels: 'settings:list-models',
+    setShortcuts: 'settings:set-shortcuts',
+    resetShortcuts: 'settings:reset-shortcuts',
+    suspendShortcuts: 'settings:suspend-shortcuts',
+    resumeShortcuts: 'settings:resume-shortcuts',
   },
   profiles: {
     list: 'profiles:list',
@@ -77,6 +81,7 @@ export const IPC = {
     show: 'overlay:show',
     hide: 'overlay:hide',
     toggle: 'overlay:toggle',
+    isVisible: 'overlay:is-visible',
     setMode: 'overlay:set-mode',
     setOpacity: 'overlay:set-opacity',
     setClickthrough: 'overlay:set-clickthrough',
@@ -100,6 +105,9 @@ export const EVENTS = {
   sessionError: 'session:error',
   overlayApplySettings: 'overlay:apply-settings',
   shortcutFired: 'shortcut:fired',
+  privacyChanged: 'privacy:changed',
+  overlayVisibility: 'overlay:visibility',
+  navigate: 'app:navigate',
 } as const;
 
 export type IpcEventChannel = (typeof EVENTS)[keyof typeof EVENTS];

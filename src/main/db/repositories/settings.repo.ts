@@ -43,4 +43,5 @@ export const SETTINGS_KEYS = {
   privacyMode: 'privacy_mode',
   dataConsentAck: 'data_consent_ack',
   tourDone: 'tour_done',
+  shortcuts: 'shortcuts',
 } as const;
