@@ -72,16 +72,20 @@ export default function SessionPage() {
 
   const refreshJobs = async (pid: string) => setJobs((await api.jobs.list(pid)) as Job[]);
 
-  // Find the most recent past session for this profile+job to offer "resume".
+  // Find the most recent past round of THIS interview type for the selected job, to
+  // offer "resume". Matching on type keeps e.g. behavioral and technical rounds as
+  // separate sessions instead of collapsing them into one.
   useEffect(() => {
     setLastSession(null);
     if (!profileId || !jobId) return;
     void (async () => {
       const all = (await api.session.list()) as SessionListItem[];
-      const match = all.find((s) => s.profileId === profileId && s.jobId === jobId);
+      const match = all.find(
+        (s) => s.profileId === profileId && s.jobId === jobId && s.interviewType === interviewType,
+      );
       setLastSession(match ?? null);
     })();
-  }, [profileId, jobId]);
+  }, [profileId, jobId, interviewType]);
 
   useEffect(() => {
     setJobId('');
@@ -481,7 +485,7 @@ export default function SessionPage() {
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 {lastSession && (
                   <Button variant="success" onClick={resume} disabled={!canStart} loading={resuming}>
-                    <PlayIcon /> Resume last session
+                    <PlayIcon /> Resume {interviewType.replace('_', ' ')} round
                   </Button>
                 )}
                 <Button
@@ -489,13 +493,14 @@ export default function SessionPage() {
                   onClick={start}
                   disabled={!canStart || resuming}
                 >
-                  {lastSession ? <><PlusIcon /> New session</> : <><PlayIcon /> Start session</>}
+                  {lastSession ? <><PlusIcon /> New round</> : <><PlayIcon /> Start session</>}
                 </Button>
               </div>
               {lastSession ? (
                 <p className="mt-2 text-xs text-neutral-500">
-                  Resuming continues your previous session for this interview (newest first) — keeps
-                  Reports tidy and lets answers build on the last round.
+                  You already have a <strong>{interviewType.replace('_', ' ')}</strong> round for this
+                  job — resume continues it (keeps Reports tidy and lets answers build on it). “New
+                  round” starts a fresh one.
                 </p>
               ) : (
                 selectedJob && (
