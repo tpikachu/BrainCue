@@ -74,10 +74,12 @@ export default function SessionPage() {
 
   // Find the most recent past round of THIS interview type for the selected job, to
   // offer "resume". Matching on type keeps e.g. behavioral and technical rounds as
-  // separate sessions instead of collapsing them into one.
+  // separate sessions instead of collapsing them into one. Depends on `session` so
+  // it RE-RUNS the moment a round ends — otherwise the setup view would still think
+  // no round exists and you'd start a duplicate instead of being offered "resume".
   useEffect(() => {
     setLastSession(null);
-    if (!profileId || !jobId) return;
+    if (!profileId || !jobId || session) return; // skip while a round is live
     void (async () => {
       const all = (await api.session.list()) as SessionListItem[];
       const match = all.find(
@@ -85,7 +87,7 @@ export default function SessionPage() {
       );
       setLastSession(match ?? null);
     })();
-  }, [profileId, jobId, interviewType]);
+  }, [profileId, jobId, interviewType, session]);
 
   useEffect(() => {
     setJobId('');
