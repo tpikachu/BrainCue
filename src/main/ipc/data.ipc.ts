@@ -5,6 +5,8 @@ import { broadcast } from './broadcast';
 import { getMainWindow } from '../windows/mainWindow';
 import { profilesRepo } from '../db/repositories/profiles.repo';
 import { sessionsRepo } from '../db/repositories/sessions.repo';
+import { jobsRepo } from '../db/repositories/jobs.repo';
+import { loadSampleData } from '../services/samples/sampleData';
 import { apiKeyStore } from '../services/security/apiKey';
 import { sessionManager } from '../services/session/sessionManager';
 import { log } from '../services/security/logger';
@@ -38,7 +40,12 @@ export function registerDataIpc(): void {
   // Lightweight counts for the dashboard sidebar status panel.
   handle(IPC.data.stats, NoInput, () => {
     const { total, live } = sessionsRepo.count();
-    return { profiles: profilesRepo.count(), sessions: total, liveSessions: live };
+    return {
+      profiles: profilesRepo.count(),
+      interviews: jobsRepo.count(),
+      sessions: total,
+      liveSessions: live,
+    };
   });
 
   // Remove ALL user data: the OpenAI API key + every profile and session (FK
@@ -61,5 +68,12 @@ export function registerDataIpc(): void {
 
     broadcast(EVENTS.dataChanged, { reason: 'wipe' });
     return { wiped: true };
+  });
+
+  // Seed a sample profile + a few realistic interviews so users can try the flow.
+  handle(IPC.data.loadSamples, NoInput, async () => {
+    const res = await loadSampleData();
+    broadcast(EVENTS.dataChanged, { reason: 'samples' });
+    return res;
   });
 }

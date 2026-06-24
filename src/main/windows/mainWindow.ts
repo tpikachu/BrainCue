@@ -7,10 +7,12 @@ import { broadcastMaximizeState } from '../ipc/window.ipc';
 import { appIconImage } from './appIcon';
 import { isQuitting } from '../quit';
 import { log } from '../services/security/logger';
+import { settingsRepo, SETTINGS_KEYS } from '../db/repositories/settings.repo';
 
 let win: BrowserWindow | null = null;
 
 export function createMainWindow(): BrowserWindow {
+  const hideTaskbarIcon = settingsRepo.get(SETTINGS_KEYS.hideTaskbarIcon) === '1';
   win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -18,6 +20,7 @@ export function createMainWindow(): BrowserWindow {
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,
+    skipTaskbar: hideTaskbarIcon, // stealth: keep the app off the taskbar
     // App icon for the taskbar / Alt-Tab (otherwise the default Electron icon
     // shows in dev). In a packaged build the exe icon is set by electron-builder.
     icon: appIconImage(),
@@ -31,6 +34,9 @@ export function createMainWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Keep audio capture (the live interview mic) running at full rate when the
+      // window is minimized/hidden to tray — the user works from the Cue Card.
+      backgroundThrottling: false,
     },
   });
 

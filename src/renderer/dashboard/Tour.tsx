@@ -12,41 +12,59 @@ export interface TourStep {
  *  the tour works regardless of the current route. */
 export const TOUR_STEPS: TourStep[] = [
   {
-    title: 'Welcome 👋',
-    body: 'A quick 30-second tour of how to go from résumé to live, grounded interview answers.',
+    title: 'Welcome to BrainCue 👋',
+    body: 'Your AI copilot for live interviews — it listens, detects questions, and streams grounded answer cues into a floating, screen-share-invisible panel. Here’s the full workflow in about a minute.',
   },
   {
     target: 'nav-settings',
     title: '1 · Add your OpenAI key',
-    body: 'Everything runs on your own key. Paste it in Settings — it’s encrypted locally and never leaves your machine except to call OpenAI.',
+    body: 'Everything runs on your own key. Paste it in Settings — it’s encrypted in your OS keychain and never leaves your machine except to call OpenAI. Tip: defaults use cost-effective models; you can change any model per task here.',
   },
   {
     target: 'nav-profiles',
     title: '2 · Create your profile',
-    body: 'A profile is just you: name, role, and résumé. You create it once and reuse it for every job you interview for.',
+    body: 'A profile is you: name, target role, and résumé. We parse the résumé so answers are grounded in YOUR real experience — never made up. Create it once and reuse it for every interview.',
   },
   {
     target: 'nav-session',
-    title: '3 · Set up the interview',
-    body: 'In Live Session, add the job: paste the JD (or a link), and optionally a company website — we’ll research it so answers can speak to the company. Then go live.',
+    title: '3 · Add an interview',
+    body: 'On the Interview page, add the job: paste the JD (or a link), and optionally a company website — we research it so answers can speak to the company’s products and values. Each interview is saved and reusable.',
+  },
+  {
+    target: 'nav-session',
+    title: '4 · Start it',
+    body: 'Pick the profile, then press Start on an interview row. Your mic/system audio is captured and the floating Cue Card opens — you can minimize this dashboard during the call.',
+  },
+  {
+    title: '5 · The Cue Card is your live surface',
+    body: 'Everything happens here: the live transcript (resizable), the streamed answer, and which profile · interview is loaded. It’s always-on-top and excluded from screen sharing. Toggle it with the tray or hotkey.',
+  },
+  {
+    title: '6 · Tune answers on the fly',
+    body: 'In the Cue Card you can change Interview Type, Answer Format, and Length live; toggle pronunciation hints; Regenerate or Clear an answer; type a manual question in the Ask box; and pick your mic in ⚙ Settings.',
+  },
+  {
+    title: '7 · Stop & save',
+    body: 'When you stop, we ask whether to Save the session to Reports (you pick what kind of interview it was) or Discard it. Nothing is kept unless you choose to save.',
   },
   {
     target: 'nav-mock',
-    title: 'Practice anytime',
-    body: 'Mock Interview runs an AI interviewer that asks questions aloud and gives feedback — great for rehearsing.',
-  },
-  {
-    title: 'The Cue Card',
-    body: 'During a call, suggested answers stream into the Cue Card — a floating, always-on-top panel. It’s shown by default; toggle it with Ctrl+Shift+Space or from the tray. Privacy Mode keeps it hidden from screen sharing.',
+    title: 'Practice with a mock interviewer',
+    body: 'Mock Interview runs an AI interviewer that asks questions aloud — a safe way to rehearse and to see the copilot in action. (Mock runs aren’t saved to Reports.)',
   },
   {
     target: 'nav-reports',
     title: 'Review afterwards',
-    body: 'After each session, generate a coaching report — strengths, improvements, and per-question notes — here in Reports.',
+    body: 'Reports group by client → interview → session, with a per-question type breakdown. Open any session for a coaching report: summary, strengths, improvements, and per-question notes.',
+  },
+  {
+    target: 'nav-settings',
+    title: 'Stay invisible — and in control',
+    body: 'Privacy Mode (Ctrl+Shift+H) hides every window from screen capture; you can also hide the app from the taskbar. Need a clean slate? Settings → Danger zone lets you reset settings or wipe all data.',
   },
   {
     title: 'You’re set 🚀',
-    body: 'That’s the whole flow. You can replay this tour anytime from Settings → Getting started.',
+    body: 'That’s the whole flow: profile → interview → Start → Cue Card → Stop & save → Reports. Replay this tour anytime from Settings → Getting started.',
   },
 ];
 

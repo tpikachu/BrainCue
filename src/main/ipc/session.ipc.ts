@@ -15,7 +15,8 @@ const interviewType = z.enum([
   'sales',
   'general',
 ]);
-const answerStyle = z.enum(['concise', 'detailed', 'star', 'technical', 'conversational']);
+const answerStyle = z.enum(['default', 'star', 'technical', 'conversational']);
+const answerLength = z.enum(['key_points', 'detailed']);
 
 export function registerSessionIpc(): void {
   handle(
@@ -23,22 +24,23 @@ export function registerSessionIpc(): void {
     z.object({
       profileId: z.string().min(1),
       interviewType,
-      answerStyle: answerStyle.default('concise'),
+      answerStyle: answerStyle.default('default'),
       jobId: z.string().nullable().default(null),
+      answerLength: answerLength.default('key_points'),
     }),
-    ({ profileId, interviewType: t, answerStyle: s, jobId }) =>
-      sessionManager.start(profileId, t, s, jobId),
+    ({ profileId, interviewType: t, answerStyle: s, jobId, answerLength: len }) =>
+      sessionManager.start(profileId, t, s, jobId, len),
   );
 
   handle(
     IPC.session.resume,
     z.object({
       sessionId: z.string().min(1),
-      interviewType,
-      answerStyle: answerStyle.default('concise'),
+      answerStyle: answerStyle.default('default'),
+      answerLength: answerLength.default('key_points'),
     }),
-    ({ sessionId, interviewType: t, answerStyle: s }) =>
-      sessionManager.resume(sessionId, t, s),
+    ({ sessionId, answerStyle: s, answerLength: len }) =>
+      sessionManager.resume(sessionId, s, len),
   );
 
   handle(IPC.session.stop, z.object({ sessionId: z.string().min(1) }), ({ sessionId }) =>
@@ -52,6 +54,8 @@ export function registerSessionIpc(): void {
   );
 
   handle(IPC.session.togglePauseActive, z.void(), () => sessionManager.togglePauseActive());
+
+  handle(IPC.session.stopActive, z.void(), () => sessionManager.stopActive());
 
   handle(
     IPC.session.audioChunk,
@@ -80,6 +84,37 @@ export function registerSessionIpc(): void {
       // fire-and-forget; answer streams over events
       sessionManager.answerQuestion(sessionId, questionText),
   );
+
+  // Live Cue Card controls — act on the active session (no id needed).
+  handle(
+    IPC.session.setAnswerPrefs,
+    z.object({
+      interviewType: interviewType.optional(),
+      style: answerStyle.optional(),
+      length: answerLength.optional(),
+      pronunciation: z.boolean().optional(),
+    }),
+    (prefs) => sessionManager.setAnswerPrefs(prefs),
+  );
+
+  handle(
+    IPC.session.askActive,
+    z.object({ questionText: z.string().min(1) }),
+    ({ questionText }) => sessionManager.askActive(questionText),
+  );
+
+  handle(
+    IPC.session.setInterviewType,
+    z.object({ sessionId: z.string().min(1), interviewType }),
+    ({ sessionId, interviewType: t }) => {
+      sessionsRepo.setInterviewType(sessionId, t);
+      return { ok: true as const };
+    },
+  );
+
+  handle(IPC.session.regenerate, z.void(), () => sessionManager.regenerateActive());
+
+  handle(IPC.session.clearAnswer, z.void(), () => sessionManager.clearAnswerActive());
 
   handle(IPC.session.list, z.void(), () => sessionsRepo.list());
 

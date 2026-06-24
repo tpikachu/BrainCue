@@ -5,6 +5,7 @@ import { embed } from '../openai/embeddings';
 import { sqliteVectorStore } from './vectorStore';
 import { model } from '../openai/models';
 import { profilesRepo } from '../../db/repositories/profiles.repo';
+import { apiKeyStore } from '../security/apiKey';
 
 async function embedChunks(rows: { id: string; content: string }[]): Promise<number> {
   let embedded = 0;
@@ -28,11 +29,15 @@ export async function reindexProfile(
   const profile = profilesRepo.get(profileId);
   if (!profile) throw new Error('Profile not found');
 
-  // Clear only the base (non-job) chunks for this profile.
+  // Clear only the base (non-job) chunks for this profile (embeddings cascade).
+  // This ALWAYS runs, so removing a resume cleans up its chunks even with no key.
   db()
     .delete(schema.chunks)
     .where(and(eq(schema.chunks.profileId, profileId), isNull(schema.chunks.jobId)))
     .run();
+  // Without a key we can't embed, so there's nothing to (re)index — but the stale
+  // chunks above are already gone.
+  if (!apiKeyStore.isPresent()) return { chunks: 0, embedded: 0 };
 
   const sources: { type: 'resume' | 'note'; text: string }[] = [];
   if (profile.resumeText) sources.push({ type: 'resume', text: profile.resumeText });
@@ -67,7 +72,10 @@ export async function indexJob(jobId: string): Promise<{ chunks: number; embedde
   const job = db().select().from(schema.jobs).where(eq(schema.jobs.id, jobId)).get();
   if (!job) throw new Error('Job not found');
 
+  // Always clear this job's chunks first (embeddings cascade), so removing a JD or
+  // company research cleans up even with no key.
   db().delete(schema.chunks).where(eq(schema.chunks.jobId, jobId)).run();
+  if (!apiKeyStore.isPresent()) return { chunks: 0, embedded: 0 };
 
   const sources: { type: 'jd' | 'company'; text: string }[] = [];
   if (job.jdText) sources.push({ type: 'jd', text: job.jdText });

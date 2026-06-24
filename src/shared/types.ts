@@ -9,12 +9,12 @@ export type InterviewType =
   | 'sales'
   | 'general';
 
-export type AnswerStyle =
-  | 'concise'
-  | 'detailed'
-  | 'star'
-  | 'technical'
-  | 'conversational';
+/** Answer FORMAT / tone — chosen per round. Orthogonal to length. */
+export type AnswerStyle = 'default' | 'star' | 'technical' | 'conversational';
+
+/** Answer LENGTH / depth — a live Cue Card toggle, independent of format.
+ *  `key_points`: short, key-point-focused but natural. `detailed`: thorough. */
+export type AnswerLength = 'key_points' | 'detailed';
 
 export type DocumentKind = 'resume' | 'jd' | 'note' | 'other';
 export type ChunkSource = 'resume' | 'jd' | 'note' | 'company';
@@ -183,6 +183,7 @@ export interface SessionListItem extends Session {
   jobTitle: string | null;
   jobCompany: string | null;
   profileName: string | null;
+  typeCounts: Record<string, number>; // detected-question counts by QuestionType
 }
 
 export interface SessionDetail extends Session {
@@ -199,12 +200,20 @@ export interface OverlayPrefs {
   mode: OverlayMode;
 }
 
+/** Audio capture preferences (configured in the Cue Card settings modal). */
+export interface AudioPrefs {
+  source: 'system' | 'mic'; // interviewer's system audio vs the microphone
+  micDeviceId: string | null; // specific mic input (null = OS default)
+}
+
 export interface AppSettings {
   apiKeyPresent: boolean;
   models: Record<string, string>; // user overrides only
   modelDefaults: Record<string, string>; // built-in defaults per purpose
   overlay: OverlayPrefs;
+  audio: AudioPrefs;
   privacyMode: boolean;
+  hideTaskbarIcon: boolean; // keep the app off the taskbar (stealth)
   dataConsentAck: boolean;
   tourDone: boolean; // first-run guided tour completed/skipped
   shortcuts: Record<string, string>; // effective global-shortcut accelerators per action

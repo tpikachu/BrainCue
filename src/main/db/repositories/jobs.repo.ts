@@ -1,4 +1,4 @@
-import { and, desc, eq, like, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, like, or, sql } from 'drizzle-orm';
 import { db, schema } from '../index';
 import type { Job } from '@shared/types';
 
@@ -36,6 +36,11 @@ export const jobsRepo = {
   get(id: string): Job | null {
     const r = db().select().from(schema.jobs).where(eq(schema.jobs.id, id)).get();
     return r ? toJob(r) : null;
+  },
+
+  /** Total interviews (jobs) across all profiles — for the sidebar stats. */
+  count(): number {
+    return db().select({ c: sql<number>`count(*)` }).from(schema.jobs).get()?.c ?? 0;
   },
 
   /** A page of jobs for a profile, newest first, optionally filtered by a search
@@ -107,6 +112,24 @@ export const jobsRepo = {
   },
 
   delete(id: string): void {
-    db().delete(schema.jobs).where(eq(schema.jobs.id, id)).run();
+    // Delete dependents explicitly (and detach sessions) in a transaction. Older
+    // DBs were created before the jobs FKs gained ON DELETE cascade/set-null, and
+    // SQLite fixes FK actions at table-creation time — so a plain delete trips a
+    // FOREIGN KEY constraint when the job has JD/company chunks. Doing it by hand
+    // works regardless of the live schema's FK actions.
+    db().transaction((tx) => {
+      const chunkIds = tx
+        .select({ id: schema.chunks.id })
+        .from(schema.chunks)
+        .where(eq(schema.chunks.jobId, id))
+        .all()
+        .map((r) => r.id);
+      if (chunkIds.length) {
+        tx.delete(schema.embeddings).where(inArray(schema.embeddings.chunkId, chunkIds)).run();
+      }
+      tx.delete(schema.chunks).where(eq(schema.chunks.jobId, id)).run();
+      tx.update(schema.sessions).set({ jobId: null }).where(eq(schema.sessions.jobId, id)).run();
+      tx.delete(schema.jobs).where(eq(schema.jobs.id, id)).run();
+    });
   },
 };

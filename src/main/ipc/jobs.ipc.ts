@@ -50,8 +50,11 @@ export function registerJobsIpc(): void {
         : jobsRepo.create({ profileId, title, company, jdUrl, jdText, companyUrl, notes });
 
       const hasKey = apiKeyStore.isPresent();
-      if (hasKey && jdText?.trim()) {
-        jobsRepo.update(job.id, { parsedJd: await parseJobDescription(jdText) });
+      if (jdText?.trim()) {
+        if (hasKey) jobsRepo.update(job.id, { parsedJd: await parseJobDescription(jdText) });
+      } else {
+        // JD cleared → drop its parsed structure (chunks are cleared by indexJob).
+        jobsRepo.update(job.id, { parsedJd: null });
       }
 
       // Company research: scrape the website + parse it into interview-relevant
@@ -76,7 +79,9 @@ export function registerJobsIpc(): void {
         }
       }
 
-      const { embedded } = hasKey ? await indexJob(job.id) : { embedded: 0 };
+      // Always reindex: clears stale JD/company chunks (+ embeddings) even with no
+      // key, and re-embeds when a key + text are present.
+      const { embedded } = await indexJob(job.id);
       return {
         job: jobsRepo.get(job.id)!,
         keyMissing: !hasKey,

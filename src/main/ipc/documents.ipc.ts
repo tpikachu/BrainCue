@@ -35,13 +35,17 @@ export function registerDocumentsIpc(): void {
     IPC.documents.saveResume,
     z.object({ profileId: z.string().min(1), resumeText: z.string() }),
     async ({ profileId, resumeText }) => {
-      profilesRepo.update(profileId, { resumeText });
       const hasKey = apiKeyStore.isPresent();
-      if (hasKey && resumeText.trim()) {
+      const hasText = !!resumeText.trim();
+      // Save the text; clearing the resume also drops its parsed structure.
+      profilesRepo.update(profileId, { resumeText, ...(hasText ? {} : { parsedResume: null }) });
+      if (hasKey && hasText) {
         profilesRepo.update(profileId, { parsedResume: await parseResume(resumeText) });
       }
-      const { embedded } = hasKey ? await reindexProfile(profileId) : { embedded: 0 };
-      return { keyMissing: !hasKey, parsed: hasKey && !!resumeText.trim(), embedded };
+      // Always reindex: it clears stale base chunks (+ their embeddings) even with
+      // no key, and re-embeds when a key + resume text are present.
+      const { embedded } = await reindexProfile(profileId);
+      return { keyMissing: !hasKey, parsed: hasKey && hasText, embedded };
     },
   );
 

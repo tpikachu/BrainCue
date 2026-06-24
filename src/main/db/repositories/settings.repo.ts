@@ -52,6 +52,8 @@ export const SETTINGS_KEYS = {
   tourDone: 'tour_done',
   shortcuts: 'shortcuts',
   overlayBounds: 'overlay_bounds',
+  audioPrefs: 'audio_prefs',
+  hideTaskbarIcon: 'hide_taskbar_icon',
 } as const;
 
 /** Non-secret settings cleared by a factory reset (everything except the API key). */
@@ -63,4 +65,6 @@ const APP_SETTING_KEYS: string[] = [
   SETTINGS_KEYS.tourDone,
   SETTINGS_KEYS.shortcuts,
   SETTINGS_KEYS.overlayBounds,
+  SETTINGS_KEYS.audioPrefs,
+  SETTINGS_KEYS.hideTaskbarIcon,
 ];

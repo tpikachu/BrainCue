@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { EVENTS, IPC } from '@shared/ipc';
-import type { ClientInfo, UpdateStatus } from '@shared/ipc';
+import type { AnswerPrefs, ClientInfo, SavePrompt, UpdateStatus } from '@shared/ipc';
 import type { Result } from '@shared/result';
 
 /** invoke + unwrap the Result envelope so renderer code uses normal try/catch. */
@@ -16,15 +16,6 @@ function on<T>(channel: string, cb: (payload: T) => void): () => void {
   ipcRenderer.on(channel, listener);
   return () => ipcRenderer.removeListener(channel, listener);
 }
-
-type MockAnswerResult = {
-  done: boolean;
-  index: number;
-  total: number;
-  question?: string;
-  questionId?: string;
-  audioBase64?: string;
-};
 
 // Typed facade. The OpenAI key is never exposed — only booleans/data come back.
 const api = {
@@ -52,8 +43,11 @@ const api = {
   },
   data: {
     stats: () =>
-      invoke<{ profiles: number; sessions: number; liveSessions: number }>(IPC.data.stats),
+      invoke<{ profiles: number; interviews: number; sessions: number; liveSessions: number }>(
+        IPC.data.stats,
+      ),
     wipeAll: () => invoke<{ wiped: boolean }>(IPC.data.wipeAll),
+    loadSamples: () => invoke<{ profileId: string; jobs: number }>(IPC.data.loadSamples),
   },
   window: {
     minimize: () => invoke<{ ok: true }>(IPC.window.minimize),
@@ -125,13 +119,31 @@ const api = {
       interviewType: string,
       answerStyle: string,
       jobId: string | null = null,
-    ) => invoke(IPC.session.start, { profileId, interviewType, answerStyle, jobId }),
-    resume: (sessionId: string, interviewType: string, answerStyle: string) =>
-      invoke(IPC.session.resume, { sessionId, interviewType, answerStyle }),
+      answerLength = 'key_points',
+    ) => invoke(IPC.session.start, { profileId, interviewType, answerStyle, jobId, answerLength }),
+    resume: (sessionId: string, answerStyle = 'default', answerLength = 'key_points') =>
+      invoke(IPC.session.resume, { sessionId, answerStyle, answerLength }),
+    setAnswerPrefs: (prefs: {
+      interviewType?: string;
+      style?: string;
+      length?: string;
+      pronunciation?: boolean;
+    }) =>
+      invoke<{ interviewType: string; style: string; length: string; pronunciation: boolean }>(
+        IPC.session.setAnswerPrefs,
+        prefs,
+      ),
+    askActive: (questionText: string) =>
+      invoke<{ ok: boolean }>(IPC.session.askActive, { questionText }),
+    setInterviewType: (sessionId: string, interviewType: string) =>
+      invoke<{ ok: true }>(IPC.session.setInterviewType, { sessionId, interviewType }),
+    regenerate: () => invoke<{ regenerated: boolean }>(IPC.session.regenerate),
+    clearAnswer: () => invoke<{ cleared: boolean }>(IPC.session.clearAnswer),
     stop: (sessionId: string) => invoke(IPC.session.stop, { sessionId }),
     togglePause: (sessionId: string) => invoke(IPC.session.togglePause, { sessionId }),
     togglePauseActive: () =>
       invoke<{ paused: boolean; active: boolean }>(IPC.session.togglePauseActive),
+    stopActive: () => invoke<{ stopped: boolean }>(IPC.session.stopActive),
     audioChunk: (sessionId: string, audio: ArrayBuffer, mime: string) =>
       invoke(IPC.session.audioChunk, { sessionId, audio, mime }),
     // One-way streaming audio (no response) for low-latency Realtime STT.
@@ -155,20 +167,19 @@ const api = {
       invoke<{
         session: { id: string };
         question: string;
-        questionId: string;
         audioBase64: string;
         index: number;
         total: number;
       }>(IPC.mock.start, { profileId, voice, jobId, interviewType }),
-    answerText: (sessionId: string, text: string) =>
-      invoke<MockAnswerResult>(IPC.mock.answerText, { sessionId, text }),
-    answerAudio: (sessionId: string, audio: ArrayBuffer, mime: string) =>
-      invoke<MockAnswerResult & { transcript: string }>(IPC.mock.answerAudio, {
-        sessionId,
-        audio,
-        mime,
-      }),
-    end: (sessionId: string) => invoke(IPC.mock.end, { sessionId }),
+    next: (sessionId: string) =>
+      invoke<{
+        done: boolean;
+        question?: string;
+        audioBase64?: string;
+        index: number;
+        total: number;
+      }>(IPC.mock.next, { sessionId }),
+    end: (sessionId: string) => invoke<{ ended: true }>(IPC.mock.end, { sessionId }),
   },
   capture: {
     region: () => invoke<{ image: string }>(IPC.capture.region),
@@ -198,6 +209,16 @@ const api = {
     check: () => invoke<{ ok: true }>(IPC.update.check),
     install: () => invoke<{ ok: true }>(IPC.update.install),
   },
+  // DEV-only DB explorer (handlers exist only in unpackaged builds).
+  dev: {
+    tables: () => invoke<{ name: string; rows: number }[]>(IPC.dev.tables),
+    rows: (table: string, limit = 50, offset = 0) =>
+      invoke<{ columns: string[]; rows: Record<string, unknown>[]; total: number }>(IPC.dev.rows, {
+        table,
+        limit,
+        offset,
+      }),
+  },
   events: {
     onSessionState: (cb: (p: unknown) => void) => on(EVENTS.sessionState, cb),
     onTranscriptDelta: (cb: (p: unknown) => void) => on(EVENTS.transcriptDelta, cb),
@@ -205,6 +226,7 @@ const api = {
     onAnswerDelta: (cb: (p: unknown) => void) => on(EVENTS.answerDelta, cb),
     onAnswerMeta: (cb: (p: unknown) => void) => on(EVENTS.answerMeta, cb),
     onAnswerDone: (cb: (p: unknown) => void) => on(EVENTS.answerDone, cb),
+    onAnswerReset: (cb: (p: unknown) => void) => on(EVENTS.answerReset, cb),
     onContextSent: (cb: (p: unknown) => void) => on(EVENTS.contextSent, cb),
     onSessionError: (cb: (p: unknown) => void) => on(EVENTS.sessionError, cb),
     onOverlayApplySettings: (cb: (p: unknown) => void) => on(EVENTS.overlayApplySettings, cb),
@@ -219,6 +241,9 @@ const api = {
     onUpdateStatus: (cb: (p: UpdateStatus) => void) => on(EVENTS.updateStatus, cb),
     onOverlayClickthrough: (cb: () => void) => on(EVENTS.overlayClickthrough, cb),
     onClientInfo: (cb: (p: ClientInfo | null) => void) => on(EVENTS.clientInfo, cb),
+    onAnswerPrefs: (cb: (p: AnswerPrefs) => void) => on(EVENTS.answerPrefs, cb),
+    onAudioLevel: (cb: (p: { level: number }) => void) => on(EVENTS.audioLevel, cb),
+    onSavePrompt: (cb: (p: SavePrompt) => void) => on(EVENTS.savePrompt, cb),
   },
 };
 

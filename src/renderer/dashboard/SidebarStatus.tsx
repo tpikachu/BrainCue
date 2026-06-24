@@ -2,11 +2,12 @@ import type React from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { api } from '../lib/api';
-import { UserIcon, MicIcon } from '../components/icons';
+import { UserIcon, MicIcon, ReportIcon } from '../components/icons';
 import { APP_VERSION } from './changelog';
 
 interface Stats {
   profiles: number;
+  interviews: number;
   sessions: number;
   liveSessions: number;
 }
@@ -50,13 +51,14 @@ export function SidebarStatus() {
             />
           </span>
           <span className="text-xs font-medium text-neutral-300">
-            {live ? 'Live session active' : 'Idle'}
+            {live ? 'Interview live' : 'Idle'}
           </span>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
           <Stat icon={<UserIcon className="h-3.5 w-3.5" />} label="Profiles" value={stats?.profiles} />
-          <Stat icon={<MicIcon className="h-3.5 w-3.5" />} label="Sessions" value={stats?.sessions} />
+          <Stat icon={<MicIcon className="h-3.5 w-3.5" />} label="Interviews" value={stats?.interviews} />
+          <Stat icon={<ReportIcon className="h-3.5 w-3.5" />} label="Sessions" value={stats?.sessions} />
         </div>
       </div>
 
@@ -76,12 +78,12 @@ export function SidebarStatus() {
 
 function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value?: number }) {
   return (
-    <div className="rounded-lg bg-white/5 px-2.5 py-1.5">
-      <div className="flex items-center gap-1.5 text-neutral-500">
+    <div className="flex items-center justify-between rounded-lg bg-white/5 px-2.5 py-1.5">
+      <span className="flex items-center gap-1.5 text-xs text-neutral-400">
         {icon}
-        <span className="text-[10px] uppercase tracking-wide">{label}</span>
-      </div>
-      <p className="mt-0.5 text-lg font-semibold tabular-nums text-neutral-100">{value ?? '—'}</p>
+        {label}
+      </span>
+      <span className="text-sm font-semibold tabular-nums text-neutral-100">{value ?? '—'}</span>
     </div>
   );
 }

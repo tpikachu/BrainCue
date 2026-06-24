@@ -156,15 +156,78 @@ body {
   margin: 0;
 }
 
-/* Slim, unobtrusive scrollbars only where content actually scrolls */
+/* Slim, themed scrollbars only where content actually scrolls */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
 *::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #404040;
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  transition: background 0.2s ease;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(124, 125, 247, 0.55);
+  background-clip: content-box;
 }
 *::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* --- Motion & depth polish --------------------------------------------- */
+
+/* Page entrance: routed pages fade + rise in. Re-runs on each navigation
+   because each page component remounts. */
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* Staggered list/card entrance. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .page-enter {
+    animation: page-in 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .rise-enter {
+    animation: rise-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  /* Soft lift for interactive cards/rows. Add `.lift` where it makes sense. */
+  .lift {
+    transition:
+      transform 0.16s ease,
+      box-shadow 0.16s ease,
+      border-color 0.16s ease;
+  }
+  .lift:hover {
+    transform: translateY(-2px);
+  }
+}
+
+/* A crisp, branded focus ring for keyboard users (doesn't show on mouse click). */
+:focus-visible {
+  outline: 2px solid rgba(124, 125, 247, 0.7);
+  outline-offset: 2px;
+  border-radius: 6px;
 }

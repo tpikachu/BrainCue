@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { api } from '../lib/api';
 import { floatTo16BitPCM, rms } from '../lib/pcm';
 import type { Session } from '@shared/types';
+import type { SavePrompt } from '@shared/ipc';
 
 export type AudioSource = 'mic' | 'system';
 
@@ -25,19 +26,22 @@ interface LiveSessionState {
   speaking: boolean;
   micError: string | null;
   stream: MediaStream | null; // exposed for the waveform
+  pendingSave: SavePrompt | null; // a just-stopped session awaiting save/discard
+  clearPendingSave: () => void;
 
   startNew: (a: {
     profileId: string;
     interviewType: string;
     answerStyle: string;
+    answerLength: string;
     jobId: string | null;
     source: AudioSource;
+    micDeviceId?: string | null;
   }) => Promise<void>;
   resumeExisting: (a: {
     sessionId: string;
-    interviewType: string;
-    answerStyle: string;
     source: AudioSource;
+    micDeviceId?: string | null;
     prior: Line[];
   }) => Promise<void>;
   stop: () => Promise<void>;
@@ -51,7 +55,7 @@ let node: ScriptProcessorNode | null = null;
 let mediaStream: MediaStream | null = null;
 let lineId = 0;
 
-async function getStream(source: AudioSource): Promise<MediaStream> {
+async function getStream(source: AudioSource, micDeviceId?: string | null): Promise<MediaStream> {
   if (source === 'system') {
     const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
     display.getVideoTracks().forEach((t) => t.stop());
@@ -61,7 +65,13 @@ async function getStream(source: AudioSource): Promise<MediaStream> {
     return display;
   }
   return navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+    audio: {
+      ...(micDeviceId ? { deviceId: { exact: micDeviceId } } : {}),
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      channelCount: 1,
+    },
   });
 }
 
@@ -84,11 +94,27 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
       transcript: [...s.transcript, { id: lineId++, speaker: 'detected question', text: d.text }],
     }));
   });
-  api.events.onSessionState((p) => set({ paused: (p as { paused: boolean }).paused }));
+  api.events.onSavePrompt((p) => set({ pendingSave: p }));
+  api.events.onSessionState((p) => {
+    const s = p as { status?: string; paused: boolean };
+    // The session can be stopped from the Cue Card (stopActive), which bypasses
+    // this store's stop(). React to the broadcast so the dashboard + mic tear
+    // down too. stopCapture() is idempotent, so our own stop() calling both is fine.
+    if (s.status === 'stopped') {
+      stopCapture();
+      set({ session: null, paused: false, interim: '' });
+    } else {
+      set({ paused: s.paused });
+    }
+  });
 
-  async function beginCapture(sessionId: string, source: AudioSource): Promise<void> {
+  async function beginCapture(
+    sessionId: string,
+    source: AudioSource,
+    micDeviceId?: string | null,
+  ): Promise<void> {
     try {
-      const stream = await getStream(source);
+      const stream = await getStream(source, micDeviceId);
       mediaStream = stream;
       set({ stream, micError: null });
 
@@ -130,19 +156,27 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
     speaking: false,
     micError: null,
     stream: null,
+    pendingSave: null,
+    clearPendingSave: () => set({ pendingSave: null }),
 
-    startNew: async ({ profileId, interviewType, answerStyle, jobId, source }) => {
-      const s = (await api.session.start(profileId, interviewType, answerStyle, jobId)) as Session;
+    startNew: async ({ profileId, interviewType, answerStyle, answerLength, jobId, source, micDeviceId }) => {
+      const s = (await api.session.start(
+        profileId,
+        interviewType,
+        answerStyle,
+        jobId,
+        answerLength,
+      )) as Session;
       lineId = 0;
       set({ session: s, transcript: [], interim: '', paused: false, micError: null });
-      await beginCapture(s.id, source);
+      await beginCapture(s.id, source, micDeviceId);
     },
 
-    resumeExisting: async ({ sessionId, interviewType, answerStyle, source, prior }) => {
-      const s = (await api.session.resume(sessionId, interviewType, answerStyle)) as Session;
+    resumeExisting: async ({ sessionId, source, micDeviceId, prior }) => {
+      const s = (await api.session.resume(sessionId)) as Session;
       lineId = prior.length;
       set({ session: s, transcript: prior, interim: '', paused: false, micError: null });
-      await beginCapture(s.id, source);
+      await beginCapture(s.id, source, micDeviceId);
     },
 
     stop: async () => {

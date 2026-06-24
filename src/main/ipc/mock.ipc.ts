@@ -2,11 +2,8 @@ import { z } from 'zod';
 import { IPC } from '@shared/ipc';
 import { handle } from './helpers';
 import { mockManager } from '../services/mock/mockManager';
-import { generateReport } from '../services/session/report';
 
-const voice = z
-  .enum(['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'])
-  .default('alloy');
+const voice = z.enum(['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']).default('alloy');
 const interviewType = z
   .enum(['behavioral', 'technical', 'coding', 'system_design', 'product', 'sales', 'general'])
   .default('general');
@@ -20,28 +17,15 @@ export function registerMockIpc(): void {
       jobId: z.string().nullable().default(null),
       interviewType,
     }),
-    ({ profileId, voice: v, jobId, interviewType: t }) =>
-      mockManager.start(profileId, v, jobId, t),
+    ({ profileId, voice: v, jobId, interviewType: t }) => mockManager.start(profileId, v, jobId, t),
   );
 
-  handle(
-    IPC.mock.answerText,
-    z.object({ sessionId: z.string().min(1), text: z.string() }),
-    ({ sessionId, text }) => mockManager.submitAnswer(sessionId, text),
+  handle(IPC.mock.next, z.object({ sessionId: z.string().min(1) }), ({ sessionId }) =>
+    mockManager.next(sessionId),
   );
 
-  handle(
-    IPC.mock.answerAudio,
-    z.object({
-      sessionId: z.string().min(1),
-      audio: z.instanceof(ArrayBuffer),
-      mime: z.string().default('audio/webm'),
-    }),
-    ({ sessionId, audio, mime }) => mockManager.submitAudio(sessionId, audio, mime),
-  );
-
-  handle(IPC.mock.end, z.object({ sessionId: z.string().min(1) }), async ({ sessionId }) => {
+  handle(IPC.mock.end, z.object({ sessionId: z.string().min(1) }), ({ sessionId }) => {
     mockManager.end(sessionId);
-    return generateReport(sessionId);
+    return { ended: true as const };
   });
 }

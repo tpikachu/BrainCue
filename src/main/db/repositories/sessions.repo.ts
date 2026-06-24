@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { db, schema } from '../index';
 import type {
   AiAnswer,
@@ -47,9 +47,10 @@ const toReport = (r: typeof schema.sessionReports.$inferSelect): SessionReport =
 });
 
 export const sessionsRepo = {
-  /** Sessions with job (title/company) + profile name, newest first. */
+  /** Sessions with job (title/company) + profile name + a per-question type
+   *  breakdown, newest first. */
   list(): SessionListItem[] {
-    return db()
+    const rows = db()
       .select({
         id: schema.sessions.id,
         profileId: schema.sessions.profileId,
@@ -67,20 +68,40 @@ export const sessionsRepo = {
       .leftJoin(schema.jobs, eq(schema.jobs.id, schema.sessions.jobId))
       .leftJoin(schema.profiles, eq(schema.profiles.id, schema.sessions.profileId))
       .orderBy(desc(schema.sessions.createdAt))
-      .all()
-      .map((r) => ({
-        id: r.id,
-        profileId: r.profileId,
-        jobId: r.jobId,
-        interviewType: r.interviewType as Session['interviewType'],
-        status: r.status as Session['status'],
-        startedAt: r.startedAt,
-        endedAt: r.endedAt,
-        createdAt: r.createdAt,
-        jobTitle: r.jobTitle ?? null,
-        jobCompany: r.jobCompany ?? null,
-        profileName: r.profileName ?? null,
-      }));
+      .all();
+
+    // One grouped query for the per-(session,type) question counts, so the
+    // Reports list can show "behavioral ×4 · coding ×2" without N detail loads.
+    const counts = db()
+      .select({
+        sessionId: schema.detectedQuestions.sessionId,
+        type: schema.detectedQuestions.type,
+        c: sql<number>`count(*)`,
+      })
+      .from(schema.detectedQuestions)
+      .groupBy(schema.detectedQuestions.sessionId, schema.detectedQuestions.type)
+      .all();
+    const bySession = new Map<string, Record<string, number>>();
+    for (const r of counts) {
+      const m = bySession.get(r.sessionId) ?? {};
+      m[r.type] = r.c;
+      bySession.set(r.sessionId, m);
+    }
+
+    return rows.map((r) => ({
+      id: r.id,
+      profileId: r.profileId,
+      jobId: r.jobId,
+      interviewType: r.interviewType as Session['interviewType'],
+      status: r.status as Session['status'],
+      startedAt: r.startedAt,
+      endedAt: r.endedAt,
+      createdAt: r.createdAt,
+      jobTitle: r.jobTitle ?? null,
+      jobCompany: r.jobCompany ?? null,
+      profileName: r.profileName ?? null,
+      typeCounts: bySession.get(r.id) ?? {},
+    }));
   },
 
   detail(id: string): SessionDetail | null {
@@ -176,6 +197,26 @@ export const sessionsRepo = {
 
   delete(id: string): void {
     db().delete(schema.sessions).where(eq(schema.sessions.id, id)).run();
+  },
+
+  /** Set the session-level interview type (chosen by the user at save time). */
+  setInterviewType(id: string, interviewType: string): void {
+    db()
+      .update(schema.sessions)
+      .set({ interviewType })
+      .where(eq(schema.sessions.id, id))
+      .run();
+  },
+
+  /** How many questions were detected in a session (for the save prompt). */
+  questionCount(id: string): number {
+    return (
+      db()
+        .select({ c: sql<number>`count(*)` })
+        .from(schema.detectedQuestions)
+        .where(eq(schema.detectedQuestions.sessionId, id))
+        .get()?.c ?? 0
+    );
   },
 
   count(): { total: number; live: number } {

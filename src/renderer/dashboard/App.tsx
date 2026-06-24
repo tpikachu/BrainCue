@@ -6,15 +6,17 @@ import { useTourStore } from '../store/useTourStore';
 import { Tour, TOUR_STEPS } from './Tour';
 import ProfilesPage from './pages/ProfilesPage';
 import ProfileEditorPage from './pages/ProfileEditorPage';
-import SessionPage from './pages/SessionPage';
+import InterviewPage from './pages/InterviewPage';
 import MockPage from './pages/MockPage';
 import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
 import WhatsNewPage from './pages/WhatsNewPage';
+import DevDbExplorerPage from './pages/DevDbExplorerPage';
 import { Titlebar } from './Titlebar';
 import { SidebarStatus } from './SidebarStatus';
 import { UpdateBanner } from './UpdateBanner';
 import {
+  DatabaseIcon,
   MockIcon,
   ReportIcon,
   SettingsIcon,
@@ -23,12 +25,16 @@ import {
 } from '../components/icons';
 import { Logo } from '../components/Logo';
 
+// Dev-only DB explorer — shown/routed only in unpackaged builds.
+const DEV = import.meta.env.DEV;
+
 const navItems = [
   { to: '/profiles', label: 'Profiles', Icon: UserIcon, tour: 'nav-profiles' },
-  { to: '/session', label: 'Live Session', Icon: MicIcon, tour: 'nav-session' },
+  { to: '/interview', label: 'Interview', Icon: MicIcon, tour: 'nav-session' },
   { to: '/mock', label: 'Mock Interview', Icon: MockIcon, tour: 'nav-mock' },
   { to: '/reports', label: 'Reports', Icon: ReportIcon, tour: 'nav-reports' },
   { to: '/settings', label: 'Settings', Icon: SettingsIcon, tour: 'nav-settings' },
+  ...(DEV ? [{ to: '/dev', label: 'DB Explorer', Icon: DatabaseIcon, tour: 'nav-dev' }] : []),
 ];
 
 export default function App() {
@@ -95,18 +101,20 @@ export default function App() {
               to={n.to}
               data-tour={n.tour}
               className={({ isActive }) =>
-                `relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+                `relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all duration-150 ${
                   isActive
                     ? 'bg-indigo-500/10 text-white'
-                    : 'text-neutral-400 hover:bg-white/5 hover:text-neutral-200'
+                    : 'text-neutral-400 hover:translate-x-0.5 hover:bg-white/5 hover:text-neutral-200'
                 }`
               }
             >
               {({ isActive }) => (
                 <>
-                  {isActive && (
-                    <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r bg-indigo-400" />
-                  )}
+                  <span
+                    className={`absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r bg-indigo-400 transition-all duration-200 ${
+                      isActive ? 'opacity-100' : 'opacity-0'
+                    }`}
+                  />
                   <n.Icon className="h-[18px] w-[18px]" />
                   {n.label}
                 </>
@@ -123,11 +131,12 @@ export default function App() {
           <Route path="/" element={<Navigate to="/profiles" replace />} />
           <Route path="/profiles" element={<ProfilesPage />} />
           <Route path="/profiles/:id" element={<ProfileEditorPage />} />
-          <Route path="/session" element={<SessionPage />} />
+          <Route path="/interview" element={<InterviewPage />} />
           <Route path="/mock" element={<MockPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/whats-new" element={<WhatsNewPage />} />
+          {DEV && <Route path="/dev" element={<DevDbExplorerPage />} />}
         </Routes>
       </main>
       </div>

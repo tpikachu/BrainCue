@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { api } from '../../lib/api';
 import { useProfileStore } from '../../store/useProfileStore';
 import { usePagedSearch } from '../../lib/usePagedSearch';
 import { Badge, Button, Card, Field, Page, Pager, SearchInput, TextInput } from '../../components/ui';
@@ -11,10 +12,23 @@ export default function ProfilesPage() {
   const [name, setName] = useState('');
   const [targetRole, setTargetRole] = useState('');
   const [creating, setCreating] = useState(false);
+  const [loadingSamples, setLoadingSamples] = useState(false);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Seed a sample profile + Google/Amazon/Stripe interviews to try the flow.
+  const loadSamples = async () => {
+    setLoadingSamples(true);
+    try {
+      const res = await api.data.loadSamples();
+      await load();
+      navigate(`/profiles/${res.profileId}`);
+    } finally {
+      setLoadingSamples(false);
+    }
+  };
 
   const paged = usePagedSearch(profiles, (p) => `${p.name} ${p.targetRole}`, 8);
 
@@ -27,7 +41,7 @@ export default function ProfilesPage() {
         targetRole,
         targetCompany: null,
         interviewType: 'general',
-        answerStyle: 'concise',
+        answerStyle: 'default',
         language: 'en',
         resumeText: null,
         jdText: null,
@@ -42,6 +56,11 @@ export default function ProfilesPage() {
     <Page
       title="Profiles"
       subtitle="A profile is just you: your name, role, and resume. Reuse it for every job."
+      actions={
+        <Button variant="ghost" onClick={loadSamples} loading={loadingSamples} title="Create a sample profile + Google/Amazon/Stripe interviews to try the app">
+          Load sample data
+        </Button>
+      }
     >
       <Card className="mb-6">
         <h3 className="mb-4 font-medium">New profile</h3>
@@ -75,7 +94,11 @@ export default function ProfilesPage() {
       <div className="space-y-2">
         {profiles.length === 0 && (
           <p className="py-8 text-center text-sm text-neutral-500">
-            No profiles yet — create one above to get started.
+            No profiles yet — create one above, or use{' '}
+            <button onClick={loadSamples} className="text-indigo-300 underline hover:text-indigo-200">
+              Load sample data
+            </button>{' '}
+            to try the app with a sample résumé + interviews.
           </p>
         )}
         {profiles.length > 0 && paged.total === 0 && (

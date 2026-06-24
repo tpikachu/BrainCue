@@ -196,7 +196,7 @@ export function Page({
         </div>
       </header>
       <div className="flex-1 overflow-auto px-8 py-6">
-        <div className={`mx-auto w-full ${width}`}>{children}</div>
+        <div className={`page-enter mx-auto w-full ${width}`}>{children}</div>
       </div>
     </div>
   );

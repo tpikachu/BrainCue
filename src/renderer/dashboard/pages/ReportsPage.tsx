@@ -1,106 +1,73 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../lib/api';
 import type { SessionListItem, SessionReport } from '@shared/types';
-import { Badge, Button, Card, Page, Pager, SearchInput, Spinner } from '../../components/ui';
+import { Badge, Button, Modal, Page, Spinner } from '../../components/ui';
+import { DataTable, type Column } from '../../components/DataTable';
 import { Markdown } from '../../components/Markdown';
-import { ChevronRightIcon } from '../../components/icons';
 
-// Clients are collapsed by default and paginated, so a list of thousands stays
-// light — you expand only the ones you want to drill into.
-const GROUPS_PER_PAGE = 10;
+const PER_PAGE = 12;
 
 /** A session's elapsed time (live sessions count up to now). */
 function durationMs(s: SessionListItem): number {
   if (!s.startedAt) return 0;
   return Math.max(0, (s.endedAt ?? Date.now()) - s.startedAt);
 }
-/** "—" / "47 min" / "1h 23m" */
 function fmtDur(ms: number): string {
   if (ms < 1000) return '—';
   const min = Math.round(ms / 60000);
   if (min < 60) return `${min} min`;
   return `${Math.floor(min / 60)}h ${min % 60}m`;
 }
-/** Total time as decimal hours, e.g. "2.4h". */
 function fmtHours(ms: number): string {
   return `${(ms / 3_600_000).toFixed(1)}h`;
-}
-
-interface Group {
-  company: string;
-  sessions: SessionListItem[];
-  latest: number;
-  totalMs: number;
 }
 
 export default function ReportsPage() {
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(0);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Report modal.
+  const [openSession, setOpenSession] = useState<SessionListItem | null>(null);
   const [report, setReport] = useState<SessionReport | null>(null);
   const [reportError, setReportError] = useState<string | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set()); // expanded client keys
 
-  const toggleGroup = (company: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      next.has(company) ? next.delete(company) : next.add(company);
-      return next;
-    });
-
-  const refresh = async () => setSessions((await api.session.list()) as SessionListItem[]);
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      setSessions((await api.session.list()) as SessionListItem[]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     void refresh();
   }, []);
 
-  // Filter → group by company (one job can have many interview rounds).
-  const groups = useMemo<Group[]>(() => {
+  const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const filtered = q
-      ? sessions.filter((s) =>
-          `${s.jobCompany ?? ''} ${s.jobTitle ?? ''} ${s.profileName ?? ''} ${s.interviewType}`
-            .toLowerCase()
-            .includes(q),
-        )
-      : sessions;
-
-    const map = new Map<string, SessionListItem[]>();
-    for (const s of filtered) {
-      const key = s.jobCompany || s.jobTitle || 'General / no job';
-      (map.get(key) ?? map.set(key, []).get(key)!).push(s);
-    }
-    return [...map.entries()]
-      .map(([company, list]) => ({
-        company,
-        sessions: list,
-        latest: Math.max(...list.map((s) => s.createdAt)),
-        totalMs: list.reduce((sum, s) => sum + durationMs(s), 0),
-      }))
-      .sort((a, b) => b.latest - a.latest);
+    if (!q) return sessions;
+    return sessions.filter((s) =>
+      `${s.jobCompany ?? ''} ${s.jobTitle ?? ''} ${s.profileName ?? ''} ${s.interviewType}`
+        .toLowerCase()
+        .includes(q),
+    );
   }, [sessions, query]);
 
-  // Overall analytics across the (filtered) groups.
-  const totals = useMemo(() => {
-    const rounds = groups.reduce((n, g) => n + g.sessions.length, 0);
-    const ms = groups.reduce((n, g) => n + g.totalMs, 0);
-    return { companies: groups.length, rounds, ms };
-  }, [groups]);
+  const totalMs = useMemo(() => filtered.reduce((n, s) => n + durationMs(s), 0), [filtered]);
+  const pageRows = filtered.slice(page * PER_PAGE, page * PER_PAGE + PER_PAGE);
 
-  const totalPages = Math.max(1, Math.ceil(groups.length / GROUPS_PER_PAGE));
-  const safePage = Math.min(page, totalPages - 1);
-  const pageGroups = groups.slice(safePage * GROUPS_PER_PAGE, safePage * GROUPS_PER_PAGE + GROUPS_PER_PAGE);
-
-  const view = async (id: string) => {
-    setOpenId(id);
-    setLoadingReport(true);
+  const view = async (s: SessionListItem) => {
+    setOpenSession(s);
     setReport(null);
     setReportError(null);
+    setLoadingReport(true);
     try {
-      let r = (await api.session.getReport(id)) as SessionReport | null;
-      if (!r) r = (await api.session.generateReport(id)) as SessionReport;
+      let r = (await api.session.getReport(s.id)) as SessionReport | null;
+      if (!r) r = (await api.session.generateReport(s.id)) as SessionReport;
       setReport(r);
     } catch (e) {
       setReportError((e as Error).message);
@@ -111,159 +78,159 @@ export default function ReportsPage() {
 
   const del = async (id: string) => {
     await api.session.delete(id);
-    if (openId === id) {
-      setOpenId(null);
-      setReport(null);
-    }
+    if (openSession?.id === id) setOpenSession(null);
     await refresh();
   };
+
+  const columns: Column<SessionListItem>[] = [
+    {
+      key: 'interview',
+      header: 'Interview',
+      render: (s) => (
+        <div className="min-w-0">
+          <div className="truncate font-medium text-neutral-100">
+            {s.jobCompany || s.jobTitle || 'General / no job'}
+          </div>
+          {s.jobCompany && s.jobTitle && (
+            <div className="truncate text-xs text-neutral-500">{s.jobTitle}</div>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'type',
+      header: 'Type',
+      className: 'w-40',
+      render: (s) => {
+        const total = Object.values(s.typeCounts).reduce((a, b) => a + b, 0);
+        const breakdown = Object.entries(s.typeCounts)
+          .map(([t, n]) => `${t.replace(/_/g, ' ')} ×${n}`)
+          .join(' · ');
+        return (
+          <div className="flex flex-col gap-0.5" title={breakdown}>
+            <Badge>{s.interviewType.replace(/_/g, ' ')}</Badge>
+            {total > 0 && <span className="text-[11px] text-neutral-500">{total} questions</span>}
+          </div>
+        );
+      },
+    },
+    {
+      key: 'profile',
+      header: 'Profile',
+      className: 'w-36',
+      render: (s) => <span className="text-sm text-neutral-300">{s.profileName ?? '—'}</span>,
+    },
+    {
+      key: 'when',
+      header: 'When',
+      className: 'w-44',
+      render: (s) => (
+        <div className="text-xs text-neutral-400">
+          <div>{new Date(s.createdAt).toLocaleDateString()}</div>
+          <div className="text-neutral-500">
+            {new Date(s.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ·{' '}
+            {fmtDur(durationMs(s))}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      className: 'w-44 text-right',
+      render: (s) => (
+        <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+          <Button variant="primary" onClick={() => view(s)}>
+            Report
+          </Button>
+          <Button variant="ghost" className="text-red-300" onClick={() => del(s.id)}>
+            Delete
+          </Button>
+        </div>
+      ),
+    },
+  ];
 
   return (
     <Page
       title="Reports"
-      subtitle="Interviews grouped by company. Each company can have several rounds."
+      subtitle="Every interview session, newest first. Open one for a coaching report."
     >
       {sessions.length > 0 && (
-        <div className="mb-4">
-          <SearchInput
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setPage(0);
-            }}
-            placeholder="Search by company, role, profile, or interview type…"
-          />
+        <div className="mb-4 flex gap-3 text-sm text-neutral-400">
+          <span>
+            <span className="font-semibold text-neutral-200">{filtered.length}</span> sessions
+          </span>
+          <span className="text-neutral-600">·</span>
+          <span>
+            <span className="font-semibold text-neutral-200">{fmtHours(totalMs)}</span> total
+          </span>
         </div>
       )}
 
-      {sessions.length === 0 && (
-        <p className="py-8 text-center text-sm text-neutral-500">No sessions recorded yet.</p>
-      )}
-      {sessions.length > 0 && groups.length === 0 && (
-        <p className="py-8 text-center text-sm text-neutral-500">Nothing matches your search.</p>
-      )}
+      <DataTable<SessionListItem>
+        columns={columns}
+        rows={pageRows}
+        rowKey={(s) => s.id}
+        total={filtered.length}
+        page={page}
+        pageSize={PER_PAGE}
+        onPage={setPage}
+        query={query}
+        onQuery={(q) => {
+          setQuery(q);
+          setPage(0);
+        }}
+        searchPlaceholder="Search by client, role, profile, or interview type…"
+        onRowClick={(s) => view(s)}
+        loading={loading}
+        empty="No interview sessions yet. Start one from the Interview page and save it when you stop."
+      />
 
-      {groups.length > 0 && (
-        <div className="mb-5 grid grid-cols-3 gap-3">
-          <Stat label="Interviews" value={String(totals.rounds)} />
-          <Stat label="Companies" value={String(totals.companies)} />
-          <Stat label="Total time" value={fmtHours(totals.ms)} />
-        </div>
-      )}
-
-      <div className="space-y-2">
-        {pageGroups.map((g) => {
-          const open = expanded.has(g.company);
-          return (
-            <div
-              key={g.company}
-              className="overflow-hidden rounded-xl border border-white/5 bg-neutral-900/40"
-            >
-              <button
-                type="button"
-                onClick={() => toggleGroup(g.company)}
-                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-white/5"
-              >
-                <div className="flex min-w-0 items-center gap-2">
-                  <ChevronRightIcon
-                    className={`h-4 w-4 shrink-0 text-neutral-500 transition-transform ${open ? 'rotate-90' : ''}`}
-                  />
-                  <span className="truncate text-sm font-semibold text-neutral-100">{g.company}</span>
-                  <Badge>
-                    {g.sessions.length} round{g.sessions.length > 1 ? 's' : ''}
-                  </Badge>
-                </div>
-                <div className="flex shrink-0 items-center gap-3 text-xs text-neutral-500">
-                  {g.totalMs >= 1000 && <span>{fmtDur(g.totalMs)}</span>}
-                  <span>{new Date(g.latest).toLocaleDateString()}</span>
-                </div>
-              </button>
-              {open && (
-                <div className="space-y-2 border-t border-white/5 p-3">
-                  {g.sessions.map((s) => (
-                <Card key={s.id} className="!py-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-sm font-medium capitalize">
-                        {s.interviewType.replace('_', ' ')}
-                        {s.jobTitle ? ` · ${s.jobTitle}` : ''}
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-400">
-                        <Badge tone={s.status === 'live' ? 'green' : 'neutral'}>{s.status}</Badge>
-                        {s.profileName && <span>{s.profileName}</span>}
-                        <span>{new Date(s.createdAt).toLocaleString()}</span>
-                        <span className="text-neutral-500">· {fmtDur(durationMs(s))}</span>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="primary" onClick={() => view(s.id)}>
-                        {openId === s.id ? 'Refresh' : 'Report'}
-                      </Button>
-                      <Button variant="ghost" className="text-red-300" onClick={() => del(s.id)}>
-                        Delete
-                      </Button>
-                    </div>
-                  </div>
-
-                  {openId === s.id && (
-                    <div className="mt-4 border-t border-neutral-800 pt-4 text-sm">
-                      {loadingReport ? (
-                        <div className="flex items-center gap-2 text-neutral-400">
-                          <Spinner className="h-4 w-4" /> Generating report…
-                        </div>
-                      ) : reportError ? (
-                        <p className="text-red-300">{reportError}</p>
-                      ) : report ? (
-                        <div className="space-y-3">
-                          <Markdown>{report.summary}</Markdown>
-                          {report.strengths.length > 0 && (
-                            <ReportList title="Strengths" tone="text-green-300" items={report.strengths} />
-                          )}
-                          {report.improvements.length > 0 && (
-                            <ReportList
-                              title="Improvements"
-                              tone="text-amber-300"
-                              items={report.improvements}
-                            />
-                          )}
-                          {report.perQuestion.length > 0 && (
-                            <div>
-                              <p className="mb-1 font-medium text-neutral-300">Per question</p>
-                              <ul className="space-y-2">
-                                {report.perQuestion.map((q, i) => (
-                                  <li key={i} className="rounded-lg bg-neutral-950/60 p-2">
-                                    <p className="text-neutral-300">{q.question}</p>
-                                    <p className="text-neutral-500">{q.assessment}</p>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <p className="text-neutral-500">No report available.</p>
-                      )}
-                    </div>
-                  )}
-                    </Card>
+      {/* Report detail */}
+      <Modal
+        open={!!openSession}
+        onClose={() => setOpenSession(null)}
+        title={
+          openSession
+            ? `${openSession.jobCompany || openSession.jobTitle || 'Session'} · ${openSession.interviewType.replace(/_/g, ' ')}`
+            : 'Report'
+        }
+      >
+        {loadingReport ? (
+          <div className="flex items-center gap-2 py-6 text-neutral-400">
+            <Spinner className="h-4 w-4" /> Generating report…
+          </div>
+        ) : reportError ? (
+          <p className="text-sm text-red-300">{reportError}</p>
+        ) : report ? (
+          <div className="space-y-4 text-sm">
+            <Markdown>{report.summary}</Markdown>
+            {report.strengths.length > 0 && (
+              <ReportList title="Strengths" tone="text-green-300" items={report.strengths} />
+            )}
+            {report.improvements.length > 0 && (
+              <ReportList title="Improvements" tone="text-amber-300" items={report.improvements} />
+            )}
+            {report.perQuestion.length > 0 && (
+              <div>
+                <p className="mb-1 font-medium text-neutral-300">Per question</p>
+                <ul className="space-y-2">
+                  {report.perQuestion.map((q, i) => (
+                    <li key={i} className="rounded-lg bg-neutral-950/60 p-2">
+                      <p className="text-neutral-300">{q.question}</p>
+                      <p className="text-neutral-500">{q.assessment}</p>
+                    </li>
                   ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-        <Pager page={safePage} totalPages={totalPages} onPage={setPage} />
-      </div>
+                </ul>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-neutral-500">No report available.</p>
+        )}
+      </Modal>
     </Page>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-white/5 bg-neutral-900/60 px-4 py-3">
-      <div className="text-xs uppercase tracking-wide text-neutral-500">{label}</div>
-      <div className="mt-0.5 text-xl font-semibold tabular-nums text-neutral-100">{value}</div>
-    </div>
   );
 }
 

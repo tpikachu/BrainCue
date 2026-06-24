@@ -1,5 +1,7 @@
 // Single source of truth for IPC channel names. See docs/05-IPC-MAP.md.
 
+import type { AnswerLength, AnswerStyle, InterviewType } from './types';
+
 /** Request/response channels (ipcRenderer.invoke <-> ipcMain.handle). */
 export const IPC = {
   app: {
@@ -24,6 +26,7 @@ export const IPC = {
   data: {
     stats: 'data:stats',
     wipeAll: 'data:wipe-all',
+    loadSamples: 'data:load-samples',
   },
   window: {
     minimize: 'window:minimize',
@@ -67,6 +70,7 @@ export const IPC = {
     stop: 'session:stop',
     togglePause: 'session:toggle-pause',
     togglePauseActive: 'session:toggle-pause-active',
+    stopActive: 'session:stop-active',
     audioChunk: 'session:audio-chunk',
     realtimeAudio: 'session:realtime-audio',
     list: 'session:list',
@@ -75,11 +79,15 @@ export const IPC = {
     generateReport: 'session:generate-report',
     getReport: 'session:get-report',
     ask: 'session:ask',
+    askActive: 'session:ask-active',
+    setInterviewType: 'session:set-interview-type',
+    setAnswerPrefs: 'session:set-answer-prefs',
+    regenerate: 'session:regenerate',
+    clearAnswer: 'session:clear-answer',
   },
   mock: {
     start: 'mock:start',
-    answerText: 'mock:answer-text',
-    answerAudio: 'mock:answer-audio',
+    next: 'mock:next',
     end: 'mock:end',
   },
   capture: {
@@ -110,6 +118,11 @@ export const IPC = {
     install: 'update:install',
     getStatus: 'update:get-status',
   },
+  // DEV-only (handlers registered only when !app.isPackaged): a read-only DB explorer.
+  dev: {
+    tables: 'dev:tables',
+    rows: 'dev:rows',
+  },
 } as const;
 
 /** Push event channels (webContents.send -> ipcRenderer.on). */
@@ -120,6 +133,7 @@ export const EVENTS = {
   answerDelta: 'session:answer-delta',
   answerMeta: 'session:answer-meta',
   answerDone: 'session:answer-done',
+  answerReset: 'session:answer-reset', // regenerate: clear the Cue Card answer, keep the transcript
   contextSent: 'session:context',
   sessionError: 'session:error',
   overlayApplySettings: 'overlay:apply-settings',
@@ -133,13 +147,37 @@ export const EVENTS = {
   updateStatus: 'update:status',
   overlayClickthrough: 'overlay:clickthrough', // global shortcut -> overlay toggles click-through
   clientInfo: 'session:client-info', // the live session's client (job) notes, for the Cue Card
+  answerPrefs: 'session:answer-prefs', // current format/length/pronunciation, for the Cue Card toggles
+  audioLevel: 'session:audio-level', // throttled mic level (0-1) for the Cue Card meter
+  savePrompt: 'session:save-prompt', // a session just stopped → ask the dashboard to save/discard it
 } as const;
 
-/** Client (job) context pushed to the Cue Card while a session is live. */
+/** Pushed to the dashboard when a session stops, to prompt save-or-discard. */
+export interface SavePrompt {
+  sessionId: string;
+  interviewType: InterviewType;
+  jobTitle: string | null;
+  questionCount: number;
+}
+
+/** Client (job) + profile context pushed to the Cue Card while a session is live,
+ *  so the user can confirm what the AI is grounding answers in. */
 export interface ClientInfo {
   company: string | null;
   title: string;
   notes: string | null;
+  profileName: string | null; // whose profile is answering
+  hasResume: boolean; // profile has a parsed resume
+  hasJd: boolean; // the interview (job) has a parsed JD
+  hasCompany: boolean; // company research was parsed
+}
+
+/** Live answer preferences pushed to the Cue Card so its toggles stay in sync. */
+export interface AnswerPrefs {
+  interviewType: InterviewType;
+  style: AnswerStyle;
+  length: AnswerLength;
+  pronunciation: boolean;
 }
 
 export type IpcEventChannel = (typeof EVENTS)[keyof typeof EVENTS];

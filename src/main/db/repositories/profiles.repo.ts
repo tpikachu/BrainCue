@@ -4,6 +4,12 @@ import type { Profile, ProfileInput } from '@shared/types';
 
 type Row = typeof schema.profiles.$inferSelect;
 
+/** Map legacy answer-style values (length is now a separate axis) to a valid
+ *  format. Older profiles stored 'concise'/'detailed'. */
+function toAnswerStyle(v: string): Profile['answerStyle'] {
+  return v === 'star' || v === 'technical' || v === 'conversational' ? v : 'default';
+}
+
 function toProfile(r: Row): Profile {
   return {
     id: r.id,
@@ -11,7 +17,7 @@ function toProfile(r: Row): Profile {
     targetRole: r.targetRole,
     targetCompany: r.targetCompany,
     interviewType: r.interviewType as Profile['interviewType'],
-    answerStyle: r.answerStyle as Profile['answerStyle'],
+    answerStyle: toAnswerStyle(r.answerStyle),
     language: r.language,
     resumeText: r.resumeText,
     jdText: r.jdText,

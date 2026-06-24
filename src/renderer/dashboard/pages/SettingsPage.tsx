@@ -7,7 +7,14 @@ import type { AppSettings } from '@shared/types';
 import { SHORTCUT_DEFS } from '@shared/shortcuts';
 import type { UpdateStatus } from '@shared/ipc';
 import { Badge, Button, Card, Field, Page, Switch, TextInput } from '../../components/ui';
-import { EyeIcon, EyeOffIcon, PlayIcon, RefreshIcon, TrashIcon } from '../../components/icons';
+import {
+  ChevronRightIcon,
+  EyeIcon,
+  EyeOffIcon,
+  PlayIcon,
+  RefreshIcon,
+  TrashIcon,
+} from '../../components/icons';
 
 const MODEL_FIELDS: { key: string; label: string; hint: string; suggest: string[] }[] = [
   {
@@ -53,13 +60,17 @@ export default function SettingsPage() {
   // Local mirror so the switch updates instantly (optimistic), then reconciles.
   const [privacyOn, setPrivacyOn] = useState(true);
   const [privacyBusy, setPrivacyBusy] = useState(false);
+  const [hideTaskbar, setHideTaskbar] = useState(false);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   useEffect(() => {
-    if (settings) setPrivacyOn(settings.privacyMode);
+    if (settings) {
+      setPrivacyOn(settings.privacyMode);
+      setHideTaskbar(settings.hideTaskbarIcon);
+    }
   }, [settings]);
 
   // Keep the switch in sync when privacy is toggled elsewhere (the global
@@ -102,6 +113,16 @@ export default function SettingsPage() {
       setPrivacyOn(!next); // revert on failure
     } finally {
       setPrivacyBusy(false);
+    }
+  };
+
+  const setHideTaskbarIcon = async (next: boolean) => {
+    setHideTaskbar(next); // optimistic
+    try {
+      await api.settings.set({ hideTaskbarIcon: next });
+      await load();
+    } catch {
+      setHideTaskbar(!next); // revert on failure
     }
   };
 
@@ -169,6 +190,17 @@ export default function SettingsPage() {
           Google Meet, Teams, or a recording. This only affects screen capture — it does not hide the
           app from your operating system or task manager.
         </p>
+
+        <div className="mt-4 flex items-center justify-between gap-4 border-t border-white/5 pt-4">
+          <div>
+            <h3 className="font-medium">Hide icon from the taskbar</h3>
+            <p className="mt-0.5 text-xs text-neutral-500">
+              Keep BrainCue off the Windows taskbar. It stays reachable from the system tray and the
+              Cue Card. (Doesn’t hide it from Task Manager.)
+            </p>
+          </div>
+          <Switch checked={hideTaskbar} onChange={setHideTaskbarIcon} onLabel="Hidden" offLabel="Shown" />
+        </div>
       </Card>
 
       {settings && <ShortcutsCard settings={settings} onSaved={load} />}
@@ -376,17 +408,12 @@ function ModelsCard({ settings, onSaved }: { settings: AppSettings; onSaved: () 
           const def = settings.modelDefaults?.[f.key] ?? '';
           return (
             <Field key={f.key} label={f.label} hint={`${f.hint} Default: ${def}`}>
-              <TextInput
-                list={`models-${f.key}`}
+              <ModelPicker
                 value={overrides[f.key] ?? ''}
                 placeholder={`Default (${def})`}
-                onChange={(e) => setOverrides((o) => ({ ...o, [f.key]: e.target.value }))}
+                options={options[f.key]}
+                onChange={(v) => setOverrides((o) => ({ ...o, [f.key]: v }))}
               />
-              <datalist id={`models-${f.key}`}>
-                {options[f.key].map((m) => (
-                  <option key={m} value={m} />
-                ))}
-              </datalist>
             </Field>
           );
         })}
@@ -402,6 +429,72 @@ function ModelsCard({ settings, onSaved }: { settings: AppSettings; onSaved: () 
       </div>
       {status && <p className="mt-3 text-sm text-neutral-300">{status}</p>}
     </Card>
+  );
+}
+
+/** A combobox for picking a model: type a custom id, or open a scrollable list of
+ *  the suggested + account models (filtered by what you've typed). */
+function ModelPicker({
+  value,
+  placeholder,
+  options,
+  onChange,
+}: {
+  value: string;
+  placeholder: string;
+  options: string[];
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const filtered = value.trim()
+    ? options.filter((o) => o.toLowerCase().includes(value.trim().toLowerCase()))
+    : options;
+  return (
+    <div className="relative">
+      <div className="relative">
+        <TextInput
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => {
+            onChange(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+          className="pr-8"
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={() => setOpen((o) => !o)}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300"
+          aria-label="Toggle model list"
+        >
+          <ChevronRightIcon className={`h-4 w-4 transition-transform ${open ? 'rotate-90' : ''}`} />
+        </button>
+      </div>
+      {open && filtered.length > 0 && (
+        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-neutral-700 bg-neutral-900 py-1 shadow-2xl shadow-black/50">
+          {filtered.map((m) => (
+            <button
+              key={m}
+              type="button"
+              // Prevent the input's onBlur from firing before the click registers.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                onChange(m);
+                setOpen(false);
+              }}
+              className={`block w-full px-3 py-1.5 text-left font-mono text-xs transition-colors hover:bg-white/5 ${
+                m === value ? 'text-indigo-300' : 'text-neutral-300'
+              }`}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

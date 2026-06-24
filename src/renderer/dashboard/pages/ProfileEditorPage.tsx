@@ -69,7 +69,7 @@ export default function ProfileEditorPage() {
   return (
     <Page
       title="Edit profile"
-      subtitle="Your name, role, and resume. Jobs and interview settings live in Live Session."
+      subtitle="Your name, role, and resume. Jobs and interview settings live on the Interview page."
       width="max-w-2xl"
       actions={
         <Link to="/profiles">

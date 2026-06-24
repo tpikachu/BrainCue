@@ -3,11 +3,23 @@ import { db, schema } from '../../db';
 import { profilesRepo } from '../../db/repositories/profiles.repo';
 import { jobsRepo } from '../../db/repositories/jobs.repo';
 import { generateQuestion, type QaTurn } from '../openai/interviewer';
-import { transcribeChunk } from '../openai/transcription';
 import { speak, type TtsVoice } from '../openai/tts';
-import type { InterviewType, Session } from '@shared/types';
+import { sessionManager } from '../session/sessionManager';
+import type { InterviewType, QuestionType, Session } from '@shared/types';
 
 const MAX_QUESTIONS = 6;
+
+// Mock questions are generated for the chosen interview type, so tag each detected
+// question with a matching QuestionType (used by the live answer prompt + any tags).
+const QUESTION_TYPE_BY_INTERVIEW: Record<InterviewType, QuestionType> = {
+  behavioral: 'behavioral',
+  technical: 'technical_concept',
+  coding: 'coding',
+  system_design: 'system_design',
+  product: 'product',
+  sales: 'behavioral',
+  general: 'behavioral',
+};
 
 interface MockState {
   sessionId: string;
@@ -15,9 +27,8 @@ interface MockState {
   jobId: string | null;
   interviewType: InterviewType;
   voice: TtsVoice;
-  history: QaTurn[];
-  lastQuestionId: string | null;
-  lastQuestion: string;
+  history: QaTurn[]; // prior questions, to steer variety
+  questionType: QuestionType;
 }
 
 let mock: MockState | null = null;
@@ -35,57 +46,51 @@ function toSession(r: typeof schema.sessions.$inferSelect): Session {
   };
 }
 
-async function askNext(): Promise<{ question: string; questionId: string; audioBase64: string }> {
+/** Generate the interviewer's next question, speak it (TTS), and stream a grounded
+ *  answer into the Cue Card via the live pipeline — so a mock doubles as a real,
+ *  end-to-end test of the copilot. */
+async function ask(): Promise<{ question: string; audioBase64: string }> {
   if (!mock) throw new Error('No active mock interview');
   const profile = profilesRepo.get(mock.profileId);
   if (!profile) throw new Error('Profile not found');
   const job = mock.jobId ? jobsRepo.get(mock.jobId) : null;
 
   const question = await generateQuestion(profile, mock.history, job, mock.interviewType);
-  const questionId = crypto.randomUUID();
-  db()
-    .insert(schema.detectedQuestions)
-    .values({
-      id: questionId,
-      sessionId: mock.sessionId,
-      text: question,
-      type: 'behavioral',
-      confidence: 1,
-      strategy: 'mock-interview',
-    })
-    .run();
-  // Record the question in the transcript as the interviewer speaking.
-  db()
-    .insert(schema.transcriptChunks)
-    .values({
-      id: crypto.randomUUID(),
-      sessionId: mock.sessionId,
-      speaker: 'interviewer',
-      text: question,
-      isFinal: 1,
-    })
-    .run();
+  mock.history.push({ q: question, a: '' });
 
-  mock.lastQuestionId = questionId;
-  mock.lastQuestion = question;
-
+  // Stream the grounded answer to the Cue Card (don't await — let TTS play in
+  // parallel) and synthesize the interviewer's voice.
+  void sessionManager.answerQuestion(mock.sessionId, question, mock.questionType).catch(() => {});
   const audio = await speak(question, mock.voice);
-  return { question, questionId, audioBase64: audio.toString('base64') };
+  return { question, audioBase64: audio.toString('base64') };
 }
 
 export const mockManager = {
+  /** Start a mock rehearsal: open a (non-persisted) live session so the Cue Card
+   *  is fully functional, then ask the first question. */
   async start(
     profileId: string,
     voice: TtsVoice,
     jobId: string | null = null,
     interviewType: InterviewType = 'general',
   ) {
-    if (!profilesRepo.get(profileId)) throw new Error('Profile not found');
+    const profile = profilesRepo.get(profileId);
+    if (!profile) throw new Error('Profile not found');
     const id = crypto.randomUUID();
     db()
       .insert(schema.sessions)
       .values({ id, profileId, jobId, interviewType, status: 'live', startedAt: Date.now() })
       .run();
+    sessionManager.goLive({
+      sessionId: id,
+      profileId,
+      jobId,
+      interviewType,
+      answerStyle: 'default',
+      answerLength: 'key_points',
+      language: profile.language,
+      isMock: true,
+    });
     mock = {
       sessionId: id,
       profileId,
@@ -93,64 +98,30 @@ export const mockManager = {
       interviewType,
       voice,
       history: [],
-      lastQuestionId: null,
-      lastQuestion: '',
+      questionType: QUESTION_TYPE_BY_INTERVIEW[interviewType],
     };
 
-    const q = await askNext();
+    const q = await ask();
     const session = toSession(
       db().select().from(schema.sessions).where(eq(schema.sessions.id, id)).get()!,
     );
     return { session, ...q, index: 1, total: MAX_QUESTIONS };
   },
 
-  /** Record the candidate's answer (text), then either ask the next question or finish. */
-  async submitAnswer(sessionId: string, answerText: string) {
+  /** Ask the next question (or signal done). */
+  async next(sessionId: string) {
     if (!mock || mock.sessionId !== sessionId) throw new Error('No active mock interview');
-
-    if (mock.lastQuestionId) {
-      db()
-        .insert(schema.aiAnswers)
-        .values({
-          id: crypto.randomUUID(),
-          questionId: mock.lastQuestionId,
-          directAnswer: answerText, // the CANDIDATE's answer, evaluated in the report
-          model: 'candidate',
-        })
-        .run();
-      db()
-        .insert(schema.transcriptChunks)
-        .values({
-          id: crypto.randomUUID(),
-          sessionId,
-          speaker: 'candidate',
-          text: answerText,
-          isFinal: 1,
-        })
-        .run();
-    }
-    mock.history.push({ q: mock.lastQuestion, a: answerText });
-
     if (mock.history.length >= MAX_QUESTIONS) {
       return { done: true as const, index: mock.history.length, total: MAX_QUESTIONS };
     }
-    const next = await askNext();
-    return { done: false as const, ...next, index: mock.history.length + 1, total: MAX_QUESTIONS };
+    const q = await ask();
+    return { done: false as const, ...q, index: mock.history.length, total: MAX_QUESTIONS };
   },
 
-  /** Transcribe an audio answer, then proceed. Returns the transcript too. */
-  async submitAudio(sessionId: string, audio: ArrayBuffer, mime: string) {
-    const text = (await transcribeChunk(audio, mime)).trim();
-    const res = await this.submitAnswer(sessionId, text || '(no answer captured)');
-    return { transcript: text, ...res };
-  },
-
+  /** End the rehearsal — stops the live session, which (being a mock) is deleted,
+   *  not saved. */
   end(sessionId: string) {
-    db()
-      .update(schema.sessions)
-      .set({ status: 'stopped', endedAt: Date.now() })
-      .where(eq(schema.sessions.id, sessionId))
-      .run();
+    sessionManager.stop(sessionId); // isMock → tears down + deletes, no save prompt
     if (mock?.sessionId === sessionId) mock = null;
   },
 };
