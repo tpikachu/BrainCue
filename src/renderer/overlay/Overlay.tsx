@@ -81,6 +81,14 @@ export default function Overlay() {
   const [audioSource, setAudioSource] = useState<'system' | 'mic'>('system');
   const [micDeviceId, setMicDeviceId] = useState<string | null>(null);
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
+  // Coding-solver model + reasoning effort (persisted overrides; '' = use default).
+  // Switchable live so a hard problem can be bumped to a stronger model on the spot.
+  const [codingModel, setCodingModel] = useState('');
+  const [codingEffort, setCodingEffort] = useState('');
+  const [codingDefaults, setCodingDefaults] = useState({ model: 'gpt-5-mini', effort: 'low' });
+  // The full override maps, so saving the coding pick doesn't clobber other tasks'.
+  const modelsRef = useRef<Record<string, string>>({});
+  const effortsRef = useRef<Record<string, string>>({});
 
   // Manual "Ask" box (Cue Card) + audio level meter + resizable transcript.
   const [askText, setAskText] = useState('');
@@ -215,13 +223,21 @@ export default function Overlay() {
       }),
     );
     void api.privacy.get().then((p) => setPrivacy((p as { enabled: boolean }).enabled));
-    // Seed the audio-device controls from persisted settings.
+    // Seed the audio-device + coding-solver controls from persisted settings.
     void api.settings.get().then((s) => {
-      const a = (s as AppSettings).audio;
-      if (a) {
-        setAudioSource(a.source);
-        setMicDeviceId(a.micDeviceId);
+      const ss = s as AppSettings;
+      if (ss.audio) {
+        setAudioSource(ss.audio.source);
+        setMicDeviceId(ss.audio.micDeviceId);
       }
+      modelsRef.current = ss.models ?? {};
+      effortsRef.current = ss.reasoningEfforts ?? {};
+      setCodingModel(ss.models?.coding ?? '');
+      setCodingEffort(ss.reasoningEfforts?.coding ?? '');
+      setCodingDefaults({
+        model: ss.modelDefaults?.coding ?? 'gpt-5-mini',
+        effort: ss.reasoningEffortDefaults?.coding ?? 'low',
+      });
     });
     return () => {
       if (flushHandle.current != null) cancelAnimationFrame(flushHandle.current);
@@ -305,6 +321,24 @@ export default function Overlay() {
     setAudioSource(source);
     setMicDeviceId(device);
     void api.settings.set({ audio: { source, micDeviceId: device } });
+  };
+
+  // Persist the coding-solver model/effort. Merges into the full override maps so we
+  // don't wipe other tasks' overrides ('' clears the key → falls back to the default).
+  const saveCoding = (next: { model?: string; effort?: string }) => {
+    const m = next.model !== undefined ? next.model : codingModel;
+    const e = next.effort !== undefined ? next.effort : codingEffort;
+    setCodingModel(m);
+    setCodingEffort(e);
+    const models = { ...modelsRef.current };
+    if (m) models.coding = m;
+    else delete models.coding;
+    const efforts = { ...effortsRef.current };
+    if (e) efforts.coding = e;
+    else delete efforts.coding;
+    modelsRef.current = models;
+    effortsRef.current = efforts;
+    void api.settings.set({ models, reasoningEfforts: efforts });
   };
 
   const sendAsk = () => {
@@ -829,6 +863,46 @@ export default function Overlay() {
                 {audioSource === 'mic' && micDevices.every((d) => !d.label)
                   ? ' Grant microphone access once to see device names.'
                   : ''}
+              </p>
+            </div>
+
+            <div className="space-y-3 border-t border-white/5 pt-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                Coding solver
+              </p>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-neutral-400">Model</span>
+                <select
+                  value={codingModel}
+                  onChange={(e) => saveCoding({ model: e.target.value })}
+                  className="w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-indigo-500"
+                >
+                  <option value="">Default ({codingDefaults.model})</option>
+                  {['gpt-5-mini', 'gpt-5', 'gpt-4.1', 'o4-mini'].map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-neutral-400">
+                  Reasoning effort <span className="text-neutral-600">(reasoning models only)</span>
+                </span>
+                <select
+                  value={codingEffort}
+                  onChange={(e) => saveCoding({ effort: e.target.value })}
+                  className="w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-indigo-500"
+                >
+                  <option value="">Default ({codingDefaults.effort})</option>
+                  <option value="low">Low — fastest, cheapest</option>
+                  <option value="medium">Medium — balanced</option>
+                  <option value="high">High — hardest problems</option>
+                </select>
+              </label>
+              <p className="text-xs text-neutral-500">
+                Used by both “Solve from clipboard” and “Solve a region.” Bump a hard problem up
+                to a stronger model or higher effort — it applies to your next solve.
               </p>
             </div>
 
