@@ -1,6 +1,6 @@
 {
   "name": "ai-interview-assistant",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "BrainCue Copilot — desktop AI interview copilot (Electron + React + OpenAI). Local-first data, BYO OpenAI key.",
   "author": "tpikachu",
   "license": "MIT",

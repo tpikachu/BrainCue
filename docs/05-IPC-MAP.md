@@ -115,6 +115,7 @@ independently.
 | `session:ask-active` | `{ questionText }` | `{ ok }` (Cue Card "Ask" box — manual ask for the active session, no id) |
 | `session:set-interview-type` | `{ sessionId, interviewType }` | `{ ok }` (set the session-level type — chosen by the user in the save prompt at stop) |
 | `session:set-answer-prefs` | `{ interviewType?, style?, length?, pronunciation? }` | `{ interviewType, style, length, pronunciation }` (live Cue Card controls; acts on the active session. Switching `interviewType` is dynamic — it persists onto the session row + reframes later answers) |
+| `session:set-answering` | `{ enabled }` | `{ enabled, answered }` (coding "listen-only" toggle: when disabled, the interviewer is still transcribed but not auto-answered; enabling it also answers the question they just asked) |
 | `session:regenerate` | — | `{ regenerated }` (re-answer the last question for the active session) |
 | `session:clear-answer` | — | `{ cleared }` (abort the in-flight answer for the active session) |
 
@@ -138,8 +139,11 @@ Runs as a non-persisted live session (`isMock`) that's deleted on end — never 
 | `capture:get-frame` | — | `{ image: string \| null }` (selector fetches the frozen frame to crop) |
 | `capture:close-selector` | — | `{ closed: true }` |
 | `capture:solve` | `{ text }` | `{ started: true }` (announces a `coding` question; solution streams to overlay) |
-| `capture:solve-image` | `{ image }` | `{ started: true }` (vision-based solve from an image) |
+| `capture:solve-image` | `{ image }` | `{ started: true }` (vision-based solve from a single image) |
 | `capture:quick-solve` | — | `{ started: true }` (solve from clipboard text) |
+| `capture:add-region` | `{ image }` | `{ added: true }` (add a captured region to the multi-image buffer; broadcasts `capture:buffer`) |
+| `capture:solve-buffer` | — | `{ started: true }` (solve ALL buffered screenshots in one vision call, then clear) |
+| `capture:clear-buffer` | — | `{ cleared: true }` |
 
 ### overlay / privacy
 | Channel | Request | Response |
@@ -179,6 +183,7 @@ Channel constants live in `EVENTS` (`src/shared/ipc.ts`); payload types are in
 | `session:save-prompt` | `SavePrompt` (`{ sessionId, interviewType, jobTitle, questionCount }`) | dashboard (a session just stopped → prompt save-or-discard + pick the type) |
 | `session:context` | `{ questionId, question, chunks }` | dashboard (debug: retrieved chunks) |
 | `session:error` | `{ message }` | dashboard + overlay |
+| `capture:buffer` | `{ images: string[] }` | overlay (current multi-image problem captures, for the Cue Card thumbnail strip) |
 | `overlay:apply-settings` | `{ opacity, fontSize, mode }` | overlay |
 | `shortcut:fired` | `{ action }` | dashboard |
 | `privacy:changed` | `{ enabled }` | dashboard + overlay (keeps every privacy indicator in sync) |

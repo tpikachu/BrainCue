@@ -5,26 +5,38 @@ The renderer never imports the SDK and never sees the key.
 
 ## Model configuration (`models.ts`)
 
-Central, overridable via `settings.models`:
+Resolution order: **per-task user override (`settings.models[key]`) → active preset's
+table → built-in default**. There are three presets (`settings.modelPreset`):
 
 ```ts
-export const defaultModels = {
-  answer:       'gpt-4.1-mini',           // Responses API, streaming (cost-effective default)
-  parsing:      'gpt-4.1-mini',           // structured extraction
-  classify:     'gpt-4.1-nano',           // high-frequency "is this a question?" — cheapest tier
-  embedding:    'text-embedding-3-small', // 1536 dim
-  transcription:'gpt-4o-transcribe',      // STT (Realtime); accuracy drives every answer
-  tts:          'gpt-4o-mini-tts',         // mock-interviewer voice
-  mock:         'gpt-4.1-mini',           // mock-interviewer question gen
-  vision:       'gpt-4.1-mini',           // solve coding problems from an image
+export const PRESETS = {
+  balanced: { // default
+    answer: 'gpt-4.1-mini', classify: 'gpt-4.1-nano', parsing: 'gpt-4.1-mini',
+    embedding: 'text-embedding-3-small', transcription: 'gpt-4o-transcribe',
+    tts: 'gpt-4o-mini-tts', mock: 'gpt-4.1-mini',
+    coding: 'gpt-5-mini',   // reasoning solver — clipboard text AND screenshots
+  },
+  low_cost: { /* …balanced, but parsing→nano, transcription→gpt-4o-mini-transcribe */ },
+  best:     { /* full gpt-4.1 on answer/parsing/mock; coding→gpt-5; classify→gpt-4.1-mini */ },
 };
 ```
-> Cost-effective by default: the mini/nano tiers are plenty for grounded, short
-> interview cues and keep per-session cost low. Power users can upgrade any task to
-> `gpt-4.1` in **Settings → OpenAI Models**. Transcription stays on the full model
-> since its accuracy is the core input. Model ids are configuration, not contracts —
-> kept in one file so they can be tuned without code changes; validate availability
-> via `settings:test-api-key`.
+> **Task-routed, not one-model-fits-all.** The live hot paths (`classify` every turn,
+> the read-along `answer`) stay on FAST non-reasoning models in **every** preset —
+> "best" upgrades them to the full `gpt-4.1` (higher quality, still snappy) rather than
+> a reasoning model, which would add latency without helping a grounded cue. A
+> reasoning model is reserved for the latency-tolerant `coding` solver.
+> The UI shows **Custom** when a per-task override diverges from the preset.
+
+### Reasoning effort
+GPT-5 / o-series models accept a `reasoning.effort` (`low`/`medium`/`high`). It's
+attached ONLY to reasoning models via `reasoningParam(key)` (never sent to gpt-4.1/4o,
+which reject it). Per-task defaults live in `defaultEfforts` (`coding: 'low'`) and are
+overridable via `settings.reasoningEfforts` — switchable live for coding in the Cue Card.
+
+Model ids are configuration, not contracts — kept in one file so they can be tuned
+without code changes; validate availability via `settings:test-api-key` / **Load my
+models**. (`gpt-5-*` ids should be verified against the live model list before relying
+on them.)
 
 ## Client (`client.ts`)
 - Lazily constructs `new OpenAI({ apiKey })` using the decrypted key from
@@ -75,9 +87,13 @@ chunked path and mock-answer audio).
 Realtime API session for delta-level STT latency; PCM is streamed one-way via
 `session:realtime-audio`. Event parsing lives in `realtimeEvents.ts`.
 
-### coding.ts — `solveFromOcr(text)`, vision.ts — `solveFromImage(image)`
-Given a coding problem as text (clipboard/selection) or an image, streams:
-approach, edge cases, time/space complexity, solution outline (and code).
+### coding.ts — `solveFromOcr(text)`, vision.ts — `solveFromImages(dataUrls[])`
+Given a coding problem as text (clipboard/selection) or as one-or-more screenshots,
+streams: approach, edge cases, time/space complexity, solution outline (and code).
+Both paths use the same `coding` model + `reasoningParam('coding')`. A long problem
+spans several viewports, so `solveFromImages` sends all captured screenshots in ONE
+request (instruction-first, scroll order, `detail:'high'`) and the model reconstructs
+them — the buffer + thumbnail strip live in `capture/codingMode.ts` (see `capture:add-region`/`solve-buffer`).
 
 ### interviewer.ts — `generateQuestion(...)` & tts.ts — `speak(text, voice)`
 Power the mock-interview mode: `generateQuestion` produces the next question and
