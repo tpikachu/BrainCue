@@ -1,6 +1,6 @@
 {
   "name": "ai-interview-assistant",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "description": "BrainCue Copilot — desktop AI interview copilot (Electron + React + OpenAI). Local-first data, BYO OpenAI key.",
   "author": "tpikachu",
   "license": "MIT",
@@ -18,6 +18,8 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "vitest run",
+    "test:e2e": "npm run build && playwright test",
+    "test:e2e:only": "playwright test",
     "db:generate": "drizzle-kit generate",
     "icon": "node scripts/generate-icon.mjs",
     "clean:release": "node scripts/clean-release.mjs",
@@ -44,6 +46,8 @@
   "devDependencies": {
     "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/utils": "^3.0.0",
+    "@playwright/test": "^1.49.1",
+    "dotenv": "^16.4.7",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.5",
     "@types/pdf-parse": "^1.1.4",

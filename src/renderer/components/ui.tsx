@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, SearchIcon } from './icons';
 
 /** Centered modal dialog. Closes on overlay click or Escape. */
@@ -16,12 +16,26 @@ export function Modal({
   width?: string;
   children: React.ReactNode;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  // Read onClose through a ref so the focus effect depends ONLY on `open`. Call sites
+  // pass a new inline onClose each render; if it were a dep, any parent re-render with
+  // the modal open (e.g. the Cue Card's per-frame audio-meter updates) would re-run
+  // this effect and yank focus out of the dialog's controls.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onCloseRef.current();
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+    // Move focus into the dialog (so keyboard/AT users land inside it) and restore it
+    // to whatever was focused before, on close. `prev` is captured once, when open→true.
+    const prev = document.activeElement as HTMLElement | null;
+    dialogRef.current?.focus();
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      prev?.focus?.();
+    };
+  }, [open]);
 
   if (!open) return null;
   return (
@@ -30,7 +44,12 @@ export function Modal({
       onMouseDown={onClose}
     >
       <div
-        className={`my-8 w-full ${width} rounded-2xl border border-white/10 bg-neutral-900 shadow-2xl shadow-black/40`}
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        className={`my-8 w-full ${width} rounded-2xl border border-white/10 bg-neutral-900 shadow-2xl shadow-black/40 outline-none`}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-white/5 px-5 py-3">

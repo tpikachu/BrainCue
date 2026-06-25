@@ -20,6 +20,23 @@ if (process.env.AI_DISABLE_GPU === '1' || process.argv.includes('--disable-gpu')
   log.info('GPU hardware acceleration disabled (AI_DISABLE_GPU / --disable-gpu)');
 }
 
+// E2E: isolate the on-disk data dir so Playwright tests never touch the real user
+// DB. Must run before the app is ready / before the DB opens (db path derives from
+// userData). No effect in normal use.
+if (process.env.E2E_USER_DATA) {
+  app.setPath('userData', process.env.E2E_USER_DATA);
+}
+
+// E2E: the harness drives the app over the Chrome DevTools Protocol. Playwright's
+// own _electron launcher passes `--remote-debugging-port=0` as a CLI flag, which
+// Electron 30+ rejects ("bad option" — microsoft/playwright#39008), so the harness
+// spawns us directly and we open a fixed CDP port here via appendSwitch (which
+// Electron DOES honor). Gated on the E2E flag — never enabled in normal use.
+if (process.env.BRAINCUE_E2E) {
+  app.commandLine.appendSwitch('remote-debugging-port', process.env.E2E_CDP_PORT || '9222');
+  app.commandLine.appendSwitch('remote-allow-origins', '*');
+}
+
 // A crashing GPU process can leave a blank/hidden window — log it so it's diagnosable.
 app.on('child-process-gone', (_e, details) => {
   if (details.type === 'GPU' || details.reason !== 'clean-exit') {

@@ -13,6 +13,14 @@ import type {
 import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/ui';
 import {
+  type AnswerCard,
+  addCard,
+  makeCard,
+  patchLast,
+  removeCard,
+  toggleCollapsed,
+} from './answerCards';
+import {
   BoltIcon,
   ChevronRightIcon,
   CloseIcon,
@@ -35,23 +43,6 @@ interface Line {
   text: string;
 }
 
-/** One generated answer (interview question or coding solve). With history on, past
- *  cards are kept (collapsed) instead of being replaced; each is individually removable. */
-interface AnswerCard {
-  id: number;
-  question: string;
-  answer: string;
-  meta: AnswerMetaEvent | null;
-  context: ContextSentEvent | null;
-  streaming: boolean;
-  collapsed: boolean;
-}
-
-/** Apply a patch to the newest (current) card. */
-function patchLast(cards: AnswerCard[], patch: Partial<AnswerCard>): AnswerCard[] {
-  if (!cards.length) return cards;
-  return [...cards.slice(0, -1), { ...cards[cards.length - 1], ...patch }];
-}
 
 // Cap transcript lines kept in the DOM — a long interview can produce thousands.
 const MAX_LINES = 300;
@@ -160,30 +151,18 @@ export default function Overlay() {
         const text = (p as { text: string }).text;
         cancelFlush();
         // History on: collapse prior cards and add a fresh one. Off: replace.
-        setCards((cs) => {
-          const prior = historyEnabledRef.current
-            ? cs.map((c) => ({ ...c, collapsed: true, streaming: false }))
-            : [];
-          return [
-            ...prior,
-            {
-              id: cardId.current++,
-              question: text,
-              answer: '',
-              meta: null,
-              context: null,
-              streaming: true,
-              collapsed: false,
-            },
-          ];
-        });
+        setCards((cs) => addCard(cs, makeCard(cardId.current++, text), historyEnabledRef.current));
         // Mirror the dashboard: surface the detected question in the transcript too.
-        setTranscript((t) => [...t, { id: lineId.current++, speaker: 'detected question', text }]);
+        setTranscript((t) =>
+          [...t, { id: lineId.current++, speaker: 'detected question', text }].slice(-MAX_LINES * 2),
+        );
       }),
       api.events.onTranscriptDelta((p) => {
         const d = p as { text: string; speaker: string; isFinal: boolean };
         if (d.isFinal) {
-          setTranscript((t) => [...t, { id: lineId.current++, speaker: d.speaker, text: d.text }]);
+          setTranscript((t) =>
+            [...t, { id: lineId.current++, speaker: d.speaker, text: d.text }].slice(-MAX_LINES * 2),
+          );
           setInterim('');
         } else {
           setInterim((s) => s + d.text);
@@ -400,7 +379,7 @@ export default function Overlay() {
   const sendAsk = () => {
     const t = askText.trim();
     if (!t) return;
-    void api.session.askActive(t);
+    void api.session.askActive(t).catch(() => {}); // errors surface via sessionError
     setAskText('');
   };
 
@@ -889,7 +868,7 @@ export default function Overlay() {
                   <button
                     onClick={() =>
                       setCards((cs) =>
-                        cs.map((x) => (x.id === c.id ? { ...x, collapsed: !x.collapsed } : x)),
+                        toggleCollapsed(cs, c.id),
                       )
                     }
                     className="flex min-w-0 flex-1 items-start gap-1 text-left text-xs font-medium text-blue-300 hover:text-blue-200"
@@ -900,7 +879,7 @@ export default function Overlay() {
                     <span className={c.collapsed ? 'truncate' : ''}>Q: {c.question}</span>
                   </button>
                   <button
-                    onClick={() => setCards((cs) => cs.filter((x) => x.id !== c.id))}
+                    onClick={() => setCards((cs) => removeCard(cs, c.id))}
                     title="Remove this answer"
                     className="shrink-0 rounded p-0.5 text-neutral-600 hover:text-red-300"
                   >
@@ -930,7 +909,7 @@ export default function Overlay() {
           <input
             value={askText}
             onChange={(e) => setAskText(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && sendAsk()}
+            onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && sendAsk()}
             placeholder="Ask a question…"
             className="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1 text-[11px] text-neutral-100 outline-none focus:border-indigo-500"
           />
@@ -940,31 +919,6 @@ export default function Overlay() {
           >
             Ask
           </button>
-        </div>
-      )}
-
-      {/* Talking points + resume match (expanded mode) */}
-      {mode === 'expanded' && meta && (
-        <div className="mt-2 shrink-0 space-y-1.5 border-t border-neutral-800 pt-2 text-xs" style={noDrag}>
-          {meta.talkingPoints.length > 0 && (
-            <ul className="list-disc space-y-0.5 pl-4 text-neutral-300">
-              {meta.talkingPoints.map((t, i) => (
-                <li key={i}>{t}</li>
-              ))}
-            </ul>
-          )}
-          {meta.resumeMatch && (
-            <p className="text-neutral-400">
-              <span className="text-neutral-500">Resume: </span>
-              {meta.resumeMatch}
-            </p>
-          )}
-          {meta.followupQuestion && (
-            <p className="text-neutral-400">
-              <span className="text-neutral-500">Ask back: </span>
-              {meta.followupQuestion}
-            </p>
-          )}
         </div>
       )}
 
@@ -1164,7 +1118,12 @@ function Btn(props: {
           ? 'bg-neutral-700 text-white'
           : 'text-neutral-400 hover:bg-neutral-700/70 hover:text-neutral-200';
   return (
-    <button title={props.title} onClick={props.onClick} className={`${base} ${tone}`}>
+    <button
+      title={props.title}
+      aria-label={props.title}
+      onClick={props.onClick}
+      className={`${base} ${tone}`}
+    >
       {props.children}
     </button>
   );

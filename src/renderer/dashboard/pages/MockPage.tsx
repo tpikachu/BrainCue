@@ -33,6 +33,7 @@ export default function MockPage() {
   const [progress, setProgress] = useState({ index: 0, total: 0 });
   const [asked, setAsked] = useState<string[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const urlRef = useRef<string | null>(null); // current clip's object URL (revoked on replace/unmount)
   const sessionIdRef = useRef<string | null>(null); // latest id, for the unmount cleanup
@@ -83,8 +84,9 @@ export default function MockPage() {
 
   const start = async () => {
     if (!profileId) return;
+    setError(null);
     if (!settings?.apiKeyPresent) {
-      alert('Add your OpenAI API key in Settings first.');
+      setError('Add your OpenAI API key in Settings first.');
       return;
     }
     setBusy('Starting rehearsal & generating the first question…');
@@ -96,7 +98,7 @@ export default function MockPage() {
       setAsked([r.question]);
       play(r.audioBase64);
     } catch (e) {
-      alert((e as Error).message);
+      setError((e as Error).message);
     } finally {
       setBusy(null);
     }
@@ -104,6 +106,7 @@ export default function MockPage() {
 
   const next = async () => {
     if (!sessionId) return;
+    setError(null);
     setBusy('Thinking of the next question…');
     try {
       const r = await api.mock.next(sessionId);
@@ -116,7 +119,7 @@ export default function MockPage() {
       setAsked((a) => [...a, r.question!]);
       play(r.audioBase64);
     } catch (e) {
-      alert((e as Error).message);
+      setError((e as Error).message);
     } finally {
       setBusy(null);
     }
@@ -136,6 +139,19 @@ export default function MockPage() {
       subtitle="An AI interviewer asks questions aloud and the copilot answers them in the Cue Card — a full rehearsal of the live experience. Mock runs aren’t saved."
     >
       {busy && <BusyOverlay message={busy} />}
+
+      {error && (
+        <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+          <span>{error}</span>
+          <button
+            onClick={() => setError(null)}
+            className="shrink-0 rounded p-0.5 text-red-300/70 hover:text-red-200"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {!sessionId && (
         <Card className="mb-5">

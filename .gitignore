@@ -5,6 +5,12 @@ out/
 release/
 dist/
 *.log
+*.tsbuildinfo
+
+# Playwright e2e output
+test-results/
+playwright-report/
+.playwright/
 
 # Secrets — never commit
 .env

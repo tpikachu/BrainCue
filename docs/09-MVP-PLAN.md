@@ -17,7 +17,7 @@ this repo delivers M0 and the scaffolding for M1–M2.
 - Document import (native file picker + paste); local extraction (pdf/docx/txt/md).
 - OpenAI structured parsing → store parsed JSON.
 - Chunker + embeddings + `vectorStore` persistence (auto re-index on import/notes).
-- `rag:search` returns top-k.
+- Top-k retrieval (`services/rag/retriever.ts`) — an internal service call, not an IPC channel.
 - UI: `ProfileEditorPage` (resume/JD upload + paste + parse, notes).
 
 ## M2 — Live session core  ✅ (implemented)

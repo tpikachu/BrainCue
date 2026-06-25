@@ -61,9 +61,6 @@ export const IPC = {
     create: 'notes:create',
     delete: 'notes:delete',
   },
-  rag: {
-    search: 'rag:search',
-  },
   session: {
     start: 'session:start',
     resume: 'session:resume',

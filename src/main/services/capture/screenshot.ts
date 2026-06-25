@@ -20,7 +20,11 @@ export async function captureScreen(display?: Display): Promise<CaptureResult> {
   const target = display ?? screen.getPrimaryDisplay();
   const { width, height } = target.size; // CSS pixels
   const aspect = height / width;
-  const targetWidth = Math.min(width, MAX_WIDTH);
+  // Capture at DEVICE pixels (CSS × scaleFactor), bounded by MAX_WIDTH — otherwise a
+  // HiDPI display (e.g. 200% scale) is grabbed at logical resolution and small code
+  // text is downscaled below what the vision model can read.
+  const deviceWidth = Math.round(width * (target.scaleFactor || 1));
+  const targetWidth = Math.min(deviceWidth, MAX_WIDTH);
   const targetHeight = Math.round(targetWidth * aspect);
 
   const sources = await desktopCapturer.getSources({

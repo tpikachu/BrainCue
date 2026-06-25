@@ -24,6 +24,7 @@ export class RealtimeTranscriber {
   private ws: WebSocket | null = null;
   private ready = false;
   private closing = false;
+  private errored = false; // a specific error was already surfaced this connection
 
   constructor(
     private cb: RealtimeCallbacks,
@@ -37,6 +38,7 @@ export class RealtimeTranscriber {
       return;
     }
     this.closing = false;
+    this.errored = false;
     // GA Realtime API: the beta shape was retired (the `OpenAI-Beta: realtime=v1`
     // header + `transcription_session.update` event), which is why the server now
     // rejects beta connections with `beta_api_shape_disabled`.
@@ -81,11 +83,23 @@ export class RealtimeTranscriber {
     this.ws.on('message', (data) => this.handle(data.toString()));
     this.ws.on('error', (err) => {
       log.error('realtime: ws error', err.message);
-      if (!this.closing) this.cb.onError?.(`Realtime transcription error: ${err.message}`);
+      if (!this.closing) {
+        this.errored = true;
+        this.cb.onError?.(`Realtime transcription error: ${err.message}`);
+      }
     });
     this.ws.on('close', (code, reason) => {
       this.ready = false;
-      if (!this.closing) log.warn(`realtime: ws closed (${code}) ${reason.toString()}`);
+      // An UNEXPECTED close would otherwise go unreported while the mic keeps streaming
+      // into a dead socket — the interview silently goes deaf. But 'ws' fires 'error'
+      // THEN 'close' for the same failure, so skip the generic message when a specific
+      // error was already surfaced (don't clobber "expired key" with "disconnected").
+      if (!this.closing) {
+        log.warn(`realtime: ws closed (${code}) ${reason.toString()}`);
+        if (!this.errored) {
+          this.cb.onError?.('Transcription disconnected — stop and resume the interview to reconnect.');
+        }
+      }
     });
   }
 

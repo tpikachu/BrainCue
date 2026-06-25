@@ -8,6 +8,7 @@ import { sessionsRepo } from '../../db/repositories/sessions.repo';
 import { transcribeChunk } from '../openai/transcription';
 import { classifyQuestion } from '../openai/questions';
 import { streamAnswer } from '../openai/answer';
+import { normalizeOpenAIError } from '../openai/client';
 import { retrieve } from '../rag/retriever';
 import { RealtimeTranscriber } from '../openai/realtime';
 import { getOverlayWindow, showOverlay } from '../../windows/overlayWindow';
@@ -443,10 +444,6 @@ export const sessionManager = {
     const profile = profilesRepo.get(session.profileId);
     if (!profile) throw new Error('Profile not found');
 
-    const context = await retrieve(profile.id, questionText, 5, session.jobId);
-    // Transparency: tell the UI exactly what was sent to OpenAI for this question.
-    broadcast(EVENTS.contextSent, { questionId, question: questionText, chunks: context });
-
     let answer = '';
     let tokens: { prompt: number; completion: number } | null = null;
     let meta: Record<string, unknown> = {};
@@ -456,6 +453,11 @@ export const sessionManager = {
       live.answerAbort = abort;
     }
     try {
+      // Retrieval (an embeddings call) is INSIDE the try so a failure here is surfaced
+      // + un-wedges the card too — not just streamAnswer failures.
+      const context = await retrieve(profile.id, questionText, 5, session.jobId);
+      // Transparency: tell the UI exactly what was sent to OpenAI for this question.
+      broadcast(EVENTS.contextSent, { questionId, question: questionText, chunks: context });
       for await (const ev of streamAnswer({
         question: questionText,
         contextChunks: context,
@@ -481,6 +483,11 @@ export const sessionManager = {
     } catch (e) {
       // Aborted by clear/regenerate — drop this partial answer silently.
       if (abort.signal.aborted) return { questionId };
+      // A real failure (auth, quota, network drop, model-not-found): surface it and
+      // clear the Cue Card's streaming state, instead of leaving the card spinning
+      // forever with no error (the most common live failure — e.g. an expired key).
+      broadcast(EVENTS.sessionError, { message: normalizeOpenAIError(e) });
+      broadcast(EVENTS.answerDone, { questionId });
       throw e;
     } finally {
       if (live) {

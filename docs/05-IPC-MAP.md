@@ -14,7 +14,7 @@ validates input with zod via the `handle()` helper. Errors are returned as
 
 ## Channel naming
 `<domain>:<action>` — domains: `app`, `dialog`, `settings`, `profiles`,
-`documents`, `jobs`, `notes`, `rag`, `session`, `mock`, `capture`, `overlay`,
+`documents`, `jobs`, `notes`, `session`, `mock`, `capture`, `overlay`,
 `privacy`, `data`, `window`.
 
 ## invoke / handle (request → response)
@@ -89,11 +89,6 @@ independently.
 | `notes:list` | `{ profileId }` | `Note[]` |
 | `notes:create` | `{ profileId, content }` | `Note` |
 | `notes:delete` | `{ id }` | `{ deleted: true }` |
-
-### rag (mostly internal; exposed for debugging)
-| Channel | Request | Response |
-|---|---|---|
-| `rag:search` | `{ profileId, query, k }` | `RetrievedChunk[]` |
 
 ### session
 | Channel | Request | Response |

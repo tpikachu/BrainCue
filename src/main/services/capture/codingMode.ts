@@ -3,6 +3,7 @@ import { EVENTS } from '@shared/ipc';
 import { broadcast } from '../../ipc/broadcast';
 import { solveFromOcr } from '../openai/coding';
 import { solveFromImages } from '../openai/vision';
+import { normalizeOpenAIError } from '../openai/client';
 import type { AnswerEvent } from '../openai/answer';
 import { showOverlay } from '../../windows/overlayWindow';
 
@@ -56,7 +57,7 @@ async function streamToOverlay(gen: AsyncGenerator<AnswerEvent>, label: string):
       }
     }
   } catch (e) {
-    broadcast(EVENTS.sessionError, { message: String(e) }, ['overlay', 'main']);
+    broadcast(EVENTS.sessionError, { message: normalizeOpenAIError(e) }, ['overlay', 'main']);
   } finally {
     broadcast(EVENTS.answerDone, { questionId }, ['overlay']);
   }
