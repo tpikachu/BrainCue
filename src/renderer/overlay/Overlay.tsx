@@ -379,7 +379,7 @@ export default function Overlay() {
   const sendAsk = () => {
     const t = askText.trim();
     if (!t) return;
-    void api.session.askActive(t);
+    void api.session.askActive(t).catch(() => {}); // errors surface via sessionError
     setAskText('');
   };
 
@@ -921,7 +921,6 @@ export default function Overlay() {
           </button>
         </div>
       )}
-
 
       {meta?.riskWarning && (
         <p className="mt-2 shrink-0 rounded bg-amber-900/40 px-2 py-1 text-[11px] text-amber-300" style={noDrag}>

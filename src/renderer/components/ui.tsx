@@ -17,19 +17,25 @@ export function Modal({
   children: React.ReactNode;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  // Read onClose through a ref so the focus effect depends ONLY on `open`. Call sites
+  // pass a new inline onClose each render; if it were a dep, any parent re-render with
+  // the modal open (e.g. the Cue Card's per-frame audio-meter updates) would re-run
+  // this effect and yank focus out of the dialog's controls.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onCloseRef.current();
     window.addEventListener('keydown', onKey);
-    // Move focus into the dialog (so keyboard/AT users land inside it) and restore
-    // it to whatever was focused before, on close.
+    // Move focus into the dialog (so keyboard/AT users land inside it) and restore it
+    // to whatever was focused before, on close. `prev` is captured once, when open→true.
     const prev = document.activeElement as HTMLElement | null;
     dialogRef.current?.focus();
     return () => {
       window.removeEventListener('keydown', onKey);
       prev?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
   return (

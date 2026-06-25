@@ -5,6 +5,7 @@ out/
 release/
 dist/
 *.log
+*.tsbuildinfo
 
 # Playwright e2e output
 test-results/

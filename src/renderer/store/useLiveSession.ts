@@ -230,10 +230,16 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
     ask: async (question) => {
       const s = get().session;
       if (!s || !question) return;
-      await api.session.ask(s.id, question);
+      // Show the asked question immediately + keep it even if the answer fails (the
+      // failure surfaces via sessionError). Swallow the rejection so a failed ask
+      // doesn't become an unhandled promise rejection.
       set((st) => ({
-        transcript: [...st.transcript, { id: lineId++, speaker: 'you (manual)', text: question }],
+        transcript: [
+          ...st.transcript,
+          { id: lineId++, speaker: 'you (manual)', text: question },
+        ].slice(-MAX_TRANSCRIPT),
       }));
+      await api.session.ask(s.id, question).catch(() => {});
     },
   };
 });

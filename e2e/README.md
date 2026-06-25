@@ -64,7 +64,6 @@ migrations (electron-builder does this when packaging; a bare `out/` run doesn't
 - Each test runs against an **isolated data dir** (`E2E_USER_DATA`, honored by
   `src/main/index.ts`) so your real profiles/sessions are never touched.
 - Data-integrity specs use `window.api` directly rather than clicking through forms —
-  robust, and they target the exact main/DB paths. (`window.api.rag` is NOT exposed by
-  the preload — the IPC map lists it but the facade omits it; tests avoid it.)
+  robust, and they target the exact main/DB paths.
 - Privacy Mode (content protection) excludes windows from *screen capture*, not from
   Playwright's CDP connection, so it doesn't interfere here.
