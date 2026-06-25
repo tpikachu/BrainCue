@@ -275,6 +275,37 @@ export default function InterviewPage() {
       title="Interview"
       subtitle="Pick a profile and an interview, then Start — your live cues appear in the Cue Card."
     >
+      {(live.micError || live.sessionError) && (
+        <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+          <span>
+            <strong className="font-semibold">
+              {live.micError ? 'Audio capture failed' : 'Session error'}:
+            </strong>{' '}
+            {live.micError || live.sessionError}
+            {live.sessionError && session && (
+              <span className="text-red-300/70">
+                {' '}
+                — the interview may have stopped transcribing. Stop and start again if needed.
+              </span>
+            )}
+          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            {live.sessionError && session && (
+              <Button variant="danger" onClick={() => void live.stop()}>
+                Stop
+              </Button>
+            )}
+            <button
+              onClick={() => (live.micError ? live.clearMicError() : live.clearSessionError())}
+              className="rounded p-0.5 text-red-300/70 hover:text-red-200"
+              aria-label="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {session && (
         <p className="mb-4 text-xs text-neutral-500">
           ● An interview is live — transcript, answers, and all controls are in the floating Cue

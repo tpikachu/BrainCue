@@ -13,5 +13,6 @@ export async function embed(texts: string[]): Promise<Float32Array[]> {
 
 export async function embedOne(text: string): Promise<Float32Array> {
   const [v] = await embed([text]);
+  if (!v) throw new Error('Embedding API returned no vector.');
   return v;
 }
