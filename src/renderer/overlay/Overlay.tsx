@@ -112,6 +112,9 @@ export default function Overlay() {
   const modelsRef = useRef<Record<string, string>>({});
   const effortsRef = useRef<Record<string, string>>({});
 
+  // Backend session failure (transcription socket dropped, OpenAI auth, etc.).
+  const [sessionError, setSessionError] = useState<string | null>(null);
+
   // Manual "Ask" box (Cue Card) + audio level meter + resizable transcript.
   const [askText, setAskText] = useState('');
   const [level, setLevel] = useState(0);
@@ -205,6 +208,9 @@ export default function Overlay() {
         setCards((cs) => patchLast(cs, { context: p as ContextSentEvent })),
       ),
       api.events.onCaptureBuffer((p) => setCaptures(p.images)),
+      api.events.onSessionError((p) =>
+        setSessionError((p as { message?: string }).message || 'Session error.'),
+      ),
       api.events.onSessionState((p) => {
         const s = p as { paused: boolean; status: string };
         const nowLive = s.status === 'live';
@@ -222,6 +228,7 @@ export default function Overlay() {
           setInterim('');
           setCards([]);
           setAtBottom(true);
+          setSessionError(null);
         }
         // Session stopped: drop the dangling interim partial + streaming cursor so
         // the Cue Card doesn't look like it's still listening.
@@ -596,6 +603,25 @@ export default function Overlay() {
             Scroll the problem &amp; capture each screen, then Solve. Tip: copying the problem text
             (⚡) is even more accurate when it&apos;s selectable.
           </p>
+        </div>
+      )}
+
+      {/* Backend session failure — surfaced so the Cue Card never silently shows a
+          "listening" state after the transcription socket / OpenAI call has failed. */}
+      {sessionError && (
+        <div
+          data-ct-interactive
+          className="mb-2 flex shrink-0 items-start justify-between gap-2 rounded-lg border border-red-500/40 bg-red-500/15 px-2 py-1 text-[11px] text-red-300"
+          style={noDrag}
+        >
+          <span className="min-w-0">⚠ {sessionError}</span>
+          <button
+            onClick={() => setSessionError(null)}
+            className="shrink-0 text-red-300/70 hover:text-red-200"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
         </div>
       )}
 

@@ -24,7 +24,10 @@ interface LiveSessionState {
   transcript: Line[];
   interim: string;
   speaking: boolean;
-  micError: string | null;
+  micError: string | null; // audio-capture failure (denied mic / no system audio)
+  clearMicError: () => void;
+  sessionError: string | null; // backend session failure (transcription socket, OpenAI)
+  clearSessionError: () => void;
   stream: MediaStream | null; // exposed for the waveform
   pendingSave: SavePrompt | null; // a just-stopped session awaiting save/discard
   clearPendingSave: () => void;
@@ -95,6 +98,11 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
     }));
   });
   api.events.onSavePrompt((p) => set({ pendingSave: p }));
+  // Surface backend session failures (transcription socket dropped, OpenAI auth,
+  // etc.) — otherwise the UI shows a happy "listening" state forever.
+  api.events.onSessionError((p) =>
+    set({ sessionError: (p as { message?: string }).message || 'Session error.' }),
+  );
   api.events.onSessionState((p) => {
     const s = p as { status?: string; paused: boolean };
     // The session can be stopped from the Cue Card (stopActive), which bypasses
@@ -108,13 +116,11 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
     }
   });
 
-  async function beginCapture(
-    sessionId: string,
-    source: AudioSource,
-    micDeviceId?: string | null,
-  ): Promise<void> {
+  // Wire an already-acquired stream into the PCM pipeline. The stream is acquired
+  // by the caller FIRST (see startNew/resumeExisting) so a denied mic or cancelled
+  // system-audio picker never leaves a phantom "live" session with no audio.
+  async function attachCapture(sessionId: string, stream: MediaStream): Promise<void> {
     try {
-      const stream = await getStream(source, micDeviceId);
       mediaStream = stream;
       set({ stream, micError: null });
 
@@ -155,11 +161,23 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
     interim: '',
     speaking: false,
     micError: null,
+    clearMicError: () => set({ micError: null }),
+    sessionError: null,
+    clearSessionError: () => set({ sessionError: null }),
     stream: null,
     pendingSave: null,
     clearPendingSave: () => set({ pendingSave: null }),
 
     startNew: async ({ profileId, interviewType, answerStyle, answerLength, jobId, source, micDeviceId }) => {
+      // Acquire audio FIRST: if the user denies the mic or cancels the system-audio
+      // picker, we never create a session that displays "live" with nothing flowing.
+      let stream: MediaStream;
+      try {
+        stream = await getStream(source, micDeviceId);
+      } catch (e) {
+        set({ micError: (e as Error).message, sessionError: null });
+        return;
+      }
       const s = (await api.session.start(
         profileId,
         interviewType,
@@ -168,15 +186,22 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
         answerLength,
       )) as Session;
       lineId = 0;
-      set({ session: s, transcript: [], interim: '', paused: false, micError: null });
-      await beginCapture(s.id, source, micDeviceId);
+      set({ session: s, transcript: [], interim: '', paused: false, micError: null, sessionError: null });
+      await attachCapture(s.id, stream);
     },
 
     resumeExisting: async ({ sessionId, source, micDeviceId, prior }) => {
+      let stream: MediaStream;
+      try {
+        stream = await getStream(source, micDeviceId);
+      } catch (e) {
+        set({ micError: (e as Error).message, sessionError: null });
+        return;
+      }
       const s = (await api.session.resume(sessionId)) as Session;
       lineId = prior.length;
-      set({ session: s, transcript: prior, interim: '', paused: false, micError: null });
-      await beginCapture(s.id, source, micDeviceId);
+      set({ session: s, transcript: prior, interim: '', paused: false, micError: null, sessionError: null });
+      await attachCapture(s.id, stream);
     },
 
     stop: async () => {

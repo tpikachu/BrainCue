@@ -34,11 +34,29 @@ export default function MockPage() {
   const [asked, setAsked] = useState<string[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const urlRef = useRef<string | null>(null); // current clip's object URL (revoked on replace/unmount)
+  const sessionIdRef = useRef<string | null>(null); // latest id, for the unmount cleanup
 
   useEffect(() => {
     void load();
     void loadSettings();
   }, [load, loadSettings]);
+
+  // Keep a ref to the live mock id so the unmount cleanup ends it without a stale closure.
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  // Leaving the page mid-rehearsal must stop the audio, free the blob URL, and end
+  // the mock session on the backend — otherwise it plays on / lingers as an orphan.
+  useEffect(
+    () => () => {
+      audioRef.current?.pause();
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+      if (sessionIdRef.current) void api.mock.end(sessionIdRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     setJobId('');
@@ -56,6 +74,9 @@ export default function MockPage() {
     });
     const url = URL.createObjectURL(blob);
     if (!audioRef.current) audioRef.current = new Audio();
+    // Replacing the source — free the previous clip's URL so they don't pile up.
+    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    urlRef.current = url;
     audioRef.current.src = url;
     void audioRef.current.play().catch(() => {});
   };
@@ -94,6 +115,8 @@ export default function MockPage() {
       setProgress({ index: r.index, total: r.total });
       setAsked((a) => [...a, r.question!]);
       play(r.audioBase64);
+    } catch (e) {
+      alert((e as Error).message);
     } finally {
       setBusy(null);
     }

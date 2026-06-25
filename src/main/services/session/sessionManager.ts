@@ -211,7 +211,11 @@ export const sessionManager = {
     const now = Date.now();
     if (now - lastLevelAt >= 80) {
       lastLevelAt = now;
-      const samples = new Int16Array(pcm);
+      // This handler is on a raw ipcMain.on (no Result envelope), so a malformed
+      // (odd-length) PCM frame must not throw — Int16Array requires an even byte
+      // length, so floor to whole samples.
+      const sampleCount = Math.floor(pcm.byteLength / 2);
+      const samples = new Int16Array(pcm, 0, sampleCount);
       let sum = 0;
       for (let i = 0; i < samples.length; i++) {
         const v = samples[i] / 32768;
@@ -241,12 +245,20 @@ export const sessionManager = {
     }
 
     // Don't pile up overlapping answers — if one is already streaming, just keep
-    // transcribing. (The user can still ask manually.)
+    // transcribing. (The user can still ask manually.) Claim the slot
+    // SYNCHRONOUSLY here, before the classify round-trip: two finals arriving
+    // back-to-back would otherwise both pass this gate (the flag is only set deep
+    // inside generateAnswer, after two awaits) and double-answer one utterance.
     if (live.answering) return;
+    live.answering = true;
 
     try {
       const classified = await classifyQuestion(text);
-      if (classified.isQuestion && classified.confidence >= 0.4 && !live.answering) {
+      // Re-check live: the session can be stopped/replaced during classify.
+      if (live?.sessionId !== sessionId) return;
+      if (classified.isQuestion && classified.confidence >= 0.4) {
+        // answerQuestion → generateAnswer re-sets `answering` and clears it in its
+        // own finally, so the slot is released when the answer completes/aborts.
         await this.answerQuestion(
           sessionId,
           text,
@@ -255,8 +267,12 @@ export const sessionManager = {
           classified.strategy,
           tcId,
         );
+      } else {
+        // Not a question — release the slot we claimed above.
+        live.answering = false;
       }
     } catch (e) {
+      if (live) live.answering = false;
       log.error('processFinalTranscript failed', e);
     }
   },

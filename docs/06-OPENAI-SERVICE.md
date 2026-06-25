@@ -9,18 +9,22 @@ Central, overridable via `settings.models`:
 
 ```ts
 export const defaultModels = {
-  answer:       'gpt-4.1',                // Responses API, streaming
+  answer:       'gpt-4.1-mini',           // Responses API, streaming (cost-effective default)
   parsing:      'gpt-4.1-mini',           // structured extraction
-  classify:     'gpt-4.1-mini',           // question classification
+  classify:     'gpt-4.1-nano',           // high-frequency "is this a question?" — cheapest tier
   embedding:    'text-embedding-3-small', // 1536 dim
-  transcription:'gpt-4o-transcribe',      // STT for audio chunks / Realtime
+  transcription:'gpt-4o-transcribe',      // STT (Realtime); accuracy drives every answer
   tts:          'gpt-4o-mini-tts',         // mock-interviewer voice
-  mock:         'gpt-4.1',                 // mock-interview question + feedback gen
-  vision:       'gpt-4.1',                 // solve coding problems from an image
+  mock:         'gpt-4.1-mini',           // mock-interviewer question gen
+  vision:       'gpt-4.1-mini',           // solve coding problems from an image
 };
 ```
-> Model ids are configuration, not contracts — keep them in one file so they can
-> be tuned without code changes. Validate availability via `settings:test-api-key`.
+> Cost-effective by default: the mini/nano tiers are plenty for grounded, short
+> interview cues and keep per-session cost low. Power users can upgrade any task to
+> `gpt-4.1` in **Settings → OpenAI Models**. Transcription stays on the full model
+> since its accuracy is the core input. Model ids are configuration, not contracts —
+> kept in one file so they can be tuned without code changes; validate availability
+> via `settings:test-api-key`.
 
 ## Client (`client.ts`)
 - Lazily constructs `new OpenAI({ apiKey })` using the decrypted key from
@@ -47,15 +51,21 @@ Small/fast model. Returns `{ text, type, confidence, strategy }`. Also used as a
 cheap "is this actually a question?" gate before answer generation.
 
 ### answer.ts — `streamAnswer(input) => AsyncIterable<AnswerEvent>`
-Input: `{ question, contextChunks, profile, style, interviewType }`.
+Input: `{ question, contextChunks, profile, style, length, pronunciation, interviewType, signal? }`.
 Builds a **grounding** prompt:
 - System: persona + rules ("ground answers in provided context; never invent
   experience; if no relevant experience, give a transferable-skills answer and
-  set a risk warning").
-- User: question + retrieved context + profile summary + desired style.
-Streams tokens (`{type:'delta', token}`) plus a final structured meta object:
-`{ talkingPoints[3..5], resumeMatch, star?, clarifyingQuestion?, riskWarning?, followupQuestion }`.
-The handler relays deltas to overlay and persists the final answer.
+  set a risk warning"); LENGTH is a hard constraint.
+- User: question + retrieved context + profile summary + the chosen format/length,
+  plus optional pronunciation hints for rare/technical terms.
+- `length` (`key_points` | `detailed`) also sets a hard `max_output_tokens` ceiling
+  (220 / 800) so "key points" can never drift long regardless of the prompt.
+Streams tokens (`{type:'delta', token}`), then a `usage` event, then a structured
+`meta` event `{ talkingPoints[], resumeMatch, star?, clarifyingQuestion?, riskWarning?,
+followupQuestion }`. **Status:** the prose answer + token usage are live; the meta pass
+is currently a stub (empty `talkingPoints`, `star: null`, only a `riskWarning` when no
+context matched) — the M2 structured second pass is not yet implemented. The handler
+relays deltas to the overlay and persists the final answer to `ai_answers`.
 
 ### transcription.ts — `transcribeChunk(audio, mime) => string`
 Sends an audio chunk to the transcription model; returns text (used for the
