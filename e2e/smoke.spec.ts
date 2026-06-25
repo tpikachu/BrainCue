@@ -11,8 +11,8 @@ test.describe('smoke', () => {
 
   test('can navigate to Settings', async ({ dashboard }) => {
     await dashboard.getByRole('link', { name: /settings/i }).first().click();
-    await expect(dashboard.getByText('OpenAI API Key')).toBeVisible();
-    await expect(dashboard.getByText('OpenAI Models')).toBeVisible();
+    await expect(dashboard.getByRole('heading', { name: 'OpenAI API Key' })).toBeVisible();
+    await expect(dashboard.getByRole('heading', { name: 'OpenAI Models' })).toBeVisible();
   });
 
   test('can navigate to Interview', async ({ dashboard }) => {

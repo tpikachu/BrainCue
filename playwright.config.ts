@@ -5,6 +5,7 @@ import 'dotenv/config'; // loads .env → process.env (incl. OPENAI_API_KEY for 
 // Playwright's _electron (see e2e/fixtures.ts). `npm run test:e2e` builds first.
 export default defineConfig({
   testDir: './e2e',
+  globalSetup: './e2e/global-setup.ts', // mirror migrations into out/main/drizzle
   fullyParallel: false, // each test launches its own Electron instance + shares one local DB
   workers: 1,
   retries: 0,

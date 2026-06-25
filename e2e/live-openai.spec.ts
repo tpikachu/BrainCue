@@ -9,26 +9,26 @@ import { test, expect, hasKey, setApiKey } from './fixtures';
 test.describe('live OpenAI (real key)', () => {
   test.skip(!hasKey, 'Set OPENAI_API_KEY in .env to run the live tier.');
 
-  test('load samples → résumé is parsed and RAG retrieves chunks', async ({ dashboard }) => {
+  test('load samples → résumé is parsed and chunks are embedded', async ({ dashboard }) => {
     test.setTimeout(180_000); // real parse of a résumé + JDs + embeddings can take a while
     await setApiKey(dashboard);
 
     const result = await dashboard.evaluate(async () => {
       const api = (window as any).api;
-      const { profileId, jobs } = await api.data.loadSamples();
+      const { profileId, jobs } = await api.data.loadSamples(); // real parse + index
       const profile = await api.profiles.get(profileId);
-      const chunks = await api.rag.search(profileId, 'leadership and measurable impact', 5);
+      const reindex = await api.documents.reindexProfile(profileId); // real embeddings
       return {
         jobs,
         hasParsedResume: !!profile.parsedResume,
         skills: profile.parsedResume?.skills?.length ?? 0,
-        chunkCount: chunks.length,
+        embedded: reindex.embedded,
       };
     });
 
     expect(result.jobs).toBeGreaterThan(0); // sample interviews created
-    expect(result.hasParsedResume).toBe(true); // real parse happened
+    expect(result.hasParsedResume).toBe(true); // real OpenAI parse happened
     expect(result.skills).toBeGreaterThan(0);
-    expect(result.chunkCount).toBeGreaterThan(0); // real embed + index + retrieve
+    expect(result.embedded).toBeGreaterThan(0); // real OpenAI embeddings produced
   });
 });
