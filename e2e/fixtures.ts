@@ -49,10 +49,14 @@ function killTree(pid: number): void {
 interface Fixtures {
   /** The dashboard BrowserWindow (loaded WITHOUT a ?view= param). */
   dashboard: Page;
+  /** Launch option: when true, strip OPENAI_API_KEY so the app starts with NO key
+   *  (the app resolves a dev env key first — see env.ts). Use to test no-key paths. */
+  noApiKey: boolean;
 }
 
 export const test = base.extend<Fixtures>({
-  dashboard: async ({}, use, testInfo) => {
+  noApiKey: [false, { option: true }],
+  dashboard: async ({ noApiKey }, use, testInfo) => {
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       BRAINCUE_E2E: '1',
@@ -63,6 +67,7 @@ export const test = base.extend<Fixtures>({
     // Electron run as plain Node (electron.app === undefined). Strip it so it boots
     // as a real Electron app.
     delete env.ELECTRON_RUN_AS_NODE;
+    if (noApiKey) delete env.OPENAI_API_KEY;
 
     const proc = spawn(electronBin, [APP_ENTRY], { env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';

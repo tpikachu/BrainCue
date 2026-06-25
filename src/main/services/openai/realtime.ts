@@ -85,7 +85,14 @@ export class RealtimeTranscriber {
     });
     this.ws.on('close', (code, reason) => {
       this.ready = false;
-      if (!this.closing) log.warn(`realtime: ws closed (${code}) ${reason.toString()}`);
+      // An UNEXPECTED close (server dropped us after 401/quota, or a network drop that
+      // closes without an 'error' event) would otherwise go unreported while the mic
+      // keeps streaming into a dead socket — the interview silently goes deaf. Surface
+      // it so the user knows to restart the session.
+      if (!this.closing) {
+        log.warn(`realtime: ws closed (${code}) ${reason.toString()}`);
+        this.cb.onError?.('Transcription disconnected — stop and resume the interview to reconnect.');
+      }
     });
   }
 
