@@ -10,6 +10,7 @@ import type {
   ContextSentEvent,
   InterviewType,
 } from '@shared/types';
+import { STORY_CUE_MIN_SCORE } from '@shared/types';
 import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/ui';
 import {
@@ -895,6 +896,7 @@ export default function Overlay() {
                       <span className="text-xs text-neutral-500">Listening…</span>
                     ) : null}
                     {c.streaming && <span className="ml-0.5 animate-pulse">▋</span>}
+                    <StoryCue card={c} />
                     <Citations card={c} openKey={openCite} onToggle={setOpenCite} />
                   </div>
                 )}
@@ -1088,6 +1090,39 @@ export default function Overlay() {
           </div>
         </Modal>
       </div>
+    </div>
+  );
+}
+
+/** The best-matching STAR story from the user's Story Bank for this question (a
+ *  `story` chunk in the retrieved context), surfaced as a glanceable "Story to tell"
+ *  cue that expands to the full STAR. Shown only when a story matched strongly enough. */
+function StoryCue({ card }: { card: AnswerCard }) {
+  const [open, setOpen] = useState(false);
+  const chunks = card.context?.chunks;
+  if (!chunks) return null;
+  const best = chunks
+    .filter((c) => c.sourceType === 'story' && c.score >= STORY_CUE_MIN_SCORE)
+    .reduce<(typeof chunks)[number] | null>((b, c) => (!b || c.score > b.score ? c : b), null);
+  if (!best) return null;
+  const [title, ...body] = best.content.split('\n');
+  return (
+    <div className="mt-1.5 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-1 text-[10px]">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-start gap-1 text-left font-medium text-amber-200 hover:text-amber-100"
+        title="A story from your bank to tell here"
+      >
+        <span className="shrink-0">📖 Story to tell:</span>
+        <span className={open ? '' : 'truncate'}>{title}</span>
+      </button>
+      {open && body.length > 0 && (
+        <div className="mt-1 space-y-0.5 text-amber-100/80">
+          {body.map((l, i) => (
+            <p key={i}>{l}</p>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

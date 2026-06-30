@@ -186,6 +186,11 @@ export interface RetrievedChunk {
   score: number;
 }
 
+/** Minimum cosine score for a STAR `story` chunk to be surfaced as the live
+ *  "Story to tell" cue (and force-included in grounding). Tunable. Shared so the
+ *  retriever (inclusion) and the Cue Card (display) agree on the threshold. */
+export const STORY_CUE_MIN_SCORE = 0.3;
+
 export interface Session {
   id: string;
   profileId: string;

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db, schema } from '../../db';
 import { bufferToVector, cosineSimilarity, vectorToBuffer } from './vectorMath';
 import type { ChunkSource, RetrievedChunk } from '@shared/types';
@@ -20,6 +20,9 @@ export interface VectorStore {
     k: number;
     jobId?: string | null;
   }): RetrievedChunk[];
+  /** The single best-matching `story` chunk for the query (or null), regardless of
+   *  the top-k. Reuses the caller's query vector so it adds no extra embedding call. */
+  topStory(args: { profileId: string; query: Float32Array }): RetrievedChunk | null;
 }
 
 export const sqliteVectorStore: VectorStore = {
@@ -67,5 +70,27 @@ export const sqliteVectorStore: VectorStore = {
       }))
       .sort((a, b) => b.score - a.score)
       .slice(0, k);
+  },
+
+  topStory({ profileId, query }) {
+    const rows = db()
+      .select({
+        id: schema.chunks.id,
+        content: schema.chunks.content,
+        vector: schema.embeddings.vector,
+      })
+      .from(schema.chunks)
+      .innerJoin(schema.embeddings, eq(schema.embeddings.chunkId, schema.chunks.id))
+      .where(and(eq(schema.chunks.profileId, profileId), eq(schema.chunks.sourceType, 'story')))
+      .all();
+
+    let best: RetrievedChunk | null = null;
+    for (const r of rows) {
+      const score = cosineSimilarity(query, bufferToVector(r.vector as Buffer));
+      if (!best || score > best.score) {
+        best = { id: r.id, sourceType: 'story', content: r.content, score };
+      }
+    }
+    return best;
   },
 };

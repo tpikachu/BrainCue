@@ -79,7 +79,12 @@ The `stories:generate` handler bails if extraction is empty, then `replaceStorie
 (`rag/indexProfile.ts`) **embeds first and commits rows + `story` chunks + embeddings in one
 transaction** — a failed embedding leaves the prior bank intact. `indexStories` re-embeds on
 edit/delete with the same embed-before-mutate guarantee. Stories surface live as `📖 story`
-source chips via the normal retriever (they're just `story` chunks).
+source chips via the normal retriever (they're just `story` chunks). **Story-to-tell cue:**
+`retrieve` (rag/retriever.ts) embeds the question once and, alongside the top-k, force-includes
+the single best-matching `story` chunk when its score ≥ `STORY_CUE_MIN_SCORE` (`@shared/types`) —
+so it grounds the answer, stays citable, and the Cue Card surfaces it as a prominent
+**"📖 Story to tell"** callout (`StoryCue` in Overlay.tsx, derived from the `contextSent` chunks —
+no extra IPC event or embedding call).
 
 ### embeddings.ts — `embed(texts: string[]) => Float32Array[]`
 Batches inputs, returns vectors; caller stores BLOBs. Records model + dim.
@@ -140,7 +145,9 @@ transcribed spoken answer, and their résumé/JD context, one Responses call
 item they could have used). Output is defensively parsed: the rating is rounded + clamped
 to 1–5, arrays are string-filtered, and missing fields default — a malformed model reply
 can't crash the turn loop. The prompt judges ONLY what the candidate actually said and
-forbids inventing experience. The `sparringManager` (in-memory, no DB) drives the turns:
+forbids inventing experience.
+
+The `sparringManager` (in-memory, no DB) drives the turns:
 `generateQuestion` + `speak` to ask, `transcribeChunk` on the recorded clip, then
 `evaluateAnswer`; the question is committed to history only after TTS succeeds so a
 transient failure can't skip a turn.
