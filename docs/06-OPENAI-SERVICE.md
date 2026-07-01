@@ -94,11 +94,13 @@ Small/fast model. Returns `{ text, type, confidence, strategy }`. Also used as a
 cheap "is this actually a question?" gate before answer generation.
 
 ### answer.ts — `streamAnswer(input) => AsyncIterable<AnswerEvent>`
-Input: `{ question, contextChunks, profile, style, length, pronunciation, interviewType, signal? }`.
+Input: `{ question, contextChunks, profile, format, pronunciation, interviewType, signal? }`.
 Builds a **grounding** prompt:
 - System: persona + rules ("ground answers in provided context; never invent
   experience; if no relevant experience, give a transferable-skills answer and
-  set a risk warning"); LENGTH is a hard constraint.
+  set a risk warning"); FORMAT is a hard constraint; plus a **naturalness / anti-AI-tone**
+  directive (contractions, varied sentence length, no corporate/AI tells or hedging — must
+  read 100% human, never AI-generated).
 - **Grounded / proof-linked answers:** `buildContext` numbers the chunks `[1] (resume) …`;
   the prompt makes the model cite those numbers inline after each grounded claim
   (e.g. `…cut p99 latency 40% [1]`). The Cue Card renders the cited `[i]` as source chips
@@ -106,10 +108,13 @@ Builds a **grounding** prompt:
   for anything the context can't support the model must not invent it — it leads with
   `⚠`, says it's not in the candidate's background, and pivots to a cited transferable
   framing.
-- User: question + retrieved context + profile summary + the chosen format/length,
+- User: question + retrieved context + profile summary + the chosen answer format,
   plus optional pronunciation hints for rare/technical terms.
-- `length` (`key_points` | `detailed`) also sets a hard `max_output_tokens` ceiling
-  (220 / 800) so "key points" can never drift long regardless of the prompt.
+- `format` — the single answer control (v1.2): `key_points` (terse bullets) | `explanation`
+  (a natural, flowing first-person explanation) | `detailed` (thorough, with one example).
+  It also sets a hard `max_output_tokens` ceiling (220 / 340 / 800) so "key points" can never
+  drift long regardless of the prompt. (The old format/tone × length split — `star`/`technical`/
+  `conversational` — was removed.)
 Streams tokens (`{type:'delta', token}`), then a `usage` event, then a structured
 `meta` event `{ talkingPoints[], resumeMatch, star?, clarifyingQuestion?, riskWarning?,
 followupQuestion }`. **Status:** the prose answer + token usage are live; the meta pass

@@ -15,8 +15,7 @@ const interviewType = z.enum([
   'sales',
   'general',
 ]);
-const answerStyle = z.enum(['default', 'star', 'technical', 'conversational']);
-const answerLength = z.enum(['key_points', 'detailed']);
+const answerFormat = z.enum(['key_points', 'explanation', 'detailed']);
 
 export function registerSessionIpc(): void {
   handle(
@@ -24,23 +23,20 @@ export function registerSessionIpc(): void {
     z.object({
       profileId: z.string().min(1),
       interviewType,
-      answerStyle: answerStyle.default('default'),
       jobId: z.string().nullable().default(null),
-      answerLength: answerLength.default('key_points'),
+      answerFormat: answerFormat.default('key_points'),
     }),
-    ({ profileId, interviewType: t, answerStyle: s, jobId, answerLength: len }) =>
-      sessionManager.start(profileId, t, s, jobId, len),
+    ({ profileId, interviewType: t, jobId, answerFormat: f }) =>
+      sessionManager.start(profileId, t, jobId, f),
   );
 
   handle(
     IPC.session.resume,
     z.object({
       sessionId: z.string().min(1),
-      answerStyle: answerStyle.default('default'),
-      answerLength: answerLength.default('key_points'),
+      answerFormat: answerFormat.default('key_points'),
     }),
-    ({ sessionId, answerStyle: s, answerLength: len }) =>
-      sessionManager.resume(sessionId, s, len),
+    ({ sessionId, answerFormat: f }) => sessionManager.resume(sessionId, f),
   );
 
   handle(IPC.session.stop, z.object({ sessionId: z.string().min(1) }), ({ sessionId }) =>
@@ -90,8 +86,7 @@ export function registerSessionIpc(): void {
     IPC.session.setAnswerPrefs,
     z.object({
       interviewType: interviewType.optional(),
-      style: answerStyle.optional(),
-      length: answerLength.optional(),
+      format: answerFormat.optional(),
       pronunciation: z.boolean().optional(),
     }),
     (prefs) => sessionManager.setAnswerPrefs(prefs),

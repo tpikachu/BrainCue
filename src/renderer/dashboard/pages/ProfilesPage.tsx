@@ -41,7 +41,6 @@ export default function ProfilesPage() {
         targetRole,
         targetCompany: null,
         interviewType: 'general',
-        answerStyle: 'default',
         language: 'en',
         resumeText: null,
         jdText: null,

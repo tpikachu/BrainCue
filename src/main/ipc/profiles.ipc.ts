@@ -12,19 +12,12 @@ const interviewType = z.enum([
   'sales',
   'general',
 ]);
-// Accept legacy length values ('concise'/'detailed') on the wire and fold them
-// into the format axis, so old clients/profiles don't fail validation.
-const answerStyle = z
-  .enum(['default', 'star', 'technical', 'conversational', 'concise', 'detailed'])
-  .transform((v) => (v === 'concise' || v === 'detailed' ? 'default' : v));
-
 const profileInput = z.object({
   name: z.string().min(1),
   targetRole: z.string().default(''),
   targetCompany: z.string().nullable().default(null),
-  // Interview type & answer style are chosen per run now; kept optional/legacy.
+  // Interview type is chosen per run now; kept optional/legacy on the profile.
   interviewType: interviewType.default('general'),
-  answerStyle: answerStyle.default('default'),
   language: z.string().default('en'),
   resumeText: z.string().nullable().default(null),
   jdText: z.string().nullable().default(null),
@@ -60,7 +53,6 @@ export function registerProfilesIpc(): void {
       targetRole: src.targetRole,
       targetCompany: src.targetCompany,
       interviewType: src.interviewType,
-      answerStyle: src.answerStyle,
       language: src.language,
       resumeText: src.resumeText,
       jdText: src.jdText,

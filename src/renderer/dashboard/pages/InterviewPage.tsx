@@ -156,8 +156,7 @@ export default function InterviewPage() {
         profileId,
         jobId: job.id,
         interviewType: 'general',
-        answerStyle: 'default',
-        answerLength: 'key_points',
+        answerFormat: 'key_points',
         source: a.source,
         micDeviceId: a.micDeviceId,
       });

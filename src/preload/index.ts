@@ -134,19 +134,13 @@ const api = {
     start: (
       profileId: string,
       interviewType: string,
-      answerStyle: string,
       jobId: string | null = null,
-      answerLength = 'key_points',
-    ) => invoke(IPC.session.start, { profileId, interviewType, answerStyle, jobId, answerLength }),
-    resume: (sessionId: string, answerStyle = 'default', answerLength = 'key_points') =>
-      invoke(IPC.session.resume, { sessionId, answerStyle, answerLength }),
-    setAnswerPrefs: (prefs: {
-      interviewType?: string;
-      style?: string;
-      length?: string;
-      pronunciation?: boolean;
-    }) =>
-      invoke<{ interviewType: string; style: string; length: string; pronunciation: boolean }>(
+      answerFormat = 'key_points',
+    ) => invoke(IPC.session.start, { profileId, interviewType, jobId, answerFormat }),
+    resume: (sessionId: string, answerFormat = 'key_points') =>
+      invoke(IPC.session.resume, { sessionId, answerFormat }),
+    setAnswerPrefs: (prefs: { interviewType?: string; format?: string; pronunciation?: boolean }) =>
+      invoke<{ interviewType: string; format: string; pronunciation: boolean }>(
         IPC.session.setAnswerPrefs,
         prefs,
       ),

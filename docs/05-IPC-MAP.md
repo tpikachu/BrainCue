@@ -104,8 +104,8 @@ résumé, persisted, and indexed as `story` chunks so they ground live answers.
 ### session
 | Channel | Request | Response |
 |---|---|---|
-| `session:start` | `{ profileId, interviewType, answerStyle, jobId, answerLength }` | `Session` (`answerStyle` = format/tone; `answerLength` = key_points\|detailed) |
-| `session:resume` | `{ sessionId, answerStyle?, answerLength? }` | `Session` (re-activate an existing session row and continue it; interview type is restored from the row — one session per interview, type is dynamic) |
+| `session:start` | `{ profileId, interviewType, jobId, answerFormat }` | `Session` (`answerFormat` = key_points\|explanation\|detailed — the single answer control) |
+| `session:resume` | `{ sessionId, answerFormat? }` | `Session` (re-activate an existing session row and continue it; interview type is restored from the row — one session per interview, type is dynamic) |
 | `session:stop` | `{ sessionId }` | `Session` |
 | `session:toggle-pause` | `{ sessionId }` | `{ paused }` |
 | `session:toggle-pause-active` | — | `{ paused, active }` (global shortcut target — toggles the live session) |
@@ -120,7 +120,7 @@ résumé, persisted, and indexed as `story` chunks so they ground live answers.
 | `session:ask` | `{ sessionId, questionText }` | `{ questionId }` (manual ask; answer streams) |
 | `session:ask-active` | `{ questionText }` | `{ ok }` (Cue Card "Ask" box — manual ask for the active session, no id) |
 | `session:set-interview-type` | `{ sessionId, interviewType }` | `{ ok }` (set the session-level type — chosen by the user in the save prompt at stop) |
-| `session:set-answer-prefs` | `{ interviewType?, style?, length?, pronunciation? }` | `{ interviewType, style, length, pronunciation }` (live Cue Card controls; acts on the active session. Switching `interviewType` is dynamic — it persists onto the session row + reframes later answers) |
+| `session:set-answer-prefs` | `{ interviewType?, format?, pronunciation? }` | `{ interviewType, format, pronunciation }` (live Cue Card controls; acts on the active session. Switching `interviewType` is dynamic — it persists onto the session row + reframes later answers) |
 | `session:set-answering` | `{ enabled }` | `{ enabled, answered }` (coding "listen-only" toggle: when disabled, the interviewer is still transcribed but not auto-answered; enabling it also answers the question they just asked) |
 | `session:regenerate` | — | `{ regenerated }` (re-answer the last question for the active session) |
 | `session:clear-answer` | — | `{ cleared }` (abort the in-flight answer for the active session) |
@@ -195,7 +195,7 @@ Channel constants live in `EVENTS` (`src/shared/ipc.ts`); payload types are in
 | `session:answer-done` | `{ questionId }` | overlay |
 | `session:answer-reset` | `{ questionId }` | overlay (regenerate: clear the Cue Card answer but keep the transcript — no new question row/line) |
 | `session:client-info` | `ClientInfo \| null` | overlay (active interview: company/title/notes + profileName + grounding flags hasResume/hasJd/hasCompany, for the Cue Card header + session bar + ⓘ panel; `null` clears on stop) |
-| `session:answer-prefs` | `AnswerPrefs` (`{ interviewType, style, length, pronunciation }`) | overlay (seeds the Cue Card answer-control toggles) |
+| `session:answer-prefs` | `AnswerPrefs` (`{ interviewType, format, pronunciation }`) | overlay (seeds the Cue Card answer-control toggles) |
 | `session:audio-level` | `{ level }` (0-1 RMS, ~12/sec) | overlay (drives the Cue Card mic meter; computed in `feedRealtimeAudio` since the stream lives in the dashboard renderer) |
 | `session:save-prompt` | `SavePrompt` (`{ sessionId, interviewType, jobTitle, questionCount }`) | dashboard (a session just stopped → prompt save-or-discard + pick the type) |
 | `session:context` | `{ questionId, question, chunks }` | dashboard (debug: retrieved chunks) |

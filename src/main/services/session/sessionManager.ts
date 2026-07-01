@@ -14,7 +14,7 @@ import { RealtimeTranscriber } from '../openai/realtime';
 import { getOverlayWindow, showOverlay } from '../../windows/overlayWindow';
 import { getMainWindow } from '../../windows/mainWindow';
 import { log } from '../security/logger';
-import type { AnswerLength, AnswerStyle, InterviewType, Session } from '@shared/types';
+import type { AnswerFormat, InterviewType, Session } from '@shared/types';
 
 /** A question we answered, kept so the Cue Card can re-generate it (e.g. after
  *  toggling length/format/pronunciation) by reusing the SAME question row — no
@@ -29,8 +29,7 @@ interface LiveState {
   profileId: string;
   jobId: string | null;
   interviewType: InterviewType;
-  answerStyle: AnswerStyle;
-  answerLength: AnswerLength;
+  answerFormat: AnswerFormat;
   pronunciation: boolean;
   isMock: boolean; // mock rehearsal — no mic capture; never persisted
   paused: boolean;
@@ -70,8 +69,7 @@ export const sessionManager = {
     profileId: string;
     jobId: string | null;
     interviewType: InterviewType;
-    answerStyle: AnswerStyle;
-    answerLength: AnswerLength;
+    answerFormat: AnswerFormat;
     language: string;
     isMock?: boolean;
   }): void {
@@ -82,8 +80,7 @@ export const sessionManager = {
       profileId: opts.profileId,
       jobId: opts.jobId,
       interviewType: opts.interviewType,
-      answerStyle: opts.answerStyle,
-      answerLength: opts.answerLength,
+      answerFormat: opts.answerFormat,
       pronunciation: false, // off by default; toggled live from the Cue Card
       isMock: !!opts.isMock,
       paused: false,
@@ -119,8 +116,7 @@ export const sessionManager = {
       EVENTS.answerPrefs,
       {
         interviewType: opts.interviewType,
-        style: opts.answerStyle,
-        length: opts.answerLength,
+        format: opts.answerFormat,
         pronunciation: false,
       },
       ['overlay'],
@@ -147,9 +143,8 @@ export const sessionManager = {
   start(
     profileId: string,
     interviewType: InterviewType,
-    answerStyle: AnswerStyle,
     jobId: string | null = null,
-    answerLength: AnswerLength = 'key_points',
+    answerFormat: AnswerFormat = 'key_points',
   ): Session {
     const profile = profilesRepo.get(profileId);
     if (!profile) throw new Error('Profile not found');
@@ -163,8 +158,7 @@ export const sessionManager = {
       profileId,
       jobId,
       interviewType,
-      answerStyle,
-      answerLength,
+      answerFormat,
       language: profile.language,
     });
     return toSession(db().select().from(schema.sessions).where(eq(schema.sessions.id, id)).get()!);
@@ -173,12 +167,8 @@ export const sessionManager = {
   /** Re-activate an existing (stopped) session and continue it, so one interview
    *  reuses a single session row instead of piling up new ones. The interview
    *  TYPE is restored from the session (it's switched live in the Cue Card, not
-   *  chosen on resume); style/length default and are adjusted live too. */
-  resume(
-    sessionId: string,
-    answerStyle: AnswerStyle = 'default',
-    answerLength: AnswerLength = 'key_points',
-  ): Session {
+   *  chosen on resume); the answer format defaults and is adjusted live too. */
+  resume(sessionId: string, answerFormat: AnswerFormat = 'key_points'): Session {
     const row = db().select().from(schema.sessions).where(eq(schema.sessions.id, sessionId)).get();
     if (!row) throw new Error('Session not found');
     const profile = profilesRepo.get(row.profileId);
@@ -193,8 +183,7 @@ export const sessionManager = {
       profileId: row.profileId,
       jobId: row.jobId,
       interviewType: row.interviewType as InterviewType,
-      answerStyle,
-      answerLength,
+      answerFormat,
       language: profile.language,
     });
     return toSession(
@@ -462,10 +451,9 @@ export const sessionManager = {
         question: questionText,
         contextChunks: context,
         profile,
-        // Format, length, and pronunciation are chosen per run (this round) and
-        // can be toggled live from the Cue Card.
-        style: live?.answerStyle ?? 'default',
-        length: live?.answerLength ?? 'key_points',
+        // Answer format + pronunciation are chosen per run (this round) and can be
+        // toggled live from the Cue Card.
+        format: live?.answerFormat ?? 'key_points',
         pronunciation: live?.pronunciation ?? false,
         interviewType: (live?.interviewType ?? session.interviewType) as InterviewType,
         signal: abort.signal,
@@ -529,16 +517,14 @@ export const sessionManager = {
    *  regenerated) answer. */
   setAnswerPrefs(prefs: {
     interviewType?: InterviewType;
-    style?: AnswerStyle;
-    length?: AnswerLength;
+    format?: AnswerFormat;
     pronunciation?: boolean;
-  }): { interviewType: InterviewType; style: AnswerStyle; length: AnswerLength; pronunciation: boolean } {
+  }): { interviewType: InterviewType; format: AnswerFormat; pronunciation: boolean } {
     // No active session (idle Cue Card): no-op with sensible defaults.
     if (!live) {
       return {
         interviewType: prefs.interviewType ?? 'general',
-        style: prefs.style ?? 'default',
-        length: prefs.length ?? 'key_points',
+        format: prefs.format ?? 'key_points',
         pronunciation: prefs.pronunciation ?? false,
       };
     }
@@ -551,13 +537,11 @@ export const sessionManager = {
         .where(eq(schema.sessions.id, live.sessionId))
         .run();
     }
-    if (prefs.style !== undefined) live.answerStyle = prefs.style;
-    if (prefs.length !== undefined) live.answerLength = prefs.length;
+    if (prefs.format !== undefined) live.answerFormat = prefs.format;
     if (prefs.pronunciation !== undefined) live.pronunciation = prefs.pronunciation;
     return {
       interviewType: live.interviewType,
-      style: live.answerStyle,
-      length: live.answerLength,
+      format: live.answerFormat,
       pronunciation: live.pronunciation,
     };
   },

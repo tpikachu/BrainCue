@@ -9,12 +9,13 @@ export type InterviewType =
   | 'sales'
   | 'general';
 
-/** Answer FORMAT / tone — chosen per round. Orthogonal to length. */
-export type AnswerStyle = 'default' | 'star' | 'technical' | 'conversational';
-
-/** Answer LENGTH / depth — a live Cue Card toggle, independent of format.
- *  `key_points`: short, key-point-focused but natural. `detailed`: thorough. */
-export type AnswerLength = 'key_points' | 'detailed';
+/** Answer FORMAT — the single live Cue Card control (v1.2; replaces the old
+ *  format/tone × length split). All three read 100% human, never AI-generated.
+ *  - `key_points`: short, glanceable — a terse opener + a few key-point bullets.
+ *  - `explanation`: a natural, flowing first-person explanation, like talking it
+ *    through with someone.
+ *  - `detailed`: thorough, with one concrete example. */
+export type AnswerFormat = 'key_points' | 'explanation' | 'detailed';
 
 export type DocumentKind = 'resume' | 'jd' | 'note' | 'other';
 export type ChunkSource = 'resume' | 'jd' | 'note' | 'company' | 'story';
@@ -38,7 +39,6 @@ export interface Profile {
   targetRole: string;
   targetCompany: string | null;
   interviewType: InterviewType;
-  answerStyle: AnswerStyle;
   language: string;
   resumeText: string | null;
   jdText: string | null;

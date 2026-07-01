@@ -1,6 +1,6 @@
 // Single source of truth for IPC channel names. See docs/05-IPC-MAP.md.
 
-import type { AnswerLength, AnswerStyle, InterviewType } from './types';
+import type { AnswerFormat, InterviewType } from './types';
 
 /** Request/response channels (ipcRenderer.invoke <-> ipcMain.handle). */
 export const IPC = {
@@ -190,8 +190,7 @@ export interface ClientInfo {
 /** Live answer preferences pushed to the Cue Card so its toggles stay in sync. */
 export interface AnswerPrefs {
   interviewType: InterviewType;
-  style: AnswerStyle;
-  length: AnswerLength;
+  format: AnswerFormat;
   pronunciation: boolean;
 }
 

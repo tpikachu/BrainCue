@@ -33,8 +33,7 @@ function baseInput(over: Partial<Parameters<typeof streamAnswer>[0]> = {}) {
     question: 'Tell me about a hard bug.',
     contextChunks: [{ id: 'c1', sourceType: 'resume' as const, content: 'Fixed a race condition', score: 0.8 }],
     profile,
-    style: 'default' as const,
-    length: 'key_points' as const,
+    format: 'key_points' as const,
     pronunciation: false,
     interviewType: 'behavioral' as const,
     ...over,
@@ -55,14 +54,20 @@ beforeEach(() => {
 
 describe('streamAnswer — request body', () => {
   it('caps key_points at 220 output tokens', async () => {
-    await collect(streamAnswer(baseInput({ length: 'key_points' })));
+    await collect(streamAnswer(baseInput({ format: 'key_points' })));
     expect(h.lastBody!.max_output_tokens).toBe(220);
     expect(userPrompt()).toContain('KEY POINTS');
     expect(userPrompt()).toContain('~60 words');
   });
 
+  it('caps explanation at 340 output tokens', async () => {
+    await collect(streamAnswer(baseInput({ format: 'explanation' })));
+    expect(h.lastBody!.max_output_tokens).toBe(340);
+    expect(userPrompt()).toContain('EXPLANATION');
+  });
+
   it('caps detailed at 800 output tokens', async () => {
-    await collect(streamAnswer(baseInput({ length: 'detailed' })));
+    await collect(streamAnswer(baseInput({ format: 'detailed' })));
     expect(h.lastBody!.max_output_tokens).toBe(800);
     expect(userPrompt()).toContain('DETAILED');
   });
@@ -75,9 +80,16 @@ describe('streamAnswer — request body', () => {
   });
 
   it('injects the chosen format and interview type', async () => {
-    await collect(streamAnswer(baseInput({ style: 'star', interviewType: 'coding' })));
-    expect(userPrompt()).toContain('STAR');
+    await collect(streamAnswer(baseInput({ format: 'explanation', interviewType: 'coding' })));
+    expect(userPrompt()).toContain('EXPLANATION');
     expect(userPrompt()).toContain('Interview type: coding');
+  });
+
+  it('instructs a human, anti-AI tone in the system prompt', async () => {
+    await collect(streamAnswer(baseInput()));
+    const system = String((h.lastBody!.input as { role: string; content: string }[])[0].content);
+    expect(system).toMatch(/human/i);
+    expect(system).toMatch(/As an AI/i); // it's in the BANNED list
   });
 
   it('embeds retrieved context tagged by source', async () => {

@@ -3,9 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import type { AnswerPrefs, ClientInfo } from '@shared/ipc';
 import type {
-  AnswerLength,
+  AnswerFormat,
   AnswerMetaEvent,
-  AnswerStyle,
   AppSettings,
   ContextSentEvent,
   InterviewType,
@@ -84,8 +83,7 @@ export default function Overlay() {
   const [showClient, setShowClient] = useState(false);
   // Live answer controls (mirrored to the active session via setAnswerPrefs).
   const [interviewType, setInterviewType] = useState<InterviewType>('general');
-  const [format, setFormat] = useState<AnswerStyle>('default');
-  const [length, setLength] = useState<AnswerLength>('key_points');
+  const [answerFormat, setAnswerFormat] = useState<AnswerFormat>('key_points');
   const [pronunciation, setPronunciation] = useState(false);
   // Coding sessions default to listen-only (don't auto-answer the interviewer, so a
   // generated coding answer isn't replaced). This toggle (coding-only) flips it on.
@@ -234,8 +232,7 @@ export default function Overlay() {
       }),
       api.events.onAnswerPrefs((p) => {
         setInterviewType(p.interviewType);
-        setFormat(p.style);
-        setLength(p.length);
+        setAnswerFormat(p.format);
         setPronunciation(p.pronunciation);
       }),
       api.events.onAudioLevel((p) => {
@@ -310,14 +307,9 @@ export default function Overlay() {
     await api.session.setAnswerPrefs({ interviewType: t });
     if (question) await api.session.regenerate();
   };
-  const changeFormat = async (f: AnswerStyle) => {
-    setFormat(f);
-    await api.session.setAnswerPrefs({ style: f });
-    if (question) await api.session.regenerate();
-  };
-  const changeLength = async (l: AnswerLength) => {
-    setLength(l);
-    await api.session.setAnswerPrefs({ length: l });
+  const changeFormat = async (f: AnswerFormat) => {
+    setAnswerFormat(f);
+    await api.session.setAnswerPrefs({ format: f });
     if (question) await api.session.regenerate();
   };
   const togglePronunciation = async () => {
@@ -664,44 +656,29 @@ export default function Overlay() {
               ))}
             </select>
           </label>
-          <label className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-neutral-500">
-            Format
-            <select
-              value={format}
-              onChange={(e) => changeFormat(e.target.value as AnswerStyle)}
-              className={ctrlSelect}
-            >
-              <option value="default">Default</option>
-              <option value="conversational">Conversational</option>
-              <option value="star">STAR</option>
-              <option value="technical">Technical</option>
-            </select>
-          </label>
           <span className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-neutral-500">
-            Length
+            Format
             <span className="flex overflow-hidden rounded-md ring-1 ring-neutral-700">
-              <button
-                onClick={() => changeLength('key_points')}
-                title="Short, key-point-focused answers"
-                className={`px-2 py-1 text-[11px] font-medium normal-case transition-colors ${
-                  length === 'key_points'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-neutral-800 text-neutral-400 hover:text-neutral-200'
-                }`}
-              >
-                Key points
-              </button>
-              <button
-                onClick={() => changeLength('detailed')}
-                title="Thorough, very detailed answers"
-                className={`px-2 py-1 text-[11px] font-medium normal-case transition-colors ${
-                  length === 'detailed'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-neutral-800 text-neutral-400 hover:text-neutral-200'
-                }`}
-              >
-                Detailed
-              </button>
+              {(
+                [
+                  ['key_points', 'Key points', 'Short, glanceable key points'],
+                  ['explanation', 'Explanation', 'A natural, spoken explanation'],
+                  ['detailed', 'Detailed', 'Thorough, with a concrete example'],
+                ] as const
+              ).map(([value, label, title]) => (
+                <button
+                  key={value}
+                  onClick={() => changeFormat(value)}
+                  title={title}
+                  className={`px-2 py-1 text-[11px] font-medium normal-case transition-colors ${
+                    answerFormat === value
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-neutral-800 text-neutral-400 hover:text-neutral-200'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </span>
           </span>
           {interviewType === 'coding' && (

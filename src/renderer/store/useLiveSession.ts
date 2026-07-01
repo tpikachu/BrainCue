@@ -35,8 +35,7 @@ interface LiveSessionState {
   startNew: (a: {
     profileId: string;
     interviewType: string;
-    answerStyle: string;
-    answerLength: string;
+    answerFormat: string;
     jobId: string | null;
     source: AudioSource;
     micDeviceId?: string | null;
@@ -178,7 +177,7 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
     pendingSave: null,
     clearPendingSave: () => set({ pendingSave: null }),
 
-    startNew: async ({ profileId, interviewType, answerStyle, answerLength, jobId, source, micDeviceId }) => {
+    startNew: async ({ profileId, interviewType, answerFormat, jobId, source, micDeviceId }) => {
       // Acquire audio FIRST: if the user denies the mic or cancels the system-audio
       // picker, we never create a session that displays "live" with nothing flowing.
       let stream: MediaStream;
@@ -191,9 +190,8 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
       const s = (await api.session.start(
         profileId,
         interviewType,
-        answerStyle,
         jobId,
-        answerLength,
+        answerFormat,
       )) as Session;
       lineId = 0;
       set({ session: s, transcript: [], interim: '', paused: false, micError: null, sessionError: null });

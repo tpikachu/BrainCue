@@ -11,7 +11,6 @@ const newProfile = {
   targetRole: 'SWE',
   targetCompany: null,
   interviewType: 'general',
-  answerStyle: 'default',
   language: 'en',
   resumeText: null,
   jdText: null,

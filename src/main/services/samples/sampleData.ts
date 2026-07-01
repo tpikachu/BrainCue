@@ -130,7 +130,6 @@ export async function loadSampleData(): Promise<{ profileId: string; jobs: numbe
     targetRole: 'Senior Software Engineer',
     targetCompany: null,
     interviewType: 'general',
-    answerStyle: 'default',
     language: 'en',
     resumeText: SAMPLE_RESUME,
     jdText: null,
