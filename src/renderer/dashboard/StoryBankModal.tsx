@@ -18,6 +18,9 @@ const COMPETENCY_LABEL: Record<StoryCompetency, string> = {
   customer_focus: 'Customer focus',
 };
 
+// Canonical competency order for the coverage view (the closed StoryCompetency set).
+const COMPETENCIES = Object.keys(COMPETENCY_LABEL) as StoryCompetency[];
+
 type EditForm = Pick<Story, 'title' | 'situation' | 'task' | 'action' | 'result'>;
 
 /** Per-profile STAR story bank: extract grounded stories from the résumé, browse,
@@ -182,6 +185,9 @@ export function StoryBankModal({
           </div>
         )}
 
+        {/* Competency coverage — what your bank covers + which gaps to fill. */}
+        {!busy && stories.length > 0 && <CompetencyCoverage stories={stories} />}
+
         {/* Story list */}
         {!busy && stories.length > 0 && (
           <ul className="space-y-2.5">
@@ -281,5 +287,52 @@ export function StoryBankModal({
         )}
       </div>
     </Modal>
+  );
+}
+
+/** At-a-glance view of which behavioral competencies the story bank covers (with a
+ *  count) and which are still gaps — so the user knows what stories to add next. */
+function CompetencyCoverage({ stories }: { stories: Story[] }) {
+  const counts = new Map<StoryCompetency, number>();
+  for (const s of stories) {
+    for (const c of s.competencies) counts.set(c, (counts.get(c) ?? 0) + 1);
+  }
+  const covered = COMPETENCIES.filter((c) => (counts.get(c) ?? 0) > 0).length;
+  const gaps = COMPETENCIES.filter((c) => !counts.get(c));
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-neutral-950/40 p-3">
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+          Competency coverage
+        </h4>
+        <span className="text-xs text-neutral-500">
+          {covered}/{COMPETENCIES.length} covered
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {COMPETENCIES.map((c) => {
+          const n = counts.get(c) ?? 0;
+          return (
+            <span
+              key={c}
+              title={n > 0 ? `${n} story${n === 1 ? '' : 's'}` : 'No story yet — a gap to fill'}
+              className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                n > 0 ? 'bg-blue-900/40 text-blue-300' : 'bg-neutral-800 text-neutral-600'
+              }`}
+            >
+              {COMPETENCY_LABEL[c]}
+              {n > 0 ? ` ×${n}` : ''}
+            </span>
+          );
+        })}
+      </div>
+      {gaps.length > 0 && (
+        <p className="mt-2 text-xs text-neutral-500">
+          Gaps: {gaps.map((g) => COMPETENCY_LABEL[g]).join(', ')} — consider adding a story for
+          each.
+        </p>
+      )}
+    </div>
   );
 }
