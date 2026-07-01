@@ -72,11 +72,18 @@ describe('streamAnswer — request body', () => {
     expect(userPrompt()).toContain('DETAILED');
   });
 
-  it('includes the pronunciation instruction only when enabled', async () => {
+  it('includes the structured pronunciation-guide instruction only when enabled', async () => {
     await collect(streamAnswer(baseInput({ pronunciation: true })));
     expect(userPrompt()).toMatch(/phonetic respelling/i);
+    expect(userPrompt()).toContain('[[PRONUNCIATION]]'); // structured guide marker
     await collect(streamAnswer(baseInput({ pronunciation: false })));
     expect(userPrompt()).not.toMatch(/phonetic respelling/i);
+    expect(userPrompt()).not.toContain('[[PRONUNCIATION]]');
+  });
+
+  it('gives pronunciation headroom above the format token cap', async () => {
+    await collect(streamAnswer(baseInput({ format: 'key_points', pronunciation: true })));
+    expect(h.lastBody!.max_output_tokens).toBe(220 + 160);
   });
 
   it('injects the chosen format and interview type', async () => {

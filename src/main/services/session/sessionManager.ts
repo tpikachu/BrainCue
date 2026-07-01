@@ -81,7 +81,7 @@ export const sessionManager = {
       jobId: opts.jobId,
       interviewType: opts.interviewType,
       answerFormat: opts.answerFormat,
-      pronunciation: false, // off by default; toggled live from the Cue Card
+      pronunciation: true, // ON by default (v1.2); toggled live from the Cue Card
       isMock: !!opts.isMock,
       paused: false,
       busy: false,
@@ -117,7 +117,7 @@ export const sessionManager = {
       {
         interviewType: opts.interviewType,
         format: opts.answerFormat,
-        pronunciation: false,
+        pronunciation: true,
       },
       ['overlay'],
     );

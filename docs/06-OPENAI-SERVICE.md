@@ -108,8 +108,14 @@ Builds a **grounding** prompt:
   for anything the context can't support the model must not invent it — it leads with
   `⚠`, says it's not in the candidate's background, and pivots to a cited transferable
   framing.
-- User: question + retrieved context + profile summary + the chosen answer format,
-  plus optional pronunciation hints for rare/technical terms.
+- User: question + retrieved context + profile summary + the chosen answer format.
+- **Pronunciation guide** (v1.2, ON by default, live-toggleable): the answer stays clean
+  (no inline respellings); instead, if any words are genuinely hard, the model appends a
+  `[[PRONUNCIATION]]` section with one pipe-delimited line per word
+  (`word | part of speech | singular | respelling`). The Cue Card splits this out
+  (`overlay/pronunciation.ts` `splitPronunciation`, tolerant of model-output variance) and
+  renders a structured "🗣 How to say it" panel below the answer. Adds +160 `max_output_tokens`
+  headroom so the guide never eats the answer.
 - `format` — the single answer control (v1.2): `key_points` (terse bullets) | `explanation`
   (a natural, flowing first-person explanation) | `detailed` (thorough, with one example).
   It also sets a hard `max_output_tokens` ceiling (220 / 340 / 800) so "key points" can never

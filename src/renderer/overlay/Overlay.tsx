@@ -20,6 +20,7 @@ import {
   removeCard,
   toggleCollapsed,
 } from './answerCards';
+import { splitPronunciation } from './pronunciation';
 import {
   BoltIcon,
   ChevronRightIcon,
@@ -84,7 +85,7 @@ export default function Overlay() {
   // Live answer controls (mirrored to the active session via setAnswerPrefs).
   const [interviewType, setInterviewType] = useState<InterviewType>('general');
   const [answerFormat, setAnswerFormat] = useState<AnswerFormat>('key_points');
-  const [pronunciation, setPronunciation] = useState(false);
+  const [pronunciation, setPronunciation] = useState(true);
   // Coding sessions default to listen-only (don't auto-answer the interviewer, so a
   // generated coding answer isn't replaced). This toggle (coding-only) flips it on.
   const [answerInterviewer, setAnswerInterviewer] = useState(false);
@@ -870,13 +871,14 @@ export default function Overlay() {
                 {!c.collapsed && (
                   <div className="mt-0.5 leading-relaxed">
                     {c.answer ? (
-                      <Markdown>{c.answer}</Markdown>
+                      <Markdown>{splitPronunciation(c.answer).body}</Markdown>
                     ) : isCurrent && live && !paused ? (
                       <span className="text-xs text-neutral-500">Listening…</span>
                     ) : null}
                     {c.streaming && <span className="ml-0.5 animate-pulse">▋</span>}
                     <StoryCue card={c} />
                     <Citations card={c} openKey={openCite} onToggle={setOpenCite} />
+                    <PronunciationGuide card={c} />
                   </div>
                 )}
               </div>
@@ -1099,6 +1101,31 @@ export default function Overlay() {
           </div>
         </Modal>
       </div>
+    </div>
+  );
+}
+
+/** A structured "how to say it" panel for the hard words in the current answer —
+ *  kept separate from the (natural) answer so the spoken text stays clean. Parsing
+ *  lives in ./pronunciation (splitPronunciation), tolerant of model-output variance. */
+function PronunciationGuide({ card }: { card: AnswerCard }) {
+  const { entries } = splitPronunciation(card.answer);
+  if (entries.length === 0) return null;
+  return (
+    <div className="mt-1.5 space-y-1.5 rounded border border-teal-500/30 bg-teal-500/10 px-1.5 py-1 text-[10px]">
+      <div className="font-medium text-teal-200">🗣 How to say it</div>
+      {entries.map((e, i) => (
+        <div key={i} className="leading-snug text-teal-100/90">
+          <span className="font-semibold text-teal-100">{e.word}</span>
+          <span className="ml-1 text-teal-300/80">{e.say}</span>
+          {(e.pos || e.singular) && (
+            <div className="text-teal-100/70">
+              {e.pos}
+              {e.singular ? ` · singular: ${e.singular}` : ''}
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

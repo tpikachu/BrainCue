@@ -90,10 +90,14 @@ export async function* streamAnswer(input: AnswerInput): AsyncGenerator<AnswerEv
     `Interview type: ${input.interviewType}`,
     FORMAT_INSTRUCTION[input.format],
     input.pronunciation
-      ? 'Pronunciation: for rare, technical, or foreign terms, add a simple phonetic respelling in ' +
-        'parentheses the FIRST time each appears — lowercase syllables joined by hyphens, with the ' +
-        'STRESSED syllable in CAPITALS, e.g. "regulations (reg-yuh-LAY-shunz)", ' +
-        '"Kubernetes (koo-ber-NET-eez)", "Nguyen (WIN)". No IPA symbols. Common words need none.'
+      ? 'PRONUNCIATION GUIDE: keep the ANSWER itself clean — do NOT put respellings inline. ' +
+        'AFTER the answer, if any words in it are genuinely hard to pronounce (rare, technical, ' +
+        'foreign, or proper nouns), add a final section: a line containing exactly ' +
+        '[[PRONUNCIATION]], then ONE line per hard word formatted as ' +
+        '`word | part of speech | singular form (or — if n/a) | phonetic respelling`. ' +
+        'Respelling = lowercase syllables joined by hyphens with the STRESSED syllable in CAPITALS ' +
+        '(e.g. "regulations | noun, plural | regulation | reg-yuh-LAY-shunz"). No IPA. Only include ' +
+        'genuinely hard words; if none, omit the section entirely.'
       : '',
     `Candidate role target: ${input.profile.targetRole} @ ${input.profile.targetCompany ?? 'n/a'}`,
     '',
@@ -112,8 +116,9 @@ export async function* streamAnswer(input: AnswerInput): AsyncGenerator<AnswerEv
   const stream = await openai().responses.stream(
     {
       model: model('answer'),
-      // Hard ceiling per format so "key points" can never run long.
-      max_output_tokens: FORMAT_MAX_TOKENS[input.format],
+      // Hard ceiling per format so "key points" can never run long. Pronunciation adds
+      // a short trailing guide, so give it headroom (the guide must not eat the answer).
+      max_output_tokens: FORMAT_MAX_TOKENS[input.format] + (input.pronunciation ? 160 : 0),
       input: [
         { role: 'system', content: SYSTEM },
         { role: 'user', content: userPrompt },
