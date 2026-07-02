@@ -62,6 +62,14 @@ export const IPC = {
     create: 'notes:create',
     delete: 'notes:delete',
   },
+  applications: {
+    page: 'applications:page',
+    get: 'applications:get',
+    tailor: 'applications:tailor', // the Tailor Resume op: LLM → profile/job/app rows + index
+    reindex: 'applications:reindex', // re-embed the JD + tailored chunks (recovery/refresh)
+    exportPdf: 'applications:export-pdf', // tailored resume → ATS-friendly PDF (save dialog)
+    delete: 'applications:delete',
+  },
   stories: {
     list: 'stories:list',
     generate: 'stories:generate', // extract STAR stories from the résumé (replaces all)

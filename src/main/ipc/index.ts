@@ -3,6 +3,7 @@ import { registerSettingsIpc } from './settings.ipc';
 import { registerProfilesIpc } from './profiles.ipc';
 import { registerDocumentsIpc } from './documents.ipc';
 import { registerJobsIpc } from './jobs.ipc';
+import { registerApplicationsIpc } from './applications.ipc';
 import { registerNotesIpc } from './notes.ipc';
 import { registerStoriesIpc } from './stories.ipc';
 import { registerSessionIpc } from './session.ipc';
@@ -22,6 +23,7 @@ export function registerIpc(): void {
   registerProfilesIpc();
   registerDocumentsIpc();
   registerJobsIpc();
+  registerApplicationsIpc();
   registerNotesIpc();
   registerStoriesIpc();
   registerSessionIpc();

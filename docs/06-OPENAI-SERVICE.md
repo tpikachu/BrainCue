@@ -86,6 +86,20 @@ so it grounds the answer, stays citable, and the Cue Card surfaces it as a promi
 **"📖 Story to tell"** callout (`StoryCue` in Overlay.tsx, derived from the `contextSent` chunks —
 no extra IPC event or embedding call).
 
+### tailor.ts — `tailorApplication(input) => TailorResult`
+Powers **Tailor Resume** (v1.3). One call (new `tailor` model key — full `gpt-4.1` on
+balanced, `gpt-5` on best; latency-tolerant, quality-critical) takes the BASE resume ×
+JD × application questions and returns `{ candidateName, jobTitle, company,
+tailoredResume, answers[] }`. The prompt grounds EVERYTHING in the base resume (reword/
+reorder/emphasize — never invent employers, dates, metrics, or skills), mirrors the JD's
+keywords only where truthful (ATS matching), and mandates ATS structure: single column,
+standard H2 sections, plain markdown, no tables/images. Answers are first-person and
+grounded. Defensively parsed; throws if no resume comes back (so nothing persists).
+The `applications:tailor` handler then materializes a profile (uploaded-base path),
+a dedicated job (JD), and the application row; `indexJob` embeds the tailored resume as
+job-scoped `tailored` chunks, and `vectorStore.search` drops base `resume` chunks for
+jobs that have them — live sessions ground in the TAILORED resume + JD.
+
 ### embeddings.ts — `embed(texts: string[]) => Float32Array[]`
 Batches inputs, returns vectors; caller stores BLOBs. Records model + dim.
 

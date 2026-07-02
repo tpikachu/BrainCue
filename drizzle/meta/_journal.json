@@ -43,6 +43,13 @@
       "when": 1782843181685,
       "tag": "0005_wealthy_rhino",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1782994837940,
+      "tag": "0006_sour_shotgun",
+      "breakpoints": true
     }
   ]
 }

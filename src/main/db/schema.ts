@@ -96,6 +96,34 @@ export const stories = sqliteTable(
   (t) => ({ byProfile: index('stories_profile_idx').on(t.profileId) }),
 );
 
+// A job application from the Tailor Resume flow. Owns a dedicated jobs row (the JD +
+// the tailored resume's `tailored` chunks); "Start interview" launches a session with
+// (profile_id, job_id) so grounding swaps to the tailored resume automatically.
+export const applications = sqliteTable(
+  'applications',
+  {
+    id: text('id').primaryKey(),
+    profileId: text('profile_id')
+      .notNull()
+      .references(() => profiles.id, { onDelete: 'cascade' }),
+    jobId: text('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+    name: text('name').notNull().default(''), // candidate/application name
+    jobTitle: text('job_title').notNull().default(''), // extracted from the JD
+    company: text('company'), // extracted from the JD
+    baseResume: text('base_resume').notNull(), // input snapshot (provenance)
+    tailoredResume: text('tailored_resume').notNull(), // markdown — PDF + chunk source
+    answers: text('answers'), // json[] — [{ question, answer }]
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => ({
+    byProfile: index('applications_profile_idx').on(t.profileId),
+    byCreated: index('applications_created_idx').on(t.createdAt),
+  }),
+);
+
 export const chunks = sqliteTable(
   'chunks',
   {
@@ -103,9 +131,10 @@ export const chunks = sqliteTable(
     profileId: text('profile_id')
       .notNull()
       .references(() => profiles.id, { onDelete: 'cascade' }),
-    // Resume/notes/story chunks have jobId null; JD chunks belong to a specific job.
+    // Resume/notes/story chunks have jobId null; JD/company/tailored chunks belong
+    // to a specific job.
     jobId: text('job_id').references(() => jobs.id, { onDelete: 'cascade' }),
-    sourceType: text('source_type').notNull(), // resume | jd | note | company | story
+    sourceType: text('source_type').notNull(), // resume | jd | note | company | story | tailored
     sourceId: text('source_id'),
     ord: integer('ord').notNull().default(0),
     content: text('content').notNull(),

@@ -9,6 +9,7 @@ import ProfileEditorPage from './pages/ProfileEditorPage';
 import InterviewPage from './pages/InterviewPage';
 import MockPage from './pages/MockPage';
 import SparringPage from './pages/SparringPage';
+import TailorPage from './pages/TailorPage';
 import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
 import WhatsNewPage from './pages/WhatsNewPage';
@@ -16,6 +17,7 @@ import DevDbExplorerPage from './pages/DevDbExplorerPage';
 import { Titlebar } from './Titlebar';
 import { SidebarStatus } from './SidebarStatus';
 import { UpdateBanner } from './UpdateBanner';
+import { SavePromptModal } from './SavePromptModal';
 import {
   BoltIcon,
   DatabaseIcon,
@@ -23,6 +25,7 @@ import {
   ReportIcon,
   SettingsIcon,
   MicIcon,
+  UploadIcon,
   UserIcon,
 } from '../components/icons';
 import { Logo } from '../components/Logo';
@@ -35,6 +38,7 @@ const navItems = [
   { to: '/interview', label: 'Interview', Icon: MicIcon, tour: 'nav-session' },
   { to: '/mock', label: 'Mock Interview', Icon: MockIcon, tour: 'nav-mock' },
   { to: '/sparring', label: 'Sparring', Icon: BoltIcon, tour: 'nav-sparring' },
+  { to: '/tailor', label: 'Tailor Resume', Icon: UploadIcon, tour: 'nav-tailor' },
   { to: '/reports', label: 'Reports', Icon: ReportIcon, tour: 'nav-reports' },
   { to: '/settings', label: 'Settings', Icon: SettingsIcon, tour: 'nav-settings' },
   ...(DEV ? [{ to: '/dev', label: 'DB Explorer', Icon: DatabaseIcon, tour: 'nav-dev' }] : []),
@@ -137,6 +141,7 @@ export default function App() {
           <Route path="/interview" element={<InterviewPage />} />
           <Route path="/mock" element={<MockPage />} />
           <Route path="/sparring" element={<SparringPage />} />
+          <Route path="/tailor" element={<TailorPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/whats-new" element={<WhatsNewPage />} />
@@ -144,6 +149,10 @@ export default function App() {
         </Routes>
       </main>
       </div>
+
+      {/* Global: sessions can be started from several pages and stopped from the
+          Cue Card — the save-or-discard prompt must appear wherever the user is. */}
+      <SavePromptModal />
 
       {running && <Tour steps={TOUR_STEPS} onClose={finishTour} />}
     </div>

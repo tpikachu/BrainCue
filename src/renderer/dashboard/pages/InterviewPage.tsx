@@ -4,8 +4,8 @@ import { api } from '../../lib/api';
 import { useProfileStore } from '../../store/useProfileStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useLiveSession, type Line } from '../../store/useLiveSession';
-import type { InterviewType, Job, SessionDetail, SessionListItem } from '@shared/types';
-import { Badge, Button, Card, Field, Modal, Page, Select } from '../../components/ui';
+import type { Job, SessionDetail, SessionListItem } from '@shared/types';
+import { Badge, Button, Card, Field, Page, Select } from '../../components/ui';
 import { DataTable, type Column } from '../../components/DataTable';
 import { JobFormModal } from '../JobFormModal';
 import { BriefModal } from '../BriefModal';
@@ -13,16 +13,6 @@ import { SampleQuestions } from '../SampleQuestions';
 import { PlayIcon, PlusIcon } from '../../components/icons';
 
 const JOBS_PER_PAGE = 5;
-
-const INTERVIEW_TYPES: { value: InterviewType; label: string }[] = [
-  { value: 'general', label: 'General' },
-  { value: 'behavioral', label: 'Behavioral' },
-  { value: 'technical', label: 'Technical' },
-  { value: 'coding', label: 'Coding' },
-  { value: 'system_design', label: 'System design' },
-  { value: 'product', label: 'Product' },
-  { value: 'sales', label: 'Sales' },
-];
 
 export default function InterviewPage() {
   const { profiles, load } = useProfileStore();
@@ -50,14 +40,10 @@ export default function InterviewPage() {
   // Latest session per job, so each row offers Start (none yet) or Resume.
   const [sessionsByJob, setSessionsByJob] = useState<Map<string, SessionListItem>>(new Map());
   const [busyJobId, setBusyJobId] = useState<string | null>(null);
-  const [sessionsRev, setSessionsRev] = useState(0); // bump to re-fetch the session map
 
-  // Save-or-discard prompt for the just-ended session (pushed from main on stop).
-  const { pendingSave, clearPendingSave } = live;
-  const [saveType, setSaveType] = useState<InterviewType>('general');
-  useEffect(() => {
-    if (pendingSave) setSaveType(pendingSave.interviewType);
-  }, [pendingSave]);
+  // The save-or-discard prompt itself is GLOBAL (SavePromptModal in App) — here we
+  // only watch it so the table's Start/Resume buttons refresh after save/discard.
+  const { pendingSave } = live;
 
   useEffect(() => {
     void load();
@@ -103,7 +89,7 @@ export default function InterviewPage() {
       }
       setSessionsByJob(map);
     })();
-  }, [profileId, session, sessionsRev]);
+  }, [profileId, session, pendingSave]);
 
   // Reset the selection + paging whenever the profile changes.
   useEffect(() => {
@@ -186,20 +172,6 @@ export default function InterviewPage() {
     } finally {
       setBusyJobId(null);
     }
-  };
-
-  // Save the just-ended session with the chosen interview type, or discard it.
-  const saveSession = async () => {
-    if (!pendingSave) return;
-    await api.session.setInterviewType(pendingSave.sessionId, saveType);
-    clearPendingSave();
-    setSessionsRev((r) => r + 1);
-  };
-  const discardSession = async () => {
-    if (!pendingSave) return;
-    await api.session.delete(pendingSave.sessionId);
-    clearPendingSave();
-    setSessionsRev((r) => r + 1);
   };
 
   const jobColumns: Column<Job>[] = [
@@ -412,52 +384,6 @@ export default function InterviewPage() {
 
       {/* Pre-interview prep brief (résumé × JD × company), generated on open. */}
       <BriefModal open={!!briefJob} job={briefJob} onClose={() => setBriefJob(null)} />
-
-      {/* Save-or-discard the interview that just ended. */}
-      <Modal
-        open={!!pendingSave}
-        onClose={clearPendingSave}
-        title="Interview ended"
-        width="max-w-md"
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-neutral-300">
-            Save this interview{pendingSave?.jobTitle ? ` for “${pendingSave.jobTitle}”` : ''}?
-            {' '}
-            <span className="text-neutral-500">
-              {pendingSave?.questionCount
-                ? `${pendingSave.questionCount} question${pendingSave.questionCount === 1 ? '' : 's'} captured.`
-                : 'No questions were captured.'}
-            </span>
-          </p>
-          <Field label="What kind of interview was this?">
-            <Select value={saveType} onChange={(e) => setSaveType(e.target.value as InterviewType)}>
-              {INTERVIEW_TYPES.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <div className="flex items-center justify-between pt-1">
-            <Button variant="ghost" className="text-red-300" onClick={() => void discardSession()}>
-              Discard
-            </Button>
-            <div className="flex gap-2">
-              <Button variant="ghost" onClick={clearPendingSave}>
-                Decide later
-              </Button>
-              <Button variant="primary" onClick={() => void saveSession()}>
-                Save to Reports
-              </Button>
-            </div>
-          </div>
-          <p className="text-xs text-neutral-500">
-            “Discard” permanently deletes this session and its transcript. “Decide later” keeps it
-            for now — you can delete it from Reports.
-          </p>
-        </div>
-      </Modal>
     </Page>
   );
 }

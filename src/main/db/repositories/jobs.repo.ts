@@ -1,8 +1,14 @@
-import { and, desc, eq, inArray, like, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, like, notInArray, or, sql } from 'drizzle-orm';
 import { db, schema } from '../index';
 import type { Job } from '@shared/types';
 
 type Row = typeof schema.jobs.$inferSelect;
+
+/** Jobs owned by an application (Tailor Resume) are managed from the Applications
+ *  table — hide them from the regular Interviews list/page so they don't
+ *  double-surface (and can't be deleted out from under their application). */
+const notApplicationOwned = () =>
+  notInArray(schema.jobs.id, db().select({ id: schema.applications.jobId }).from(schema.applications));
 
 function toJob(r: Row): Job {
   return {
@@ -27,7 +33,7 @@ export const jobsRepo = {
     return db()
       .select()
       .from(schema.jobs)
-      .where(eq(schema.jobs.profileId, profileId))
+      .where(and(eq(schema.jobs.profileId, profileId), notApplicationOwned()))
       .orderBy(desc(schema.jobs.updatedAt))
       .all()
       .map(toJob);
@@ -38,9 +44,16 @@ export const jobsRepo = {
     return r ? toJob(r) : null;
   },
 
-  /** Total interviews (jobs) across all profiles — for the sidebar stats. */
+  /** Total interviews (jobs) across all profiles — for the sidebar stats. Excludes
+   *  application-owned jobs (those are counted as applications, not interviews). */
   count(): number {
-    return db().select({ c: sql<number>`count(*)` }).from(schema.jobs).get()?.c ?? 0;
+    return (
+      db()
+        .select({ c: sql<number>`count(*)` })
+        .from(schema.jobs)
+        .where(notApplicationOwned())
+        .get()?.c ?? 0
+    );
   },
 
   /** A page of jobs for a profile, newest first, optionally filtered by a search
@@ -50,7 +63,7 @@ export const jobsRepo = {
     total: number;
   } {
     const q = (opts.query ?? '').trim();
-    const base = eq(schema.jobs.profileId, opts.profileId);
+    const base = and(eq(schema.jobs.profileId, opts.profileId), notApplicationOwned());
     const where = q
       ? and(base, or(like(schema.jobs.title, `%${q}%`), like(schema.jobs.company, `%${q}%`)))
       : base;
