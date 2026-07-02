@@ -20,7 +20,9 @@ export type InterviewType =
 export type AnswerFormat = 'key_points' | 'explanation' | 'detailed' | 'story_teller';
 
 export type DocumentKind = 'resume' | 'jd' | 'note' | 'other';
-export type ChunkSource = 'resume' | 'jd' | 'note' | 'company' | 'story';
+/** `tailored` = an application's tailored resume, indexed job-scoped; when a job has
+ *  tailored chunks, retrieval drops the base `resume` chunks for that job's sessions. */
+export type ChunkSource = 'resume' | 'jd' | 'note' | 'company' | 'story' | 'tailored';
 export type SessionStatus = 'idle' | 'live' | 'stopped';
 export type Speaker = 'interviewer' | 'candidate' | 'unknown';
 
@@ -179,6 +181,35 @@ export interface Job {
   notes: string | null; // free-form client notes (user-facing, shown in setup + Cue Card)
   createdAt: number;
   updatedAt: number;
+}
+
+/** One application question + its grounded answer (Tailor Resume flow). */
+export interface ApplicationAnswer {
+  question: string;
+  answer: string;
+}
+
+/** A job application produced by the Tailor Resume flow: an ATS-friendly resume
+ *  tailored from a base resume × a JD (grounded — no invented experience), plus
+ *  answers to the application's questions. Owns a dedicated Job row holding the JD;
+ *  the tailored resume is indexed as that job's `tailored` chunks, so "Start
+ *  interview" grounds the live session in the TAILORED resume + JD. */
+export interface Application {
+  id: string;
+  profileId: string; // owning (real) profile — sessions/stories still belong to it
+  jobId: string; // dedicated job row (JD + tailored chunks); hidden from the Interviews table
+  name: string; // candidate/application name — shown as "[name] - [jobTitle] at [company]"
+  jobTitle: string;
+  company: string | null;
+  baseResume: string; // input snapshot (provenance)
+  tailoredResume: string; // markdown — the PDF source + `tailored` chunk source
+  answers: ApplicationAnswer[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ApplicationListItem extends Application {
+  profileName: string | null;
 }
 
 export interface RetrievedChunk {

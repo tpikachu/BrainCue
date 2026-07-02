@@ -56,12 +56,21 @@ export const sqliteVectorStore: VectorStore = {
       .from(schema.chunks)
       .innerJoin(schema.embeddings, eq(schema.embeddings.chunkId, schema.chunks.id))
       .where(eq(schema.chunks.profileId, profileId))
-      .all()
-      // Always include base chunks (resume/notes, jobId null); include JD chunks
-      // only for the selected job.
-      .filter((r) => r.jobId == null || r.jobId === jobId);
+      .all();
 
-    return rows
+    // An application job carries `tailored` chunks (the resume rewritten FOR that
+    // job) — when present, they REPLACE the base resume for this job's retrieval,
+    // so the session grounds in the tailored resume. Notes/stories still apply.
+    const hasTailored = rows.some((r) => r.jobId === jobId && r.sourceType === 'tailored');
+    const filtered = rows.filter(
+      (r) =>
+        // Base chunks (resume/notes/stories, jobId null) + the selected job's chunks…
+        (r.jobId == null || r.jobId === jobId) &&
+        // …minus the base resume when this job has a tailored one.
+        !(hasTailored && r.jobId == null && r.sourceType === 'resume'),
+    );
+
+    return filtered
       .map((r) => ({
         id: r.id,
         sourceType: r.sourceType as ChunkSource,

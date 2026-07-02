@@ -7,6 +7,7 @@ import { vectorToBuffer } from './vectorMath';
 import { model } from '../openai/models';
 import { profilesRepo } from '../../db/repositories/profiles.repo';
 import { storiesRepo, storyInsertValues } from '../../db/repositories/stories.repo';
+import { applicationsRepo } from '../../db/repositories/applications.repo';
 import { apiKeyStore } from '../security/apiKey';
 import type { Story, StoryDraft, StoryInput } from '@shared/types';
 
@@ -88,9 +89,15 @@ export async function indexJob(jobId: string): Promise<{ chunks: number; embedde
   db().delete(schema.chunks).where(eq(schema.chunks.jobId, jobId)).run();
   if (!apiKeyStore.isPresent()) return { chunks: 0, embedded: 0 };
 
-  const sources: { type: 'jd' | 'company'; text: string }[] = [];
+  const sources: { type: 'jd' | 'company' | 'tailored'; text: string }[] = [];
   if (job.jdText) sources.push({ type: 'jd', text: job.jdText });
   if (job.companyResearch) sources.push({ type: 'company', text: job.companyResearch });
+  // An application-owned job also indexes its TAILORED resume (job-scoped), which
+  // replaces the base resume in retrieval for this job's sessions (see vectorStore).
+  // Indexed here — inside indexJob's single clear-and-reinsert pass — so jd/company/
+  // tailored chunks never wipe each other.
+  const app = applicationsRepo.getByJobId(jobId);
+  if (app?.tailoredResume) sources.push({ type: 'tailored', text: app.tailoredResume });
   if (sources.length === 0) return { chunks: 0, embedded: 0 };
 
   const rows: { id: string; content: string }[] = [];

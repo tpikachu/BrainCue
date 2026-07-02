@@ -16,6 +16,9 @@ const BALANCED = {
   // screenshot path (vision.ts). The one task where a reasoning model earns its cost:
   // latency-tolerant (the user waits a beat) and correctness is the whole point.
   coding: 'gpt-5-mini',
+  // Resume tailoring (Tailor Resume flow) — one-off, latency-tolerant, and the output
+  // IS the user's application document, so it gets the full non-reasoning model.
+  tailor: 'gpt-4.1',
 } as const;
 
 export type ModelKey = keyof typeof BALANCED;
@@ -39,6 +42,7 @@ export const PRESETS: Record<PresetName, Record<ModelKey, string>> = {
     tts: 'gpt-4o-mini-tts',
     mock: 'gpt-4.1-mini',
     coding: 'gpt-5-mini',
+    tailor: 'gpt-4.1-mini',
   },
   best: {
     answer: 'gpt-4.1', // full model: higher quality, still non-reasoning = still snappy
@@ -49,6 +53,7 @@ export const PRESETS: Record<PresetName, Record<ModelKey, string>> = {
     tts: 'gpt-4o-mini-tts',
     mock: 'gpt-4.1',
     coding: 'gpt-5', // strongest reasoning solver for the hardest problems
+    tailor: 'gpt-5', // reasoning model may deliberate over wording; latency is fine here
   },
 };
 
@@ -82,6 +87,7 @@ export type ReasoningEffort = 'low' | 'medium' | 'high';
  *  default; the live answer/classify paths stay on fast non-reasoning models. */
 export const defaultEfforts: Partial<Record<ModelKey, ReasoningEffort>> = {
   coding: 'low',
+  tailor: 'medium', // only sent when the resolved tailor model is a reasoning one ('best')
 };
 
 /** Effective effort for a task (user override → built-in default → none). */

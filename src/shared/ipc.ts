@@ -62,6 +62,12 @@ export const IPC = {
     create: 'notes:create',
     delete: 'notes:delete',
   },
+  applications: {
+    page: 'applications:page',
+    get: 'applications:get',
+    tailor: 'applications:tailor', // the Tailor Resume op: LLM → profile/job/app rows + index
+    delete: 'applications:delete',
+  },
   stories: {
     list: 'stories:list',
     generate: 'stories:generate', // extract STAR stories from the résumé (replaces all)
