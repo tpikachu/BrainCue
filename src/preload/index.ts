@@ -128,7 +128,12 @@ const api = {
       baseResumeText: string | null;
       jdText: string;
       questions: string[];
-    }) => invoke<{ application: Application; embedded: number }>(IPC.applications.tailor, input),
+    }) =>
+      invoke<{ application: Application; embedded: number; indexError: string | null }>(
+        IPC.applications.tailor,
+        input,
+      ),
+    reindex: (id: string) => invoke<{ embedded: number }>(IPC.applications.reindex, { id }),
     exportPdf: (id: string) =>
       invoke<{ saved: boolean; filePath?: string }>(IPC.applications.exportPdf, { id }),
     delete: (id: string) => invoke<{ deleted: true }>(IPC.applications.delete, { id }),

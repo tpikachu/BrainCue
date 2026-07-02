@@ -8,7 +8,9 @@ import { tailorApplication } from '../services/openai/tailor';
 import { parseJobDescription, parseResume } from '../services/openai/parsing';
 import { indexJob, reindexProfile } from '../services/rag/indexProfile';
 import { exportResumePdf } from '../services/documents/resumePdf';
+import { normalizeOpenAIError } from '../services/openai/client';
 import { apiKeyStore } from '../services/security/apiKey';
+import { log } from '../services/security/logger';
 
 export function registerApplicationsIpc(): void {
   handle(
@@ -67,7 +69,8 @@ export function registerApplicationsIpc(): void {
       const parsedResume = existing ? null : await parseResume(baseResume);
 
       // Uploaded base resume → materialize a real, reusable profile for it (sessions
-      // and jobs both require an owning profile).
+      // and jobs both require an owning profile). Its embedding runs in the
+      // best-effort block below, AFTER the application row exists.
       let owner = existing;
       if (!owner) {
         owner = profilesRepo.create({
@@ -80,7 +83,6 @@ export function registerApplicationsIpc(): void {
           jdText: null,
         });
         profilesRepo.update(owner.id, { parsedResume });
-        await reindexProfile(owner.id);
       }
 
       // The application's dedicated job: holds the JD + (via indexJob) the tailored
@@ -107,12 +109,31 @@ export function registerApplicationsIpc(): void {
         answers: result.answers,
       });
 
-      // Embed JD + tailored chunks. If embedding fails the app still exists; its
-      // sessions fall back to base-resume grounding until a re-index succeeds.
-      const { embedded } = await indexJob(job.id);
-      return { application: app, embedded };
+      // BEST-EFFORT indexing — every row already exists, so an embedding failure
+      // (429/network) must NOT fail the operation or lose the paid result. Sessions
+      // fall back to base-resume grounding until "Re-index" succeeds; a new profile's
+      // base chunks self-heal on its next resume save.
+      let embedded = 0;
+      let indexError: string | null = null;
+      try {
+        if (!existing) await reindexProfile(owner.id);
+        ({ embedded } = await indexJob(job.id));
+      } catch (e) {
+        indexError = normalizeOpenAIError(e);
+        log.warn('applications:tailor indexing failed (app saved)', indexError);
+      }
+      return { application: app, embedded, indexError };
     },
   );
+
+  // Re-embed an application's grounding (JD + tailored chunks) — the recovery path
+  // when indexing failed at tailor time (and a way to re-embed after model changes).
+  handle(IPC.applications.reindex, zId, async ({ id }) => {
+    const app = applicationsRepo.get(id);
+    if (!app) throw new Error('Application not found');
+    const { embedded } = await indexJob(app.jobId);
+    return { embedded };
+  });
 
   // Save the tailored resume as an ATS-friendly PDF (native save dialog).
   handle(IPC.applications.exportPdf, zId, async ({ id }) => {

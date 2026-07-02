@@ -91,6 +91,21 @@ independently.
 | `notes:create` | `{ profileId, content }` | `Note` |
 | `notes:delete` | `{ id }` | `{ deleted: true }` |
 
+### applications (Tailor Resume)
+A job application produced by the Tailor Resume flow: an ATS-friendly resume tailored
+from a base resume × JD (grounded — never invented), plus answers to the application
+questions. Each application owns a dedicated (hidden) job row; its tailored resume is
+indexed as that job's `tailored` chunks, so "Start interview" (session.start with the
+app's profile+job) grounds the live session in the TAILORED resume + JD.
+| Channel | Request | Response |
+|---|---|---|
+| `applications:page` | `{ query?, limit=8, offset=0 }` | `{ items: ApplicationListItem[], total }` (global, newest first; `LIKE` over name/title/company) |
+| `applications:get` | `{ id }` | `Application` |
+| `applications:tailor` | `{ profileId\|null, baseResumeText\|null, jdText, questions[] }` | `{ application, embedded, indexError }` (ALL model calls run before any write — an LLM failure persists nothing. An uploaded base resume materializes a real profile. Indexing is best-effort AFTER the rows exist: on failure the app is still saved and `indexError` is set — recover via `applications:reindex`) |
+| `applications:reindex` | `{ id }` | `{ embedded }` (re-embed the JD + tailored chunks — recovery/refresh) |
+| `applications:export-pdf` | `{ id }` | `{ saved, filePath? }` (tailored resume → ATS-friendly PDF via a hidden window + printToPDF; native save dialog; `saved:false` on cancel) |
+| `applications:delete` | `{ id }` | `{ deleted: true }` (also removes the dedicated job + its chunks; sessions keep history with jobId nulled) |
+
 ### stories
 The per-profile STAR story bank (`Story[]`). Stories are extracted from the parsed
 résumé, persisted, and indexed as `story` chunks so they ground live answers.

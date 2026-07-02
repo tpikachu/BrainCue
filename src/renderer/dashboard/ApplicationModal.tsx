@@ -62,6 +62,22 @@ export function ApplicationModal({
     }
   };
 
+  // Recovery path when indexing failed at tailor time (also re-embeds after
+  // switching the embedding model): re-index the JD + tailored grounding chunks.
+  const reindex = async () => {
+    setBusy('Re-indexing…');
+    setError(null);
+    setNotice(null);
+    try {
+      const r = await api.applications.reindex(app.id);
+      setNotice(`Re-indexed ✓ — ${r.embedded} chunks embedded. Interviews now ground in this tailored resume.`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <Modal open={open} onClose={onClose} title={label} width="max-w-3xl">
       <div className="space-y-5">
@@ -79,6 +95,14 @@ export function ApplicationModal({
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="primary" disabled={!!busy} onClick={() => void downloadPdf()}>
             {busy === 'Exporting PDF…' ? 'Exporting…' : 'Download PDF'}
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={!!busy}
+            title="Re-embed the tailored resume + JD for live-interview grounding"
+            onClick={() => void reindex()}
+          >
+            {busy === 'Re-indexing…' ? 'Re-indexing…' : 'Re-index'}
           </Button>
           {confirmDelete ? (
             <>

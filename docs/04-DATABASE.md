@@ -12,7 +12,8 @@ profiles 1───* documents 1───* chunks ──* embeddings
    │                                   (1:1 chunk:embedding)
    ├──* notes
    ├──* stories                      (STAR stories; also indexed as `story` chunks, job_id null)
-   ├──* jobs ────* chunks            (JD + company-research chunks carry job_id; resume/note/story chunks have job_id null)
+   ├──* applications ──1 jobs        (Tailor Resume: each application owns a dedicated, hidden job; its tailored resume = that job's `tailored` chunks)
+   ├──* jobs ────* chunks            (JD + company-research + tailored chunks carry job_id; resume/note/story chunks have job_id null)
    │       └──── sessions            (a session optionally references the job it's for)
    └──* sessions 1──* transcript_chunks
                  1──* detected_questions 1──* ai_answers
@@ -68,6 +69,12 @@ Uploaded file metadata + parsed text.
 Freeform additional notes attached to a profile.
 | id | profile_id FK | content | created_at |
 
+### `applications`
+A Tailor Resume application: the ATS-friendly resume tailored from a base resume × JD,
+plus grounded answers to the application questions. Owns a dedicated jobs row (hidden
+from the Interviews UI) whose `tailored` chunks ground that application's interviews.
+| id | profile_id FK (cascade) | job_id FK (cascade) | name | job_title | company | base_resume | tailored_resume | answers (json[]) | created_at | updated_at |
+
 ### `stories`
 Reusable STAR stories extracted from the résumé, tagged by competency + skills.
 Profile-level (reused across every interview); also indexed as `story` chunks so
@@ -75,13 +82,16 @@ they can ground live answers.
 | id | profile_id FK | title | situation | task | action | result | competencies (json[]) | skills (json[]) | created_at | updated_at |
 
 ### `chunks`
-Chunked text from documents/notes/profile fields/stories for RAG.
-| id | profile_id FK | job_id FK (nullable) | source_type (resume/jd/note/company/story) | source_id | ord | content | token_count | created_at |
+Chunked text from documents/notes/profile fields/stories/tailored resumes for RAG.
+| id | profile_id FK | job_id FK (nullable) | source_type (resume/jd/note/company/story/tailored) | source_id | ord | content | token_count | created_at |
 
-`job_id` is set on JD **and** company-research chunks (both cascade on job
+`job_id` is set on JD, company-research, **and** `tailored` chunks (all cascade on job
 delete); resume/note/story chunks have `job_id` null. `story` chunks are managed
 by `indexStories` (one chunk per story) and are deliberately **excluded** from the
 résumé/notes re-index, so re-saving a résumé doesn't wipe the curated story bank.
+`tailored` chunks (an application's tailored resume, indexed by `indexJob`) REPLACE the
+base `resume` chunks in retrieval whenever the selected job has them — that's how
+"Start interview" on an application grounds in the tailored resume instead of the base.
 
 ### `embeddings`
 | id | chunk_id FK (unique) | model | dim | vector BLOB | created_at |
@@ -115,14 +125,16 @@ Known keys:
 - `tour_done` — `'1'` once the first-run guided tour is completed/skipped.
 
 ## Deletion semantics
-Deleting a profile cascades to its documents, notes, stories, jobs, chunks,
-embeddings, sessions, and everything under sessions (FK `on delete cascade`). Deleting a job
-cascades to its JD chunks and nulls `sessions.job_id` (the session history is
-kept). Original uploaded files in `userData/documents/` are removed by the
-documents service.
+Deleting a profile cascades to its documents, notes, stories, applications, jobs,
+chunks, embeddings, sessions, and everything under sessions (FK `on delete cascade`).
+Deleting a job cascades to its JD/company/tailored chunks and nulls `sessions.job_id`
+(the session history is kept). Deleting an application removes its dedicated job the
+same way, then the application row. Original uploaded files in `userData/documents/`
+are removed by the documents service.
 
 ## Indexes
 - `chunks(profile_id)`, `jobs(profile_id)`, `stories(profile_id)`,
+  `applications(profile_id)`, `applications(created_at)`,
   `embeddings(chunk_id)`, `transcript_chunks(session_id)`,
   `detected_questions(session_id)`, `ai_answers(question_id)`,
   `sessions(profile_id)`, `documents(profile_id)`, `notes(profile_id)`.

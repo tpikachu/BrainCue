@@ -17,6 +17,7 @@ import DevDbExplorerPage from './pages/DevDbExplorerPage';
 import { Titlebar } from './Titlebar';
 import { SidebarStatus } from './SidebarStatus';
 import { UpdateBanner } from './UpdateBanner';
+import { SavePromptModal } from './SavePromptModal';
 import {
   BoltIcon,
   DatabaseIcon,
@@ -148,6 +149,10 @@ export default function App() {
         </Routes>
       </main>
       </div>
+
+      {/* Global: sessions can be started from several pages and stopped from the
+          Cue Card — the save-or-discard prompt must appear wherever the user is. */}
+      <SavePromptModal />
 
       {running && <Tour steps={TOUR_STEPS} onClose={finishTour} />}
     </div>

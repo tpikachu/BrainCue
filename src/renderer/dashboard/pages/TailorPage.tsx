@@ -123,6 +123,12 @@ export default function TailorPage() {
       setPage(0);
       setRev((v) => v + 1);
       void load(); // an uploaded base resume may have created a new profile
+      // Saved, but grounding wasn't embedded (e.g. a rate limit) — recoverable.
+      if (r.indexError)
+        setError(
+          `Application saved, but indexing its grounding failed (${r.indexError}). ` +
+            'Open it and press "Re-index" so interviews use the tailored resume.',
+        );
     });
 
   // Start a live interview grounded in this application's tailored resume + JD.
