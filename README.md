@@ -18,6 +18,17 @@
   <img alt="Built with Electron" src="https://img.shields.io/badge/Electron-React%20%C2%B7%20TypeScript-47848F?style=flat-square" />
 </p>
 
+## See it in action
+
+<p align="center">
+  <img src="docs/media/cuecard-teaser.gif" width="440" alt="The Cue Card during a live mock interview: a question is detected, a grounded answer streams in, the previous answer collapses into history, and the format switches to Story mid-stream." />
+  <br /><sub><b>Live, in real time</b> — the question is heard, and a grounded answer streams into the Cue Card.</sub>
+</p>
+
+<p align="center">
+  <a href="docs/media/braincue-demo.mp4"><b>▶ Watch the full demo (76s)</b></a>
+</p>
+
 ## Screenshots
 
 <!-- Drop PNGs at the paths below to fill these in. Capture guide: docs/images/README.md.
