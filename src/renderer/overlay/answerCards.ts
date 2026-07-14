@@ -11,6 +11,7 @@ export interface AnswerCard {
   answer: string;
   meta: AnswerMetaEvent | null;
   context: ContextSentEvent | null;
+  followup: string | null; // predicted likely interviewer follow-up (post-stream)
   streaming: boolean;
   collapsed: boolean;
   isCoding: boolean; // a coding-solver card (not a live-session question → not regenerable)
@@ -30,6 +31,7 @@ export function makeCard(
     answer: '',
     meta: null,
     context: null,
+    followup: null,
     streaming: true,
     collapsed: false,
     isCoding,

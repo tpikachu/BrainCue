@@ -24,6 +24,7 @@ describe('makeCard', () => {
       answer: '',
       meta: null,
       context: null,
+      followup: null,
       streaming: true,
       collapsed: false,
       isCoding: false,

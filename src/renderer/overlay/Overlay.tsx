@@ -198,6 +198,10 @@ export default function Overlay() {
         const m = p as AnswerMetaEvent;
         setCards((cs) => patchById(cs, m.questionId, { meta: m }));
       }),
+      api.events.onAnswerFollowup((p) => {
+        const f = p as { questionId: string; followup: string };
+        setCards((cs) => patchById(cs, f.questionId, { followup: f.followup }));
+      }),
       api.events.onAnswerDone((p) => {
         flush();
         setCards((cs) => patchById(cs, (p as { questionId: string }).questionId, { streaming: false }));
@@ -214,6 +218,7 @@ export default function Overlay() {
             answer: '',
             meta: null,
             context: null,
+            followup: null,
             streaming: true,
             collapsed: false,
           }),
@@ -964,6 +969,12 @@ export default function Overlay() {
                       <span className="text-xs text-neutral-500">Listening…</span>
                     ) : null}
                     {c.streaming && <span className="ml-0.5 animate-pulse">▋</span>}
+                    {!c.streaming && c.followup && (
+                      <p className="mt-1.5 rounded border-l-2 border-indigo-500/60 bg-indigo-500/5 px-2 py-1 text-[11px] text-indigo-200/90">
+                        <span className="font-medium text-indigo-300">Likely follow-up:</span>{' '}
+                        {c.followup}
+                      </p>
+                    )}
                     <StoryCue card={c} />
                     <Citations card={c} openKey={openCite} onToggle={setOpenCite} />
                   </div>

@@ -160,6 +160,7 @@ export const EVENTS = {
   answerMeta: 'session:answer-meta',
   answerDone: 'session:answer-done',
   answerReset: 'session:answer-reset', // regenerate: clear the Cue Card answer, keep the transcript
+  answerFollowup: 'session:answer-followup', // post-stream predicted interviewer follow-up
   contextSent: 'session:context',
   sessionError: 'session:error',
   overlayApplySettings: 'overlay:apply-settings',

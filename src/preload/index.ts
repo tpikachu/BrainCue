@@ -297,6 +297,7 @@ const api = {
     onAnswerMeta: (cb: (p: unknown) => void) => on(EVENTS.answerMeta, cb),
     onAnswerDone: (cb: (p: unknown) => void) => on(EVENTS.answerDone, cb),
     onAnswerReset: (cb: (p: unknown) => void) => on(EVENTS.answerReset, cb),
+    onAnswerFollowup: (cb: (p: unknown) => void) => on(EVENTS.answerFollowup, cb),
     onContextSent: (cb: (p: unknown) => void) => on(EVENTS.contextSent, cb),
     onSessionError: (cb: (p: unknown) => void) => on(EVENTS.sessionError, cb),
     onOverlayApplySettings: (cb: (p: unknown) => void) => on(EVENTS.overlayApplySettings, cb),

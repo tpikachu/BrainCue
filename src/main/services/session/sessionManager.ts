@@ -8,6 +8,7 @@ import { sessionsRepo } from '../../db/repositories/sessions.repo';
 import { transcribeChunk } from '../openai/transcription';
 import { classifyQuestion } from '../openai/questions';
 import { streamAnswer } from '../openai/answer';
+import { predictFollowup } from '../openai/followup';
 import { normalizeOpenAIError } from '../openai/client';
 import { retrieve } from '../rag/retriever';
 import { RealtimeTranscriber } from '../openai/realtime';
@@ -524,6 +525,28 @@ export const sessionManager = {
       .run();
 
     broadcast(EVENTS.answerDone, { questionId });
+
+    // Predict the interviewer's likely follow-up AFTER the answer is done — a
+    // cheap classify-tier call that can never touch first-token latency.
+    // Fire-and-forget: a failed prediction is silent. Skipped for mock
+    // rehearsals (the AI interviewer generates its own next question anyway).
+    if (answer && live && !live.isMock && live.sessionId === sessionId) {
+      const interviewType = live.interviewType;
+      void predictFollowup({ question: questionText, answer, interviewType })
+        .then((followup) => {
+          if (!followup) return;
+          // Written by questionId so a regenerate's fresh row still gets it;
+          // the overlay routes the annotation to the same card.
+          db()
+            .update(schema.aiAnswers)
+            .set({ followupQuestion: followup })
+            .where(eq(schema.aiAnswers.questionId, questionId))
+            .run();
+          broadcast(EVENTS.answerFollowup, { questionId, followup }, ['overlay']);
+        })
+        .catch((e) => log.warn('followup prediction failed', e));
+    }
+
     return { questionId };
   },
 
