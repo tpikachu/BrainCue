@@ -141,4 +141,6 @@ export function registerSessionIpc(): void {
     z.object({ sessionId: z.string().min(1) }),
     ({ sessionId }) => sessionsRepo.getReport(sessionId),
   );
+
+  handle(IPC.session.practiceStats, z.void(), () => sessionsRepo.practiceStats());
 }

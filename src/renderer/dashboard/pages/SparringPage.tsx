@@ -242,7 +242,7 @@ export default function SparringPage() {
   return (
     <Page
       title="Sparring"
-      subtitle="A two-way voice mock: the AI asks aloud, you answer by speaking, and it coaches each answer. Hold the button to talk. Drills aren’t saved."
+      subtitle="A two-way voice mock: the AI asks aloud, you answer by speaking, and it coaches each answer. Hold the button to talk. Every drill is saved to Reports, so your scores build a trend."
     >
       {busy && <BusyOverlay message={busy} />}
 
@@ -471,9 +471,14 @@ export default function SparringPage() {
               ))}
             </ol>
           )}
-          <Button variant="primary" className="mt-4" onClick={() => void finish()}>
-            Start another
-          </Button>
+          <div className="mt-4 flex items-center gap-3">
+            <Button variant="primary" onClick={() => void finish()}>
+              Start another
+            </Button>
+            <Link to="/reports" className="text-sm text-indigo-300 underline-offset-2 hover:underline">
+              See your practice trend in Reports →
+            </Link>
+          </div>
         </Card>
       )}
     </Page>

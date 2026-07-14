@@ -1,12 +1,14 @@
-import { desc, eq, sql } from 'drizzle-orm';
+import { asc, desc, eq, sql } from 'drizzle-orm';
 import { db, schema } from '../index';
 import type {
   AiAnswer,
   DetectedQuestion,
+  PracticeStats,
   Session,
   SessionDetail,
   SessionListItem,
   SessionReport,
+  StoryCompetency,
   TranscriptChunk,
 } from '@shared/types';
 
@@ -216,6 +218,62 @@ export const sessionsRepo = {
         .where(eq(schema.detectedQuestions.sessionId, id))
         .get()?.c ?? 0
     );
+  },
+
+  /** Practice Loop aggregates over every sparring drill's per-answer coaching
+   *  (answer_feedback ⨝ sessions kind='sparring'). Small local data — computed
+   *  in one pass, no pagination needed. */
+  practiceStats(): PracticeStats {
+    const rows = db()
+      .select({
+        sessionId: schema.answerFeedback.sessionId,
+        rating: schema.answerFeedback.rating,
+        competency: schema.answerFeedback.competency,
+        sessionCreatedAt: schema.sessions.createdAt,
+      })
+      .from(schema.answerFeedback)
+      .innerJoin(schema.sessions, eq(schema.sessions.id, schema.answerFeedback.sessionId))
+      .where(eq(schema.sessions.kind, 'sparring'))
+      .orderBy(asc(schema.sessions.createdAt), asc(schema.answerFeedback.createdAt))
+      .all();
+
+    const answers = rows.length;
+    const avgRating = answers ? rows.reduce((s, r) => s + r.rating, 0) / answers : 0;
+
+    const byComp = new Map<string, { sum: number; n: number }>();
+    for (const r of rows) {
+      if (!r.competency) continue;
+      const c = byComp.get(r.competency) ?? { sum: 0, n: 0 };
+      c.sum += r.rating;
+      c.n += 1;
+      byComp.set(r.competency, c);
+    }
+    const byCompetency = [...byComp.entries()]
+      .map(([competency, { sum, n }]) => ({
+        competency: competency as StoryCompetency,
+        avgRating: sum / n,
+        count: n,
+      }))
+      .sort((a, b) => b.count - a.count || b.avgRating - a.avgRating);
+
+    // Per-drill averages in chronological order (rows are already sorted).
+    const drills = new Map<string, { createdAt: number; sum: number; n: number }>();
+    for (const r of rows) {
+      const d = drills.get(r.sessionId) ?? { createdAt: r.sessionCreatedAt, sum: 0, n: 0 };
+      d.sum += r.rating;
+      d.n += 1;
+      drills.set(r.sessionId, d);
+    }
+    const recent = [...drills.entries()]
+      .map(([sessionId, d]) => ({
+        sessionId,
+        createdAt: d.createdAt,
+        avgRating: d.sum / d.n,
+        answers: d.n,
+      }))
+      .slice(-12);
+
+    return { sessions: drills.size, answers, avgRating, byCompetency, recent };
   },
 
   count(): { total: number; live: number } {

@@ -91,6 +91,7 @@ export const IPC = {
     delete: 'session:delete',
     generateReport: 'session:generate-report',
     getReport: 'session:get-report',
+    practiceStats: 'session:practice-stats', // Practice Loop aggregates (Reports)
     ask: 'session:ask',
     askActive: 'session:ask-active',
     setInterviewType: 'session:set-interview-type',

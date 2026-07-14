@@ -1,6 +1,7 @@
 import { openai } from './client';
 import { model } from './models';
-import type { InterviewType, Job, Profile, SparringFeedback } from '@shared/types';
+import { COMPETENCIES } from './stories';
+import type { InterviewType, Job, Profile, SparringFeedback, StoryCompetency } from '@shared/types';
 
 export interface FeedbackInput {
   question: string;
@@ -37,6 +38,8 @@ disfluencies/transcription noise — judge the substance). Return JSON only:
   metric/result, STAR framing, relevance to the role).
 - tip: ONE actionable pointer — ideally name a real project/skill/metric FROM THEIR RÉSUMÉ they
   could have used to strengthen the answer.
+- competency: the ONE competency the QUESTION primarily probes, chosen from exactly this list:
+  ${COMPETENCIES.join(', ')}. (Used to chart practice progress per competency.)
 
 Be specific and constructive. Judge ONLY what they actually said against the question. Never
 invent experience or claim they said things they didn't. If the answer is empty or off-topic,
@@ -73,6 +76,10 @@ export async function evaluateAnswer(input: FeedbackInput): Promise<SparringFeed
     Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
   const ratingNum = Math.round(Number(raw.rating));
   const rating = Number.isFinite(ratingNum) ? Math.min(5, Math.max(1, ratingNum)) : 3;
+  // Closed-set validation — an off-list competency degrades to null, never junk.
+  const competency = (COMPETENCIES as readonly string[]).includes(raw.competency as string)
+    ? (raw.competency as StoryCompetency)
+    : null;
 
   return {
     verdict: typeof raw.verdict === 'string' ? raw.verdict : '',
@@ -80,5 +87,6 @@ export async function evaluateAnswer(input: FeedbackInput): Promise<SparringFeed
     strengths: strs(raw.strengths),
     improvements: strs(raw.improvements),
     tip: typeof raw.tip === 'string' ? raw.tip : '',
+    competency,
   };
 }

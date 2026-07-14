@@ -138,6 +138,9 @@ export interface SparringFeedback {
   strengths: string[]; // what landed well
   improvements: string[]; // concrete things to do better next time
   tip: string; // one actionable pointer (e.g. a résumé item they could have used)
+  /** The one competency the question probed (closed StoryCompetency set) — powers
+   *  the per-competency practice trends in Reports. Null if unclassifiable. */
+  competency: StoryCompetency | null;
 }
 
 /** A pre-interview prep brief: a résumé × JD × company gap analysis generated
@@ -282,6 +285,16 @@ export interface SessionReport {
   improvements: string[];
   perQuestion: { question: string; assessment: string }[];
   createdAt: number;
+}
+
+/** Aggregated Practice Loop stats across all sparring drills (Reports). */
+export interface PracticeStats {
+  sessions: number; // sparring drills with at least one coached answer
+  answers: number; // total coached answers
+  avgRating: number; // mean rating across all answers (0 when none)
+  byCompetency: { competency: StoryCompetency; avgRating: number; count: number }[]; // count desc
+  /** Per-drill average rating, oldest → newest (trend line; last 12 drills). */
+  recent: { sessionId: string; createdAt: number; avgRating: number; answers: number }[];
 }
 
 export interface SessionListItem extends Session {

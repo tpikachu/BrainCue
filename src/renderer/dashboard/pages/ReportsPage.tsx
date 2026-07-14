@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../lib/api';
-import type { SessionListItem, SessionReport } from '@shared/types';
-import { Badge, Button, Modal, Page, Spinner } from '../../components/ui';
+import type { PracticeStats, SessionListItem, SessionReport } from '@shared/types';
+import { Badge, Button, Card, Modal, Page, Spinner } from '../../components/ui';
 import { DataTable, type Column } from '../../components/DataTable';
 import { Markdown } from '../../components/Markdown';
 
@@ -24,6 +24,7 @@ function fmtHours(ms: number): string {
 
 export default function ReportsPage() {
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
+  const [practice, setPractice] = useState<PracticeStats | null>(null);
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -38,6 +39,7 @@ export default function ReportsPage() {
     setLoading(true);
     try {
       setSessions((await api.session.list()) as SessionListItem[]);
+      setPractice((await api.session.practiceStats()) as PracticeStats);
     } finally {
       setLoading(false);
     }
@@ -108,7 +110,10 @@ export default function ReportsPage() {
           .join(' · ');
         return (
           <div className="flex flex-col gap-0.5" title={breakdown}>
-            <Badge>{s.interviewType.replace(/_/g, ' ')}</Badge>
+            <span className="flex items-center gap-1">
+              <Badge>{s.interviewType.replace(/_/g, ' ')}</Badge>
+              {s.kind === 'sparring' && <Badge tone="amber">Practice</Badge>}
+            </span>
             {total > 0 && <span className="text-[11px] text-neutral-500">{total} questions</span>}
           </div>
         );
@@ -156,6 +161,8 @@ export default function ReportsPage() {
       title="Reports"
       subtitle="Every interview session, newest first. Open one for a coaching report."
     >
+      {practice && practice.answers > 0 && <PracticeCard stats={practice} />}
+
       {sessions.length > 0 && (
         <div className="mb-4 flex gap-3 text-sm text-neutral-400">
           <span>
@@ -231,6 +238,91 @@ export default function ReportsPage() {
         )}
       </Modal>
     </Page>
+  );
+}
+
+/** The Practice Loop summary: overall average, a per-drill trend, and the
+ *  per-competency averages — all from persisted sparring coaching. Single-hue
+ *  magnitude visuals (indigo accent on the app surface); values are shown as
+ *  text so nothing depends on color alone. */
+function PracticeCard({ stats }: { stats: PracticeStats }) {
+  const trend = stats.recent;
+  // Fixed, honest 0–5 domain for both the sparkline and the bar lengths.
+  const W = 220;
+  const H = 48;
+  const PAD = 6;
+  const x = (i: number) => (trend.length === 1 ? W / 2 : PAD + (i * (W - PAD * 2)) / (trend.length - 1));
+  const y = (v: number) => H - PAD - ((v / 5) * (H - PAD * 2));
+  const points = trend.map((d, i) => `${x(i).toFixed(1)},${y(d.avgRating).toFixed(1)}`).join(' ');
+
+  return (
+    <Card className="mb-5">
+      <div className="flex flex-wrap items-start justify-between gap-x-8 gap-y-4">
+        <div className="min-w-0">
+          <h3 className="font-medium text-neutral-100">Practice</h3>
+          <p className="mt-0.5 text-xs text-neutral-500">
+            {stats.sessions} drill{stats.sessions === 1 ? '' : 's'} · {stats.answers} answer
+            {stats.answers === 1 ? '' : 's'} coached
+          </p>
+          <p className="mt-3 text-3xl font-semibold tracking-tight text-neutral-100">
+            {stats.avgRating.toFixed(1)}
+            <span className="ml-1 text-base font-normal text-neutral-500">/ 5 average</span>
+          </p>
+          {trend.length > 1 && (
+            <div className="mt-3">
+              <p className="mb-1 text-[11px] uppercase tracking-wide text-neutral-500">
+                Per-drill average
+              </p>
+              <svg width={W} height={H} role="img" aria-label="Average rating per practice drill">
+                <polyline
+                  points={points}
+                  fill="none"
+                  stroke="#818cf8"
+                  strokeWidth="2"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+                {trend.map((d, i) => (
+                  <circle key={d.sessionId} cx={x(i)} cy={y(d.avgRating)} r="3" fill="#818cf8">
+                    <title>
+                      {new Date(d.createdAt).toLocaleDateString()} — {d.avgRating.toFixed(1)}/5 (
+                      {d.answers} answer{d.answers === 1 ? '' : 's'})
+                    </title>
+                  </circle>
+                ))}
+              </svg>
+            </div>
+          )}
+        </div>
+
+        {stats.byCompetency.length > 0 && (
+          <div className="min-w-[16rem] flex-1">
+            <p className="mb-2 text-[11px] uppercase tracking-wide text-neutral-500">
+              By competency
+            </p>
+            <ul className="space-y-1.5">
+              {stats.byCompetency.slice(0, 6).map((c) => (
+                <li key={c.competency} className="flex items-center gap-2 text-xs">
+                  <span className="w-32 shrink-0 truncate text-neutral-300">
+                    {c.competency.replace(/_/g, ' ')}
+                  </span>
+                  <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-neutral-800">
+                    <span
+                      className="block h-full rounded-full bg-indigo-400"
+                      style={{ width: `${(c.avgRating / 5) * 100}%` }}
+                    />
+                  </span>
+                  <span className="w-14 shrink-0 text-right tabular-nums text-neutral-300">
+                    {c.avgRating.toFixed(1)}
+                    <span className="text-neutral-600"> ×{c.count}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 

@@ -201,6 +201,7 @@ const api = {
     delete: (id: string) => invoke(IPC.session.delete, { id }),
     generateReport: (sessionId: string) => invoke(IPC.session.generateReport, { sessionId }),
     getReport: (sessionId: string) => invoke(IPC.session.getReport, { sessionId }),
+    practiceStats: () => invoke(IPC.session.practiceStats),
   },
   mock: {
     start: (

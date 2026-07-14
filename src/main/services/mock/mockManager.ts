@@ -12,7 +12,7 @@ const MAX_QUESTIONS = 6;
 
 // Mock questions are generated for the chosen interview type, so tag each detected
 // question with a matching QuestionType (used by the live answer prompt + any tags).
-const QUESTION_TYPE_BY_INTERVIEW: Record<InterviewType, QuestionType> = {
+export const QUESTION_TYPE_BY_INTERVIEW: Record<InterviewType, QuestionType> = {
   behavioral: 'behavioral',
   technical: 'technical_concept',
   coding: 'coding',

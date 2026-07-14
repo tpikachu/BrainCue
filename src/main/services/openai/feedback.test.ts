@@ -59,6 +59,7 @@ const FULL = JSON.stringify({
   strengths: ['Clear structure'],
   improvements: ['Quantify the impact'],
   tip: 'Mention your p99 latency −40% result.',
+  competency: 'impact',
 });
 
 beforeEach(() => {
@@ -97,7 +98,21 @@ describe('evaluateAnswer — defensive parsing', () => {
       strengths: ['Clear structure'],
       improvements: ['Quantify the impact'],
       tip: 'Mention your p99 latency −40% result.',
+      competency: 'impact',
     });
+  });
+
+  it('degrades an off-list competency to null (closed set)', async () => {
+    h.reply = JSON.stringify({ competency: 'vibes' });
+    expect((await evaluateAnswer(input())).competency).toBeNull();
+    h.reply = JSON.stringify({ competency: 'ownership' });
+    expect((await evaluateAnswer(input())).competency).toBe('ownership');
+  });
+
+  it('asks the model to classify the competency from the closed set', async () => {
+    await evaluateAnswer(input());
+    expect(systemPrompt()).toMatch(/competency/i);
+    expect(systemPrompt()).toContain('technical_depth'); // the list is spelled out
   });
 
   it('clamps rating into 1–5 and rounds', async () => {
@@ -112,7 +127,14 @@ describe('evaluateAnswer — defensive parsing', () => {
   it('defaults a missing/non-numeric rating to 3 and arrays to empty', async () => {
     h.reply = '{}';
     const f = await evaluateAnswer(input());
-    expect(f).toEqual({ verdict: '', rating: 3, strengths: [], improvements: [], tip: '' });
+    expect(f).toEqual({
+      verdict: '',
+      rating: 3,
+      strengths: [],
+      improvements: [],
+      tip: '',
+      competency: null,
+    });
     h.reply = JSON.stringify({ rating: 'great' });
     expect((await evaluateAnswer(input())).rating).toBe(3);
   });
