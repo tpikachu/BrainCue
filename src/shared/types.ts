@@ -225,10 +225,15 @@ export interface RetrievedChunk {
  *  retriever (inclusion) and the Cue Card (display) agree on the threshold. */
 export const STORY_CUE_MIN_SCORE = 0.3;
 
+/** What produced a session: a real interview, a mock rehearsal (transient — the
+ *  row is deleted at stop), or a Sparring practice drill (persisted coaching). */
+export type SessionKind = 'live' | 'mock' | 'sparring';
+
 export interface Session {
   id: string;
   profileId: string;
   jobId: string | null;
+  kind: SessionKind;
   interviewType: InterviewType;
   status: SessionStatus;
   startedAt: number | null;
@@ -261,11 +266,8 @@ export interface AiAnswer {
   id: string;
   questionId: string;
   directAnswer: string;
-  talkingPoints: string[];
-  resumeMatch: string | null;
-  star: { situation: string; task: string; action: string; result: string } | null;
-  clarifyingQuestion: string | null;
   riskWarning: string | null;
+  /** Predicted likely interviewer follow-up (v1.5) — generated post-stream. */
   followupQuestion: string | null;
   model: string;
   tokens: { prompt: number; completion: number } | null;
@@ -339,12 +341,12 @@ export interface AnswerDeltaEvent {
 }
 export interface AnswerMetaEvent {
   questionId: string;
-  talkingPoints: string[];
-  resumeMatch: string | null;
-  star: AiAnswer['star'];
-  clarifyingQuestion: string | null;
   riskWarning: string | null;
-  followupQuestion: string | null;
+}
+/** Post-stream follow-up prediction for a just-answered question (v1.5). */
+export interface AnswerFollowupEvent {
+  questionId: string;
+  followup: string;
 }
 export interface SessionStateEvent {
   status: SessionStatus;

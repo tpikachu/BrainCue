@@ -32,13 +32,5 @@ export async function* solveFromOcr(
       yield { type: 'delta', token: event.delta };
     }
   }
-  yield {
-    type: 'meta',
-    talkingPoints: [],
-    resumeMatch: null,
-    star: null,
-    clarifyingQuestion: null,
-    riskWarning: null,
-    followupQuestion: null,
-  };
+  yield { type: 'meta', riskWarning: null };
 }

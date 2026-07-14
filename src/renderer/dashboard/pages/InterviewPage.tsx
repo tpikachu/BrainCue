@@ -84,7 +84,9 @@ export default function InterviewPage() {
       const all = (await api.session.list()) as SessionListItem[];
       const map = new Map<string, SessionListItem>();
       for (const s of all) {
-        if (s.profileId !== profileId || !s.jobId) continue;
+        // Only real interview sessions drive Start/Resume — a Sparring practice
+        // drill (kind 'sparring') must never be offered for resumption here.
+        if (s.kind !== 'live' || s.profileId !== profileId || !s.jobId) continue;
         if (!map.has(s.jobId)) map.set(s.jobId, s); // list is newest-first
       }
       setSessionsByJob(map);

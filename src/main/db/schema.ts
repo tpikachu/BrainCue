@@ -168,6 +168,10 @@ export const sessions = sqliteTable(
       .notNull()
       .references(() => profiles.id, { onDelete: 'cascade' }),
     jobId: text('job_id').references(() => jobs.id, { onDelete: 'set null' }),
+    // What produced this session: a real interview ('live'), a mock rehearsal
+    // ('mock' — deleted at stop, only ever transient), or a Sparring practice
+    // drill ('sparring' — persisted so coaching scores accumulate in Reports).
+    kind: text('kind').notNull().default('live'),
     interviewType: text('interview_type').notNull().default('general'),
     status: text('status').notNull().default('idle'),
     startedAt: integer('started_at'),
@@ -219,10 +223,10 @@ export const aiAnswers = sqliteTable(
       .notNull()
       .references(() => detectedQuestions.id, { onDelete: 'cascade' }),
     directAnswer: text('direct_answer').notNull().default(''),
-    talkingPoints: text('talking_points'), // json[]
-    resumeMatch: text('resume_match'),
-    star: text('star'), // json
-    clarifyingQuestion: text('clarifying_question'),
+    // (v1.5) The dead expanded-meta columns (talking_points / resume_match / star /
+    // clarifying_question) were dropped — the UI for them was removed in v1.0 and
+    // they were always empty. riskWarning still flows; followupQuestion is now the
+    // post-stream follow-up PREDICTION shown under the Cue Card answer.
     riskWarning: text('risk_warning'),
     followupQuestion: text('followup_question'),
     model: text('model').notNull().default(''),
@@ -230,6 +234,32 @@ export const aiAnswers = sqliteTable(
     createdAt: integer('created_at').notNull().default(now),
   },
   (t) => ({ byQuestion: index('answers_question_idx').on(t.questionId) }),
+);
+
+// Per-answer coaching from a Sparring drill (the Practice Loop): every spoken
+// answer's rating + feedback persists here as it happens, so practice compounds
+// into trends instead of evaporating when the round ends. One row per answered
+// question; the session's report is assembled from these at end().
+export const answerFeedback = sqliteTable(
+  'answer_feedback',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    questionId: text('question_id')
+      .notNull()
+      .references(() => detectedQuestions.id, { onDelete: 'cascade' }),
+    answerTranscript: text('answer_transcript').notNull().default(''),
+    rating: integer('rating').notNull().default(0), // 1–5
+    verdict: text('verdict').notNull().default(''),
+    strengths: text('strengths'), // json[]
+    improvements: text('improvements'), // json[]
+    tip: text('tip'),
+    competency: text('competency'), // StoryCompetency | null — powers practice trends
+    createdAt: integer('created_at').notNull().default(now),
+  },
+  (t) => ({ bySession: index('answer_feedback_session_idx').on(t.sessionId) }),
 );
 
 export const sessionReports = sqliteTable('session_reports', {

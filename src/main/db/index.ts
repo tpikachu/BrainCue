@@ -6,6 +6,7 @@ import { join } from 'path';
 import { app } from 'electron';
 import { paths } from '../env';
 import { log } from '../services/security/logger';
+import { fixLegacyFkActions } from './fkRebuild';
 import * as schema from './schema';
 
 let _db: BetterSQLite3Database<typeof schema> | null = null;
@@ -56,6 +57,15 @@ export function initDb(): BetterSQLite3Database<typeof schema> {
     } catch (e) {
       log.error('db: migration failed', e);
     }
+  }
+
+  // Repair the FK actions migration 0001 created without ON DELETE clauses —
+  // a table rebuild drizzle can't express (see fkRebuild.ts). A failure here
+  // rolls back and the app keeps the legacy (pre-v1.5) delete behavior.
+  try {
+    fixLegacyFkActions(sqlite, log);
+  } catch (e) {
+    log.error('db: FK-action rebuild failed (continuing with legacy FK behavior)', e);
   }
 
   return _db;

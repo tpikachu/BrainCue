@@ -45,15 +45,7 @@ const FORMAT_MAX_TOKENS: Record<AnswerFormat, number> = {
 
 export type AnswerEvent =
   | { type: 'delta'; token: string }
-  | {
-      type: 'meta';
-      talkingPoints: string[];
-      resumeMatch: string | null;
-      star: { situation: string; task: string; action: string; result: string } | null;
-      clarifyingQuestion: string | null;
-      riskWarning: string | null;
-      followupQuestion: string | null;
-    }
+  | { type: 'meta'; riskWarning: string | null }
   | { type: 'usage'; prompt: number; completion: number };
 
 const SYSTEM = `You ARE the candidate — a second version of them — answering the interview ON
@@ -169,15 +161,8 @@ export async function* streamAnswer(input: AnswerInput): AsyncGenerator<AnswerEv
     };
   }
 
-  // M2: a second cheap structured pass produces talking points / STAR / warnings.
-  // Stubbed here so the contract is in place.
   yield {
     type: 'meta',
-    talkingPoints: [],
-    resumeMatch: null,
-    star: null,
-    clarifyingQuestion: null,
     riskWarning: input.contextChunks.length === 0 ? 'No matching profile experience found.' : null,
-    followupQuestion: null,
   };
 }

@@ -53,6 +53,7 @@ function toSession(r: typeof schema.sessions.$inferSelect): Session {
     id: r.id,
     profileId: r.profileId,
     jobId: r.jobId,
+    kind: r.kind as Session['kind'],
     interviewType: r.interviewType as InterviewType,
     status: r.status as Session['status'],
     startedAt: r.startedAt,
@@ -154,7 +155,7 @@ export const sessionManager = {
     const id = crypto.randomUUID();
     db()
       .insert(schema.sessions)
-      .values({ id, profileId, jobId, interviewType, status: 'live', startedAt: Date.now() })
+      .values({ id, profileId, jobId, kind: 'live', interviewType, status: 'live', startedAt: Date.now() })
       .run();
     this.goLive({
       sessionId: id,
@@ -516,12 +517,7 @@ export const sessionManager = {
         id: crypto.randomUUID(),
         questionId,
         directAnswer: answer,
-        talkingPoints: JSON.stringify((meta.talkingPoints as string[]) ?? []),
-        resumeMatch: (meta.resumeMatch as string) ?? null,
-        star: meta.star ? JSON.stringify(meta.star) : null,
-        clarifyingQuestion: (meta.clarifyingQuestion as string) ?? null,
         riskWarning: (meta.riskWarning as string) ?? null,
-        followupQuestion: (meta.followupQuestion as string) ?? null,
         model: 'answer',
         tokens: tokens ? JSON.stringify(tokens) : null,
       })

@@ -10,7 +10,6 @@ const JSON_COLS = new Set([
   'parsedResume',
   'parsedJd',
   'parsedCompany',
-  'talkingPoints',
   'star',
   'tokens',
 ]);
