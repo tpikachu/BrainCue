@@ -23,8 +23,9 @@ const CODING_DELIVERY: Record<AnswerFormat, string> = {
     'DELIVERY = EXPLANATION (spoken walkthrough). Write beats 1, 2, and 4 as natural ' +
     "first-person speech, the way you'd talk in the interview: \"So this problem really " +
     'comes down to …\" (understanding), \"So here\'s my plan — … and the benefit is …\" ' +
-    '(plan), and a spoken wrap-up of the efficiency (evaluation). Flowing sentences, ' +
-    'no robotic bullets outside the code.',
+    '(plan), and a spoken wrap-up of the efficiency (evaluation). Flowing SHORT sentences ' +
+    'the candidate can read aloud on the first try — one idea per sentence, no nested ' +
+    'clauses, no robotic bullets outside the code.',
   detailed:
     'DELIVERY = DETAILED. Each beat is thorough: the understanding names the inputs/' +
     'outputs and constraints, the plan covers the technique + why alternatives lose, ' +

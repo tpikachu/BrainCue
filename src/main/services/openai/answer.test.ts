@@ -133,6 +133,17 @@ describe('streamAnswer — request body', () => {
     expect(system).toMatch(/As an AI/i); // it's in the BANNED list
   });
 
+  it('writes for the ear: system demands speakable prose; spoken formats demand read-aloud fluency', async () => {
+    await collect(streamAnswer(baseInput({ format: 'explanation' })));
+    const system = String((h.lastBody!.input as { role: string; content: string }[])[0].content);
+    expect(system).toMatch(/WRITE FOR THE EAR/i);
+    expect(system).toMatch(/READ ALOUD/i);
+    expect(userPrompt()).toMatch(/read aloud|say it across the table/i);
+    await collect(streamAnswer(baseInput({ format: 'story_teller' })));
+    expect(userPrompt()).toMatch(/out loud|first read/i);
+    expect(userPrompt()).toMatch(/no\s+flashbacks/i);
+  });
+
   it('embeds retrieved context tagged by source', async () => {
     await collect(streamAnswer(baseInput()));
     expect(userPrompt()).toContain('(resume) Fixed a race condition');
