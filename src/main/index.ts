@@ -9,7 +9,7 @@ import { createSelectionWindow } from './windows/selectionWindow';
 import { createTray } from './windows/tray';
 import { registerGlobalShortcuts } from './shortcuts';
 import { performShutdown } from './quit';
-import { getPrivacy } from './services/session/privacy';
+import { getPrivacy, startContentProtectionWatchdog } from './services/session/privacy';
 import { initAutoUpdate } from './services/update/updater';
 import { log } from './services/security/logger';
 
@@ -121,6 +121,9 @@ app.whenReady().then(() => {
     // is stale — fully quit Electron and restart so window changes take effect.
     log.info('main build: single-index views + jobs + clipboard-solve');
     log.info(`privacy mode (hidden from capture): ${getPrivacy() ? 'ON' : 'OFF'}`);
+    // Backstop for spontaneous DWM exclusion drops (see privacy.ts) — fast
+    // enough that a drop survives at most ~1 frame of a 30fps screen share.
+    startContentProtectionWatchdog();
     // Check for updates in the background (packaged builds only) and let the
     // renderer prompt a restart once a new version is downloaded.
     initAutoUpdate();

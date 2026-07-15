@@ -34,47 +34,118 @@ export function applyPrivacyToWindow(win: BrowserWindow): void {
 
 /**
  * Apply Privacy Mode to a window AND keep it applied across the operations that
- * silently drop it on Windows. `setContentProtection` maps to
- * SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE); on Windows that affinity is
- * cleared by the window entering the modal move/resize loop — i.e. the user
- * DRAGGING or resizing the window — after which the "hidden" window reappears in
- * screen capture until something re-asserts it. We re-assert on every
- * move/resize (these fire continuously through a drag on Windows) plus
- * restore/focus/show, so protection survives a drag. `applyPrivacyToWindow`
- * respects the current on/off state, so this correctly clears protection too
- * when Privacy Mode is off. Call once per window at creation.
+ * silently drop it on Windows.
+ *
+ * What ground-truth capture testing (separate-process WGC/DXGI oracle + real
+ * SendInput clicks, 2026-07-15) established about WDA_EXCLUDEFROMCAPTURE here:
+ *  - GetWindowDisplayAffinity NEVER changes during a leak (stays 0x11 across
+ *    ~1M samples while the window is plainly visible in capture): the drop is
+ *    internal to DWM's composition, so it can't be detected by polling — only
+ *    healed by re-CALLING SetWindowDisplayAffinity.
+ *  - Re-calling setContentProtection is invisible in capture (0 leak frames
+ *    across hundreds of re-calls at 55 fps), so re-asserting often is free.
+ *  - The drop triggers observed: window ACTIVATION (click on an inactive
+ *    window), a plain CLICK on an ALREADY-ACTIVE window (~1 in 5, and no
+ *    activation message fires for it), and Z-ORDER changes via SetWindowPos
+ *    (no Electron event at all). The last two left the window visible
+ *    INDEFINITELY before this fix, because nothing re-asserted.
+ *
+ * So: re-assert on every signal that accompanies those triggers, each with a
+ * short deferred double-tap — the synchronous re-assert can run BEFORE the
+ * DWM drop caused by the same input lands, so we re-assert again just after.
+ *   - native activation messages (synchronous, earliest click signal):
+ *     WM_MOUSEACTIVATE 0x0021 · WM_ACTIVATE 0x0006 · WM_NCACTIVATE 0x0086 ·
+ *     WM_SETFOCUS 0x0007
+ *   - WM_PARENTNOTIFY 0x0210 — button-down inside child HWNDs (click on an
+ *     active window) · WM_WINDOWPOSCHANGED 0x0047 — move/size/Z-ORDER changes
+ *   - webContents 'input-event' mouseDown — Chromium-level click delivery,
+ *     guaranteed even if child HWND styles suppress WM_PARENTNOTIFY
+ *   - Electron show/move/resize/restore/focus events (cross-platform paths;
+ *     move/resize also keep a live drag covered)
+ * `applyPrivacyToWindow` respects the current on/off state, so this correctly
+ * clears protection too when Privacy Mode is off. Call once per window at
+ * creation.
  */
 export function keepContentProtected(win: BrowserWindow): void {
   const reassert = (): void => applyPrivacyToWindow(win);
+  let tap1: ReturnType<typeof setTimeout> | undefined;
+  let tap2: ReturnType<typeof setTimeout> | undefined;
+  // Re-assert now AND shortly after: the DWM drop caused by the very input
+  // we're reacting to can land after our synchronous call. Timers collapse
+  // (one pending pair) so a drag's event stream doesn't pile them up.
+  let tap0: ReturnType<typeof setTimeout> | undefined;
+  const reassertSoon = (): void => {
+    reassert();
+    clearTimeout(tap0);
+    clearTimeout(tap1);
+    clearTimeout(tap2);
+    tap0 = setTimeout(reassert, 30);
+    tap1 = setTimeout(reassert, 120);
+    tap2 = setTimeout(reassert, 300);
+  };
   reassert();
-  // The trigger is FOCUS/ACTIVATION — clicking the window drops the capture
-  // exclusion on Windows and it reappears in a screen share until re-asserted.
-  // The JS 'focus' event fires AFTER Windows has already activated the window,
-  // so a live 30fps share (Meet/Zoom) can catch a frame or two before we
-  // re-hide — a brief flash. To close that gap we ALSO re-assert inside the
-  // native activation messages themselves (Windows-only), which run
-  // synchronously the instant the click lands, before the un-excluded frame is
-  // presented:
-  //   WM_MOUSEACTIVATE (0x0021) — a click on an inactive window (earliest)
-  //   WM_ACTIVATE      (0x0006) — activation state change
-  //   WM_NCACTIVATE    (0x0086) — non-client activation (title/border)
-  //   WM_SETFOCUS      (0x0007) — keyboard focus gained
   if (process.platform === 'win32') {
-    for (const msg of [0x0021, 0x0006, 0x0086, 0x0007]) {
+    // In addition to the activation/click/pos messages above:
+    //   WM_NCLBUTTONDOWN 0x00A1 + WM_ENTERSIZEMOVE 0x0231 — grabbing the drag
+    //   region / entering the modal move loop. Ground-truth capture caught a
+    //   single-frame flash right at drag START (after the grab, before the
+    //   first WM_MOVE) — these two messages are the only signals in that gap.
+    //   WM_EXITSIZEMOVE 0x0232 + WM_CAPTURECHANGED 0x0215 — drag/loop end.
+    for (const msg of [0x0021, 0x0006, 0x0086, 0x0007, 0x0210, 0x0047, 0x00a1, 0x0231, 0x0232, 0x0215]) {
       // hookWindowMessage is Windows-only; guarded above.
       (win as unknown as { hookWindowMessage: (m: number, cb: () => void) => void }).hookWindowMessage(
         msg,
-        reassert,
+        reassertSoon,
       );
     }
   }
-  win.on('show', reassert);
-  win.on('move', reassert);
-  win.on('resize', reassert);
-  win.on('restore', reassert);
-  win.on('focus', reassert);
+  win.webContents.on('input-event', (_e, input) => {
+    if (input.type === 'mouseDown') reassertSoon();
+  });
+  win.on('show', reassertSoon);
+  win.on('move', reassertSoon);
+  win.on('resize', reassertSoon);
+  win.on('restore', reassertSoon);
+  win.on('focus', reassertSoon);
+  win.on('closed', () => {
+    clearTimeout(tap0);
+    clearTimeout(tap1);
+    clearTimeout(tap2);
+  });
 }
 
+
+let watchdog: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Fast periodic re-assert — the backstop for SPONTANEOUS exclusion drops.
+ *
+ * Ground-truth capture testing caught the Cue Card becoming visible ~470ms
+ * AFTER a drag ended, with no input and no window message in between: on this
+ * Windows 11 build, DWM sometimes drops WDA_EXCLUDEFROMCAPTURE on its own,
+ * so event hooks alone can't bound how long a window stays visible. Two more
+ * measured facts make a fast timer the right tool:
+ *   - re-calling setContentProtection is INVISIBLE in capture (0 leak frames
+ *     across 400+ re-calls at 55 fps), and WDA never hides the window locally,
+ *     so a 50ms cadence has no visual cost anywhere;
+ *   - the earlier 500ms watchdog wasn't CAUSING the "interval flashing" the
+ *     user saw — it was HEALING spontaneous drops at a 500ms cadence, leaving
+ *     each drop visible for up to half a second. At 50ms a drop survives at
+ *     most ~1 frame of a 30fps Meet/Zoom stream.
+ * The synchronous message hooks in keepContentProtected remain the first line
+ * (they close the deterministic triggers with ~0 frames); this bounds the tail.
+ */
+export function startContentProtectionWatchdog(intervalMs = 50): void {
+  if (watchdog) return;
+  watchdog = setInterval(() => {
+    if (!getPrivacy()) return; // never fight the user's explicit OFF
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) w.setContentProtection(true);
+    }
+  }, intervalMs);
+  // Never keep the process alive just for the watchdog.
+  (watchdog as { unref?: () => void }).unref?.();
+}
 
 export function setPrivacy(enabled: boolean): boolean {
   settingsRepo.set(SETTINGS_KEYS.privacyMode, enabled ? '1' : '0');

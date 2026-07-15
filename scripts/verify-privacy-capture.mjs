@@ -96,7 +96,13 @@ try {
   shoot(rect, path.join(OUT, 'privacy-on.png'));
   console.log('privacy-on.png saved — the app must NOT be readable in it');
 
-  await dash.evaluate(() => window.api.settings.set({ privacyMode: false }));
+  // NOTE: settings.set({ privacyMode }) is NOT a real API — the zod patch
+  // schema strips unknown keys, so it silently does nothing (this script used
+  // to call it and therefore never actually tested the privacy-off state).
+  // privacy.set(false) is the real path; it opens a confirmation dialog in the
+  // app — click "Turn off Privacy Mode" to let the script continue.
+  console.log('>>> A confirmation dialog is open in the app: click "Turn off Privacy Mode"');
+  await dash.evaluate(() => window.api.privacy.set(false));
   await beat(1500);
   shoot(rect, path.join(OUT, 'privacy-off.png'));
   console.log('privacy-off.png saved — the app SHOULD be readable in it');
