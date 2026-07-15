@@ -38,6 +38,21 @@ if (process.env.BRAINCUE_E2E) {
   app.commandLine.appendSwitch('remote-allow-origins', '*');
 }
 
+// Privacy Mode's OS backing (SetWindowDisplayAffinity / WDA_EXCLUDEFROMCAPTURE)
+// is BYPASSED by Chromium's DirectComposition presentation path on some Windows
+// 11 builds/GPU drivers: the window renders via overlay planes that DWM's
+// capture-exclusion filter never sees, so a "hidden" window shows up fully
+// readable in screen shares. Verified with a minimal probe on Win11 26200:
+// protected + DirectComposition = captured; protected + this switch = properly
+// excluded; unprotected + this switch = captured (control). Electron 43 leaks
+// identically, so this is not fixed by upgrading. Disabling DirectComposition
+// routes rendering through the classic path the filter handles; the perf cost
+// for a text UI is negligible. Escape hatch for misbehaving GPUs:
+// BRAINCUE_ALLOW_DIRECT_COMPOSITION=1 (accepting that Privacy Mode may leak).
+if (process.platform === 'win32' && !process.env.BRAINCUE_ALLOW_DIRECT_COMPOSITION) {
+  app.commandLine.appendSwitch('disable-direct-composition');
+}
+
 // A crashing GPU process can leave a blank/hidden window — log it so it's diagnosable.
 app.on('child-process-gone', (_e, details) => {
   if (details.type === 'GPU' || details.reason !== 'clean-exit') {
