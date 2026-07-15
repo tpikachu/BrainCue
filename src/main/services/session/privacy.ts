@@ -47,13 +47,35 @@ export function applyPrivacyToWindow(win: BrowserWindow): void {
 export function keepContentProtected(win: BrowserWindow): void {
   const reassert = (): void => applyPrivacyToWindow(win);
   reassert();
-  // 'move' + 'resize' fire during/after a drag on Windows; the rest cover
-  // un-minimize, refocus, and (re)show — all points where affinity can reset.
+  // The main trigger is FOCUS/ACTIVATION — clicking the window drops the capture
+  // exclusion on Windows and it reappears in a screen share until re-asserted
+  // (measured: a focused protected window is fully captured; re-asserting on
+  // focus re-hides it). 'move'/'resize' cover drag/resize; 'restore'/'show'
+  // cover un-minimize and (re)show.
   win.on('show', reassert);
   win.on('move', reassert);
   win.on('resize', reassert);
   win.on('restore', reassert);
   win.on('focus', reassert);
+}
+
+let watchdog: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Backstop for the per-window handlers above. Some capture-exclusion drops don't
+ * fire a clean window event — activation from the taskbar / Alt-Tab, a
+ * notification stealing focus, a display change, or a DWM/GPU reset — and on
+ * flaky Windows setups the affinity is easily lost. While Privacy Mode is ON we
+ * therefore RE-ASSERT protection on every window on a short interval, so any drop
+ * self-heals within the interval instead of leaving the app visible in a share.
+ * Idempotent; unref'd so it never keeps the process alive.
+ */
+export function startContentProtectionWatchdog(): void {
+  if (watchdog) return;
+  watchdog = setInterval(() => {
+    if (getPrivacy()) applyContentProtectionToAll(true);
+  }, 500);
+  watchdog.unref?.();
 }
 
 export function setPrivacy(enabled: boolean): boolean {

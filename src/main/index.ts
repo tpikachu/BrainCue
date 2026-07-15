@@ -9,7 +9,7 @@ import { createSelectionWindow } from './windows/selectionWindow';
 import { createTray } from './windows/tray';
 import { registerGlobalShortcuts } from './shortcuts';
 import { performShutdown } from './quit';
-import { getPrivacy } from './services/session/privacy';
+import { getPrivacy, startContentProtectionWatchdog } from './services/session/privacy';
 import { initAutoUpdate } from './services/update/updater';
 import { log } from './services/security/logger';
 
@@ -117,6 +117,10 @@ app.whenReady().then(() => {
     createSelectionWindow();
     createTray();
     registerGlobalShortcuts();
+    // Backstop that re-asserts capture exclusion on all windows periodically,
+    // catching drops (focus from taskbar/Alt-Tab, display/DWM changes) that the
+    // per-window handlers miss. Cheap; unref'd.
+    startContentProtectionWatchdog();
     // Build marker: if you DON'T see this line on `npm run dev`, the main process
     // is stale — fully quit Electron and restart so window changes take effect.
     log.info('main build: single-index views + jobs + clipboard-solve');
