@@ -68,20 +68,22 @@ export function applyPrivacyToWindow(win: BrowserWindow): void {
  */
 export function keepContentProtected(win: BrowserWindow): void {
   const reassert = (): void => applyPrivacyToWindow(win);
-  let tap1: ReturnType<typeof setTimeout> | undefined;
-  let tap2: ReturnType<typeof setTimeout> | undefined;
-  // Re-assert now AND shortly after: the DWM drop caused by the very input
-  // we're reacting to can land after our synchronous call. Timers collapse
-  // (one pending pair) so a drag's event stream doesn't pile them up.
-  let tap0: ReturnType<typeof setTimeout> | undefined;
+  // Re-assert now AND repeatedly over the next ~300ms: the DWM drop caused by
+  // the very input we're reacting to lands a moment AFTER our synchronous call,
+  // so a single re-assert misses it. A dense early cascade — front-loaded at
+  // ~4/10/20ms because the leak window between the drop and the first heal is
+  // only a frame or two — closes it to about one 30fps frame. Timers collapse
+  // (one pending cascade) so a click storm or drag can't pile them up.
+  const TAPS = [4, 10, 20, 40, 80, 160, 300];
+  let taps: ReturnType<typeof setTimeout>[] = [];
+  const clearTaps = (): void => {
+    for (const t of taps) clearTimeout(t);
+    taps = [];
+  };
   const reassertSoon = (): void => {
     reassert();
-    clearTimeout(tap0);
-    clearTimeout(tap1);
-    clearTimeout(tap2);
-    tap0 = setTimeout(reassert, 30);
-    tap1 = setTimeout(reassert, 120);
-    tap2 = setTimeout(reassert, 300);
+    clearTaps();
+    taps = TAPS.map((ms) => setTimeout(reassert, ms));
   };
   reassert();
   if (process.platform === 'win32') {
@@ -107,11 +109,7 @@ export function keepContentProtected(win: BrowserWindow): void {
   win.on('resize', reassertSoon);
   win.on('restore', reassertSoon);
   win.on('focus', reassertSoon);
-  win.on('closed', () => {
-    clearTimeout(tap0);
-    clearTimeout(tap1);
-    clearTimeout(tap2);
-  });
+  win.on('closed', clearTaps);
 }
 
 
@@ -130,17 +128,25 @@ let watchdog: ReturnType<typeof setInterval> | null = null;
  *     so a 50ms cadence has no visual cost anywhere;
  *   - the earlier 500ms watchdog wasn't CAUSING the "interval flashing" the
  *     user saw — it was HEALING spontaneous drops at a 500ms cadence, leaving
- *     each drop visible for up to half a second. At 50ms a drop survives at
- *     most ~1 frame of a 30fps Meet/Zoom stream.
+ *     each drop visible for up to half a second. At 20ms a drop survives at
+ *     most ~1 frame of a 30fps Meet/Zoom stream (storm-tested: rapid-click
+ *     bursts produced single blips of ~43ms under the earlier 50ms cadence).
  * The synchronous message hooks in keepContentProtected remain the first line
  * (they close the deterministic triggers with ~0 frames); this bounds the tail.
+ *
+ * Re-assert only on VISIBLE windows: the overlay is deliberately kept hidden
+ * (show:false) when unused, and Chromium re-applies content protection as a
+ * side effect that forces a composition pass — doing that to a hidden window
+ * can leave a blank, un-hittable ghost surface (matches Chromium's own
+ * IsVisible guard). Hidden windows are already absent from capture, so there
+ * is nothing to heal there anyway.
  */
-export function startContentProtectionWatchdog(intervalMs = 50): void {
+export function startContentProtectionWatchdog(intervalMs = 20): void {
   if (watchdog) return;
   watchdog = setInterval(() => {
     if (!getPrivacy()) return; // never fight the user's explicit OFF
     for (const w of BrowserWindow.getAllWindows()) {
-      if (!w.isDestroyed()) w.setContentProtection(true);
+      if (!w.isDestroyed() && w.isVisible()) w.setContentProtection(true);
     }
   }, intervalMs);
   // Never keep the process alive just for the watchdog.

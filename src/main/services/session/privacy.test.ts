@@ -31,6 +31,7 @@ function fakeWindow() {
   const calls: boolean[] = [];
   return {
     isDestroyed: () => false,
+    isVisible: () => true,
     setContentProtection: (v: boolean) => calls.push(v),
     webContents: {
       on(ev: string, fn: (e: unknown, input: { type: string }) => void) {
@@ -96,7 +97,7 @@ describe('keepContentProtected', () => {
     w.fire('focus');
     expect(w.calls.length).toBe(2); // initial + synchronous
     vi.advanceTimersByTime(400);
-    expect(w.calls.length).toBe(5); // + the 30/120/300ms deferred taps
+    expect(w.calls.length).toBe(9); // + the 4/10/20/40/80/160/300ms deferred taps
     expect(w.calls.every((c) => c === true)).toBe(true);
   });
 
@@ -106,8 +107,8 @@ describe('keepContentProtected', () => {
     keepContentProtected(w as any);
     for (let i = 0; i < 10; i++) w.fire('move'); // burst: 10 immediate re-asserts
     vi.advanceTimersByTime(400);
-    // 1 initial + 10 immediate + only ONE trio of trailing taps
-    expect(w.calls.length).toBe(14);
+    // 1 initial + 10 immediate + only ONE cascade of 7 trailing taps
+    expect(w.calls.length).toBe(18);
   });
 
   it('re-asserts the CURRENT state — clears protection when Privacy Mode is off', () => {
