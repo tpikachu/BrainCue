@@ -1004,11 +1004,6 @@ export default function Overlay() {
             value={askText}
             onChange={(e) => setAskText(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && sendAsk()}
-            // The Cue Card is non-activating (never steals focus / never leaks
-            // into a screen share), so typing needs a deliberate tap-to-focus:
-            // grant keyboard focus on focus, release it on blur.
-            onFocus={() => void api.overlay.setKeyboardFocus(true)}
-            onBlur={() => void api.overlay.setKeyboardFocus(false)}
             placeholder="Ask a question…"
             className="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1 text-[11px] text-neutral-100 outline-none focus:border-indigo-500"
           />

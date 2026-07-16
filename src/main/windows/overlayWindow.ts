@@ -3,7 +3,7 @@ import { join } from 'path';
 import { EVENTS } from '@shared/ipc';
 import { SETTINGS_KEYS, settingsRepo } from '../db/repositories/settings.repo';
 import { attachDiagnostics, loadRenderer } from './loadRenderer';
-import { applyPrivacyToWindow, keepContentProtected } from '../services/session/privacy';
+import { keepContentProtected } from '../services/session/privacy';
 import { getMainWindow } from './mainWindow';
 import type { OverlayMode } from '@shared/types';
 
@@ -94,16 +94,14 @@ export function createOverlayWindow(): BrowserWindow {
     backgroundColor: '#0a0a0a',
     resizable: true,
     skipTaskbar: true,
-    // NON-ACTIVATING (WS_EX_NOACTIVATE on Windows). Clicking the Cue Card must
-    // never bring it to the foreground / give it focus, because window
-    // ACTIVATION is what makes Windows silently drop the screen-capture
-    // exclusion (WDA_EXCLUDEFROMCAPTURE) — and re-asserting the exclusion to
-    // heal that drop itself flickers in a live screen share. A non-activating
-    // window still receives mouse clicks (buttons, drag, sliders all work); it
-    // only gives up keyboard focus, so text inputs in the overlay are typed via
-    // a deliberate tap-to-focus instead. This is the core of "perfect" stealth:
-    // no activation → no drop → no re-assert → no flicker.
-    focusable: false,
+    // A normal, focusable window: clicking it, dragging it, and typing in the
+    // "Ask a question" box all work exactly as expected. Its screen-capture
+    // stealth does NOT depend on being non-activating — the real leak was the
+    // app's own loopback screen-capture clearing WDA on all our windows, which
+    // is fixed by capturing an off-screen window (loopbackAnchor) + the capture
+    // shield (see startCaptureShield). Keeping it focusable is what makes the
+    // Ask box typeable.
+    focusable: true,
     hasShadow: true,
     alwaysOnTop: true,
     webPreferences: {
@@ -117,12 +115,11 @@ export function createOverlayWindow(): BrowserWindow {
   overlay.setAlwaysOnTop(true, 'screen-saver');
   overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
-  // The Cue Card is NON-ACTIVATING (focusable:false above), so it never drops
-  // the capture exclusion on interaction — `static` protects it once and never
-  // re-asserts. That is what makes it perfectly stealthy AND flicker-free: a
-  // re-assert would itself flicker in a live screen share, and there is nothing
-  // to heal because a non-activating window can't be dropped by a click/drag.
-  keepContentProtected(overlay, { static: true });
+  // Hide from screen capture (Privacy Mode) and re-assert across the events that
+  // drop the exclusion on Windows. The dominant leak — the app's own loopback
+  // capture clearing WDA during a live session — is handled by the capture
+  // shield (startCaptureShield), not here.
+  keepContentProtected(overlay);
   overlay.on('show', () => notifyVisibility(true));
   overlay.on('hide', () => notifyVisibility(false));
 
@@ -158,28 +155,6 @@ export function showOverlay(): BrowserWindow {
 
 export function getOverlayWindow(): BrowserWindow | null {
   return overlay && !overlay.isDestroyed() ? overlay : null;
-}
-
-/**
- * Temporarily make the (normally non-activating) Cue Card focusable so the user
- * can TYPE into it — e.g. the manual "Ask a question" box. A non-activating
- * window receives clicks but no keyboard, so text inputs need this deliberate
- * tap-to-focus. Enabling focus activates the window, which drops the capture
- * exclusion; we re-assert a couple of times to re-hide it (a brief,
- * user-initiated flicker while typing). On disable we also re-assert, in case
- * it was dropped while focused, then it is back to its flicker-free steady state.
- */
-export function setOverlayKeyboardFocus(enable: boolean): void {
-  const w = getOverlayWindow();
-  if (!w) return;
-  w.setFocusable(enable);
-  if (enable) w.focus();
-  applyPrivacyToWindow(w);
-  for (const ms of [60, 200]) {
-    setTimeout(() => {
-      if (!w.isDestroyed()) applyPrivacyToWindow(w);
-    }, ms);
-  }
 }
 
 export function setOverlayMode(mode: OverlayMode): void {

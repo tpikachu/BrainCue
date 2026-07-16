@@ -132,7 +132,6 @@ export const IPC = {
     setMode: 'overlay:set-mode',
     setOpacity: 'overlay:set-opacity',
     setClickthrough: 'overlay:set-clickthrough',
-    setKeyboardFocus: 'overlay:set-keyboard-focus', // temporarily make the non-activating Cue Card focusable to type
 
     copyText: 'overlay:copy-text', // write text to the OS clipboard (per-card "Copy")
   },

@@ -32,54 +32,55 @@ export function applyPrivacyToWindow(win: BrowserWindow): void {
   if (!win.isDestroyed()) win.setContentProtection(getPrivacy());
 }
 
+let shieldTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * While a live interview is running, the app captures system (loopback) audio,
+ * which requires a video capture. We point that at a tiny off-screen window (not
+ * the screen — see loopbackAnchor.ts), but even a window capture makes Chromium
+ * momentarily clear WDA_EXCLUDEFROMCAPTURE on our own windows every few seconds.
+ * Each clear is rare and a re-assert restores it durably, so a modest re-assert
+ * interval — running ONLY for the life of the capture — keeps the Cue Card and
+ * dashboard hidden. (This is NOT the old always-on watchdog: it runs only during
+ * an active capture, where a *screen* capture's continuous clearing turned every
+ * re-assert into a visible flicker; a window capture doesn't fight back.)
+ */
+export function startCaptureShield(): void {
+  stopCaptureShield();
+  const intervalMs = Number(process.env.BRAINCUE_SHIELD_MS) || 80;
+  shieldTimer = setInterval(() => applyContentProtectionToAll(getPrivacy()), intervalMs);
+}
+
+export function stopCaptureShield(): void {
+  if (shieldTimer) {
+    clearInterval(shieldTimer);
+    shieldTimer = null;
+  }
+}
+
 /**
  * Apply Privacy Mode to a window and keep it excluded from screen capture
- * across the operations that silently drop the exclusion on Windows.
+ * across the operations that momentarily drop the exclusion on Windows.
  *
- * What ground-truth capture testing (separate-process WGC/DXGI oracle + real
- * SendInput clicks/drags) plus the reporter's live Meet/Zoom testing established
- * about WDA_EXCLUDEFROMCAPTURE here (Win 11 26200):
- *  - The drop is triggered by window ACTIVATION. A window that ACTIVATES on
- *    interaction (a normal, focusable window) loses the capture exclusion on
- *    the click that activates it — and Windows reports it as still excluded
- *    (GetWindowDisplayAffinity stays 0x11), so the drop can't be detected, only
- *    healed by re-CALLING setContentProtection.
- *  - A NON-ACTIVATING window (`focusable: false` → WS_EX_NOACTIVATE) never
- *    activates, so it NEVER drops the exclusion: verified 0 leak frames through
- *    thousands of real clicks, format-button spam, dropdown toggling, window
- *    drags, and z-order churn — with NO re-assertion at all. This is the basis
- *    of the Cue Card's `static` mode below: protect once, never re-assert.
- *  - CRUCIAL: each `setContentProtection` re-call itself costs a composition
- *    pass that surfaces to a WGC capturer (Zoom/Meet) as a one-frame flicker
- *    (invisible to the desktop-capturer harness, which samples steady state,
- *    but plainly visible to the reporter). So re-asserting is NOT free: a
- *    periodic re-assert (any watchdog) produces steady flicker at its cadence —
- *    the "interval flashing" the reporter saw. Therefore: non-activating
- *    windows get ZERO re-assertion, and activating windows re-assert ONLY on a
- *    real drop-causing event (never on a timer), coalesced so one interaction
- *    is a few re-calls, not dozens.
+ * The dominant leak — the app's OWN loopback screen-capture clearing
+ * WDA_EXCLUDEFROMCAPTURE on all its windows for the life of an interview — is
+ * NOT handled here; it's handled by capturing an off-screen window instead of
+ * the screen (loopbackAnchor.ts) plus the capture shield (startCaptureShield).
  *
- * `opts.static` (used for the Cue Card overlay): apply protection at
- * creation/show and NEVER re-assert. Correct only for a non-activating window
- * — it can't drop, and skipping re-assertion means it can't flicker either.
- *
- * Default (used for the focusable dashboard / region selector, which DO
- * activate): on any drop-trigger signal, (re)schedule ONE coalesced cascade of
- * a few re-asserts over ~120ms — the drop lands a frame or two after the event.
- * A burst of messages from one click collapses to a single cascade.
- * `applyPrivacyToWindow` respects the on/off state, so this clears protection
- * too when Privacy Mode is off. Call once per window at creation.
+ * This function covers the smaller, event-driven drops: on Windows, activating
+ * (clicking), moving, resizing, or z-ordering a window can momentarily drop the
+ * exclusion, and Windows keeps reporting it as still excluded
+ * (GetWindowDisplayAffinity stays 0x11), so the only cure is to re-CALL
+ * setContentProtection. We do that ONLY on a real drop-causing event (never on
+ * a timer) and coalesce a burst of messages from one interaction into a single
+ * short cascade of re-asserts. `applyPrivacyToWindow` respects the on/off state,
+ * so this also clears protection when Privacy Mode is off. Call once per window
+ * at creation.
  */
-export function keepContentProtected(win: BrowserWindow, opts: { static?: boolean } = {}): void {
+export function keepContentProtected(win: BrowserWindow): void {
   const reassert = (): void => applyPrivacyToWindow(win);
   reassert(); // protect once, now, at creation
   win.on('show', reassert); // (re)establish protection when the window becomes visible
-
-  // Non-activating windows never drop the exclusion, so they need no healing —
-  // and healing would re-call setContentProtection on every click, which itself
-  // flickers in a live screen share. Protect-once is both sufficient and
-  // flicker-free.
-  if (opts.static) return;
 
   // Coalesced cascade for windows that CAN activate (and thus drop): 0 = next
   // tick (collapses a click's message burst into one re-assert), then a couple

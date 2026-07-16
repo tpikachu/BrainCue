@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Drive getPrivacy() via a stubbed settings repo (avoids better-sqlite3), and
 // capture broadcasts/app-events so the module loads without electron windows.
-const state = vi.hoisted(() => ({ privacy: '1' as string | null }));
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const state = vi.hoisted(() => ({ privacy: '1' as string | null, windows: [] as any[] }));
 vi.mock('../../db/repositories/settings.repo', () => ({
   SETTINGS_KEYS: { privacyMode: 'privacy_mode' },
   settingsRepo: {
@@ -12,12 +13,12 @@ vi.mock('../../db/repositories/settings.repo', () => ({
     },
   },
 }));
-vi.mock('electron', () => ({ BrowserWindow: {}, dialog: {} }));
+vi.mock('electron', () => ({ BrowserWindow: { getAllWindows: () => state.windows }, dialog: {} }));
 vi.mock('../../ipc/broadcast', () => ({ broadcast: vi.fn() }));
 vi.mock('@shared/ipc', () => ({ EVENTS: { privacyChanged: 'privacy:changed' } }));
 vi.mock('../../appEvents', () => ({ appEvents: { emit: vi.fn() }, APP_EVENT: { privacyChanged: 'x' } }));
 
-import { keepContentProtected, applyPrivacyToWindow } from './privacy';
+import { keepContentProtected, applyPrivacyToWindow, startCaptureShield, stopCaptureShield } from './privacy';
 
 /** A fake BrowserWindow that records setContentProtection calls and lets tests
  *  fire lifecycle events, native window messages, and webContents input events. */
@@ -63,9 +64,11 @@ function fakeWindow() {
 
 beforeEach(() => {
   state.privacy = '1';
+  state.windows = [];
   vi.useFakeTimers();
 });
 afterEach(() => {
+  stopCaptureShield();
   vi.clearAllTimers();
   vi.useRealTimers();
 });
@@ -149,30 +152,39 @@ describe('keepContentProtected', () => {
     },
   );
 
-  it('static mode: protects once + on show, and NEVER re-asserts on interaction (a non-activating window can\'t drop, and a re-call would flicker)', () => {
-    const w = fakeWindow();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    keepContentProtected(w as any, { static: true });
-    expect(w.calls).toEqual([true]); // applied up front
-    // No interaction hooks are registered at all.
-    expect(w.msgHooks.size).toBe(0);
-    expect(w.handlers.has('move')).toBe(false);
-    expect(w.handlers.has('focus')).toBe(false);
-    // 'show' still (re)establishes protection when the window becomes visible.
-    expect(w.handlers.has('show')).toBe(true);
-    w.fire('show');
-    expect(w.calls).toEqual([true, true]);
-    // Firing a would-be drop event does nothing (no handler, no timers).
-    w.fire('move');
-    vi.advanceTimersByTime(500);
-    expect(w.calls).toEqual([true, true]);
-  });
-
   it('applyPrivacyToWindow reflects the stored setting', () => {
     const w = fakeWindow();
     state.privacy = '0';
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     applyPrivacyToWindow(w as any);
     expect(w.calls).toEqual([false]);
+  });
+});
+
+describe('capture shield', () => {
+  it('re-asserts protection on every window on an interval while running, and stops on stopCaptureShield', () => {
+    const a = fakeWindow();
+    const b = fakeWindow();
+    state.windows = [a, b];
+    startCaptureShield();
+    expect(a.calls.length).toBe(0); // nothing synchronous — first re-assert is on the first tick
+    vi.advanceTimersByTime(80 * 5); // ~5 ticks at the default 80ms cadence
+    expect(a.calls.length).toBeGreaterThanOrEqual(4);
+    expect(b.calls.length).toBe(a.calls.length); // every window re-asserted together
+    expect(a.calls.every((c) => c === true)).toBe(true); // Privacy Mode on -> protect
+    const after = a.calls.length;
+    stopCaptureShield();
+    vi.advanceTimersByTime(80 * 5);
+    expect(a.calls.length).toBe(after); // no more re-asserts once stopped
+  });
+
+  it('re-asserts the CURRENT privacy state — clears protection when Privacy Mode is off', () => {
+    const w = fakeWindow();
+    state.windows = [w];
+    state.privacy = '0';
+    startCaptureShield();
+    vi.advanceTimersByTime(80);
+    expect(w.calls[w.calls.length - 1]).toBe(false);
+    stopCaptureShield();
   });
 });

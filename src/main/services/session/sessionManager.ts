@@ -14,6 +14,7 @@ import { retrieve } from '../rag/retriever';
 import { RealtimeTranscriber } from '../openai/realtime';
 import { getOverlayWindow, showOverlay } from '../../windows/overlayWindow';
 import { getMainWindow } from '../../windows/mainWindow';
+import { startCaptureShield, stopCaptureShield } from './privacy';
 import { log } from '../security/logger';
 import type { AnswerFormat, InterviewType, Session } from '@shared/types';
 
@@ -101,6 +102,10 @@ export const sessionManager = {
       transcriber: null,
     };
     showOverlay();
+    // The live session captures loopback audio, which periodically clears our
+    // windows' capture-exclusion; keep re-asserting it for the life of the
+    // session (stopped in stop()/shutdown()). See startCaptureShield.
+    startCaptureShield();
 
     // Real interviews stream STT via the Realtime API. A mock rehearsal has no
     // mic — its questions come from the AI interviewer — so skip the transcriber.
@@ -302,6 +307,7 @@ export const sessionManager = {
     // one or hide the overlay out from under it.
     const wasLive = live?.sessionId === sessionId;
     if (wasLive) {
+      stopCaptureShield(); // the loopback capture ends with the session
       const interviewType = live!.interviewType;
       const wasMock = live!.isMock;
       const jobTitle = live!.jobId ? (jobsRepo.get(live!.jobId)?.title ?? null) : null;
@@ -340,6 +346,7 @@ export const sessionManager = {
    *  process doesn't linger. Does not touch the DB (the session row keeps its
    *  last status). Safe to call when nothing is live. */
   shutdown(): void {
+    stopCaptureShield();
     if (live) {
       live.transcriber?.stop();
       live = null;

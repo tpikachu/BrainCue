@@ -6,10 +6,11 @@ import { sparringManager } from './services/mock/sparringManager';
 import { createMainWindow, showMainWindow } from './windows/mainWindow';
 import { createOverlayWindow, showOverlay } from './windows/overlayWindow';
 import { createSelectionWindow } from './windows/selectionWindow';
+import { createLoopbackAnchor, LOOPBACK_ANCHOR_TITLE } from './windows/loopbackAnchor';
 import { createTray } from './windows/tray';
 import { registerGlobalShortcuts } from './shortcuts';
 import { performShutdown } from './quit';
-import { getPrivacy } from './services/session/privacy';
+import { applyContentProtectionToAll, getPrivacy } from './services/session/privacy';
 import { initAutoUpdate } from './services/update/updater';
 import { log } from './services/security/logger';
 
@@ -87,13 +88,28 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => allowed.has(permission));
 
   // System-audio (loopback) capture for transcribing the interviewer's voice in
-  // online calls. getDisplayMedia({audio:true,video:true}) resolves to the
-  // primary screen's video + system audio loopback; the renderer keeps only audio.
+  // online calls. We need `audio: 'loopback'`, which getDisplayMedia only grants
+  // alongside a VIDEO source — but if that video is the SCREEN, Chromium clears
+  // WDA_EXCLUDEFROMCAPTURE on all of THIS process's windows for the whole capture
+  // (the Cue Card + dashboard then show up in Zoom/Meet). So we point the video
+  // at a tiny off-screen anchor WINDOW instead (createLoopbackAnchor): a window
+  // capture only clears the exclusion once, at capture-start, so re-asserting it
+  // afterwards sticks. The renderer discards the video track and keeps only audio.
   session.defaultSession.setDisplayMediaRequestHandler(
     (_request, callback) => {
       desktopCapturer
-        .getSources({ types: ['screen'] })
-        .then((sources) => callback({ video: sources[0], audio: 'loopback' }))
+        .getSources({ types: ['window', 'screen'] })
+        .then((sources) => {
+          const anchor = sources.find((s) => s.name === LOOPBACK_ANCHOR_TITLE);
+          if (!anchor) log.warn('loopback anchor window not found; falling back to screen capture (may reveal windows)');
+          callback({ video: anchor ?? sources[0], audio: 'loopback' });
+          // Capture-start clears our windows' capture-exclusion once; restore it a
+          // few times over the next few seconds (window capture makes it durable —
+          // no watchdog, no flicker). Tied to the real event, not a timer loop.
+          for (const ms of [250, 600, 1000, 1600, 2400, 3500]) {
+            setTimeout(() => applyContentProtectionToAll(getPrivacy()), ms);
+          }
+        })
         .catch(() => callback({}));
     },
     { useSystemPicker: false },
@@ -115,6 +131,9 @@ app.whenReady().then(() => {
     // Pre-create the region selector (hidden) so its renderer is loaded and ready;
     // creating it on demand right after a screen capture made it fail to load.
     createSelectionWindow();
+    // The off-screen video source for system-audio (loopback) capture — created up
+    // front so it's enumerable the instant a live session starts. See its handler.
+    createLoopbackAnchor();
     createTray();
     registerGlobalShortcuts();
     // Build marker: if you DON'T see this line on `npm run dev`, the main process
