@@ -1,8 +1,7 @@
-import { dialog } from 'electron';
 import { IPC, EVENTS } from '@shared/ipc';
 import { handle, NoInput } from './helpers';
 import { broadcast } from './broadcast';
-import { getMainWindow } from '../windows/mainWindow';
+import { confirmInWindow } from '../services/ui/confirm';
 import { profilesRepo } from '../db/repositories/profiles.repo';
 import { sessionsRepo } from '../db/repositories/sessions.repo';
 import { jobsRepo } from '../db/repositories/jobs.repo';
@@ -11,29 +10,22 @@ import { apiKeyStore } from '../services/security/apiKey';
 import { sessionManager } from '../services/session/sessionManager';
 import { log } from '../services/security/logger';
 
-/** A blocking native confirm, modal to the dashboard. Returns true if confirmed.
- *  Used to gate destructive actions in the main process, so they can't run
- *  without explicit user consent even if the IPC is invoked directly. */
+/** An in-window confirm (NOT a native dialog — that's a separate OS window that
+ *  shows in a screen share). Returns true if confirmed. Gates destructive actions
+ *  in the main process, so they can't run without explicit user consent even if
+ *  the IPC is invoked directly. */
 export async function confirmDestructive(opts: {
   message: string;
   detail: string;
   confirmLabel: string;
 }): Promise<boolean> {
-  const win = getMainWindow();
-  const box = {
-    type: 'warning' as const,
-    buttons: [opts.confirmLabel, 'Cancel'],
-    defaultId: 1, // default to the safe choice
-    cancelId: 1,
-    noLink: true,
+  return confirmInWindow({
     title: opts.message,
-    message: opts.message,
     detail: opts.detail,
-  };
-  const { response } = win
-    ? await dialog.showMessageBox(win, box)
-    : await dialog.showMessageBox(box);
-  return response === 0;
+    confirmLabel: opts.confirmLabel,
+    cancelLabel: 'Cancel',
+    tone: 'danger',
+  });
 }
 
 export function registerDataIpc(): void {

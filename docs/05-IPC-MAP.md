@@ -15,7 +15,7 @@ validates input with zod via the `handle()` helper. Errors are returned as
 ## Channel naming
 `<domain>:<action>` — domains: `app`, `dialog`, `settings`, `profiles`,
 `documents`, `jobs`, `notes`, `session`, `mock`, `capture`, `overlay`,
-`privacy`, `data`, `window`.
+`privacy`, `ui`, `data`, `window`.
 
 ## invoke / handle (request → response)
 
@@ -37,13 +37,13 @@ validates input with zod via the `handle()` helper. Errors are returned as
 | `settings:set-shortcuts` | `{ shortcuts }` | `{ shortcuts }` (persist + live re-register global shortcuts) |
 | `settings:reset-shortcuts` | — | `{ shortcuts }` (back to defaults) |
 | `settings:suspend-shortcuts` / `settings:resume-shortcuts` | — | `{ suspended }` / `{ resumed }` (while recording a binding in the UI) |
-| `settings:reset-app` | — | `{ reset, settings }` (factory-reset all settings; native confirm; keeps API key + data) |
+| `settings:reset-app` | — | `{ reset, settings }` (factory-reset all settings; in-window confirm; keeps API key + data) |
 
 ### data / window
 | Channel | Request | Response |
 |---|---|---|
 | `data:stats` | — | `{ profiles, interviews, sessions, liveSessions }` (sidebar status panel; `interviews` = total jobs) |
-| `data:wipe-all` | — | `{ wiped }` (native confirm; clears API key + all profiles + all sessions) |
+| `data:wipe-all` | — | `{ wiped }` (in-window confirm; clears API key + all profiles + all sessions) |
 | `data:load-samples` | — | `{ profileId, jobs }` (seed a sample résumé profile + Google/Amazon/Stripe interviews; parses + indexes when a key exists) |
 | `window:minimize` | — | `{ ok: true }` (custom titlebar control) |
 | `window:maximize-toggle` | — | `{ maximized }` |
@@ -190,6 +190,11 @@ persisted; no DB session, no Cue Card).
 | `privacy:toggle` | — | `{ enabled }` |
 | `privacy:set` | `{ enabled }` | `{ enabled }` |
 
+### ui
+| Channel | Request | Response |
+|---|---|---|
+| `ui:confirm-response` | `{ id, ok }` | `{ ok: true }` (renderer's reply to a main-initiated in-window confirm — see the `ui:confirm-request` event. Replaces native `dialog.showMessageBox`, which is a separate OS window visible in a screen share; `confirmInWindow` in `services/ui/confirm.ts` shows the modal inside a protected window and awaits this reply) |
+
 ### dev (DEV-ONLY — registered only when `!app.isPackaged`)
 Read-only local DB explorer; the renderer route/nav is also gated on `import.meta.env.DEV`.
 | Channel | Request | Response |
@@ -221,6 +226,7 @@ Channel constants live in `EVENTS` (`src/shared/ipc.ts`); payload types are in
 | `overlay:apply-settings` | `{ opacity, fontSize, mode }` | overlay |
 | `shortcut:fired` | `{ action }` | dashboard |
 | `privacy:changed` | `{ enabled }` | dashboard + overlay (keeps every privacy indicator in sync) |
+| `ui:confirm-request` | `ConfirmRequest` (`{ id, title, detail, confirmLabel, cancelLabel, tone }`) | ONE protected window (focused app window → visible dashboard → visible overlay) — a main-initiated confirm rendered in-window by `ConfirmHost`; the user's choice returns via the `ui:confirm-response` handler. Replaces native `dialog.showMessageBox` so confirms don't leak into a screen share |
 | `overlay:visibility` | `{ visible }` | dashboard (reflects overlay show/hide) |
 | `app:navigate` | `{ path }` | dashboard (tray "Settings" routes here) |
 | `window:maximized` | `{ maximized }` | dashboard (titlebar maximize/restore icon) |

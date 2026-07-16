@@ -5,6 +5,7 @@ import App from './dashboard/App';
 import Overlay from './overlay/Overlay';
 import RegionSelector from './selection/RegionSelector';
 import { TooltipShield } from './components/ui';
+import { ConfirmHost } from './components/ConfirmHost';
 import './index.css';
 
 class ErrorBoundary extends React.Component<
@@ -68,6 +69,9 @@ function Root() {
       {/* Replaces native `title` tooltips (separate OS windows that leak into
           screen shares) with an in-window tooltip. Covers every view. */}
       <TooltipShield />
+      {/* Renders main-initiated confirms in-window (native OS dialogs are
+          separate windows that leak into screen shares). Covers every view. */}
+      <ConfirmHost />
     </>
   );
 }

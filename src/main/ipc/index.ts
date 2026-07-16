@@ -15,6 +15,7 @@ import { registerWindowIpc } from './window.ipc';
 import { registerDataIpc } from './data.ipc';
 import { registerUpdateIpc } from './update.ipc';
 import { registerDevIpc } from './dev.ipc';
+import { registerConfirmIpc } from '../services/ui/confirm';
 
 /** Wire every IPC handler. Called once after the DB is initialized. */
 export function registerIpc(): void {
@@ -34,5 +35,6 @@ export function registerIpc(): void {
   registerWindowIpc();
   registerDataIpc();
   registerUpdateIpc();
+  registerConfirmIpc();
   registerDevIpc(); // no-op in packaged builds
 }

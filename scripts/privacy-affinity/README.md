@@ -24,6 +24,36 @@ What it does:
   here — the app's own `desktopCapturer` cannot see its own protected windows,
   and Electron has no getter for content protection.
 
+## Hard test (`hardtest.js`) — exhaustive edge-action sweep
+
+```bash
+npm run build && node scripts/privacy-affinity/hardtest.js
+```
+
+A stricter superset of `drive.js`. Same separate-process affinity probe, but the
+driver hammers **every** edge action that could wipe a window's capture
+exclusion and asserts the dashboard + Cue Card stay `0x11` the whole time:
+
+- nav / dropdown / hover storms, dashboard minimize / maximize / restore, overlay
+  hide / show, privacy re-assert;
+- a real live interview (loopback capture — the known wipe trigger) + the full
+  Cue Card control storm (expand/compact, opacity, click-through, type/format
+  sweeps, pronunciation, Ask box);
+- an **OS-level move storm** (koffi `SetWindowPos`, ~130–160 moves) — the
+  "hold-and-drag the Cue Card" test, driven at the OS level so it doesn't depend
+  on synthetic-input hit-testing;
+- the region selector (hides + reshows both windows), pause / resume / stop;
+- a **confirm-leak check**: triggers each confirm gate (turn off Privacy Mode,
+  Reset settings, Delete all data) and asserts each renders as an **in-window
+  modal** (in the DOM of a protected window) rather than a native OS dialog —
+  then cancels it (privacy stays on, nothing is wiped).
+
+Verdict is per-window and strict: any sustained (> 1 share-frame) capturable
+sample on the dashboard or Cue Card, or any confirm that is NOT in-window, fails.
+Windows carry empty OS titles, so it labels them by size (Cue Card 440×460 /
+520×680; dashboard large; loopback anchor is titled). Output lands under the
+gitignored `.out/hard/`.
+
 Reading the report: `0x11` = `WDA_EXCLUDEFROMCAPTURE` (hidden from shares),
 `0x0` = capturable. `[transient]` dips (≤150ms, healed by the in-app protection
 observer) are the OS wiping the affinity and the app re-protecting — expected

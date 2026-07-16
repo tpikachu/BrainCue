@@ -57,7 +57,18 @@ overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   as the heal are gone — a raw affinity read is side-effect-free and the raw set
   is one DWM flag flip, so a healthy state does zero writes and a real wipe never
   outlives a frame. Verify with `node scripts/privacy-affinity/drive.js`
-  (separate-process affinity probe + driven live session).
+  (separate-process affinity probe + driven live session), or the exhaustive
+  `node scripts/privacy-affinity/hardtest.js` (every edge action + a confirm-leak
+  check).
+- **No separate OS window leaks**: a native `<select>` popup, a `title=` tooltip,
+  and a native `dialog.showMessageBox` each open as a SEPARATE OS window that does
+  NOT inherit content protection — so they'd show in a screen share even while the
+  app is hidden. All three are rendered in-window instead: `Dropdown` and
+  `TooltipShield` (`components/ui.tsx`), and confirmations via `ConfirmHost`
+  (mounted in `Root`) + `confirmInWindow` (`services/ui/confirm.ts`) — a
+  main-driven confirm shown inside a protected window, awaited over
+  `ui:confirm-request`/`ui:confirm-response` (used by turn-off-Privacy, Exit,
+  Reset/Delete). Only OS file pickers and the tray menu stay native (OS-owned).
 - **Click-through (optional)**: `overlay.setIgnoreMouseEvents(true,{forward:true})`
   for a passive mode.
 

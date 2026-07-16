@@ -140,6 +140,11 @@ export const IPC = {
     set: 'privacy:set',
     get: 'privacy:get',
   },
+  // Generic UI round-trips driven by main. `confirmResponse` returns a user's
+  // answer to a main-initiated in-window confirm (see EVENTS.confirmRequest).
+  ui: {
+    confirmResponse: 'ui:confirm-response',
+  },
   update: {
     check: 'update:check',
     install: 'update:install',
@@ -180,6 +185,7 @@ export const EVENTS = {
   transcriberStatus: 'session:transcriber-status', // STT socket lifecycle: reconnecting | connected
   savePrompt: 'session:save-prompt', // a session just stopped → ask the dashboard to save/discard it
   captureBuffer: 'capture:buffer', // current multi-image problem captures, for the Cue Card strip
+  confirmRequest: 'ui:confirm-request', // main asks a protected window to show a confirm modal (reply via IPC.ui.confirmResponse)
 } as const;
 
 /** Pushed to the dashboard when a session stops, to prompt save-or-discard. */
@@ -188,6 +194,19 @@ export interface SavePrompt {
   interviewType: InterviewType;
   jobTitle: string | null;
   questionCount: number;
+}
+
+/** A main-initiated confirm, shown INSIDE a protected window (not a native OS
+ *  dialog — those are separate windows visible in a screen share). Main sends it
+ *  on EVENTS.confirmRequest; the renderer replies via IPC.ui.confirmResponse with
+ *  { id, ok }. `tone` colors the confirm button. */
+export interface ConfirmRequest {
+  id: string;
+  title: string;
+  detail: string;
+  confirmLabel: string;
+  cancelLabel: string;
+  tone: 'danger' | 'warning' | 'question';
 }
 
 /** Client (job) + profile context pushed to the Cue Card while a session is live,

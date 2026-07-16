@@ -27,6 +27,9 @@ vi.mock('../../ipc/broadcast', () => ({ broadcast: vi.fn() }));
 vi.mock('@shared/ipc', () => ({ EVENTS: { privacyChanged: 'privacy:changed' } }));
 vi.mock('../../appEvents', () => ({ appEvents: { emit: vi.fn() }, APP_EVENT: { privacyChanged: 'x' } }));
 vi.mock('../security/logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+// requestPrivacy now confirms via the in-window primitive; stub it so this unit
+// doesn't pull in the window/ipc graph (its own logic is in confirm.test.ts).
+vi.mock('../ui/confirm', () => ({ confirmInWindow: vi.fn().mockResolvedValue(false) }));
 vi.mock('./displayAffinity', () => ({
   WDA_NONE: 0x0,
   WDA_EXCLUDEFROMCAPTURE: 0x11,

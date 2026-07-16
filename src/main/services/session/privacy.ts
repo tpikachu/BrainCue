@@ -1,10 +1,11 @@
-import { BrowserWindow, dialog } from 'electron';
+import { BrowserWindow } from 'electron';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
 import { broadcast } from '../../ipc/broadcast';
 import { EVENTS } from '@shared/ipc';
 import { appEvents, APP_EVENT } from '../../appEvents';
 import { hwndOf } from './displayAffinity';
 import { AffinityObserver } from './affinityWorker';
+import { confirmInWindow } from '../ui/confirm';
 
 /** Whether setContentProtection actually works on this platform. On Linux
  *  (X11/Wayland) it is a silent no-op — the app IS visible in screen shares no
@@ -112,27 +113,20 @@ let confirming = false;
  *  user cancels, privacy stays on. */
 export async function requestPrivacy(enabled: boolean): Promise<boolean> {
   if (!enabled && getPrivacy()) {
-    if (confirming) return getPrivacy(); // a dialog is already open
+    if (confirming) return getPrivacy(); // a confirm is already open
     confirming = true;
-    const parent =
-      BrowserWindow.getFocusedWindow() ??
-      BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
-    const opts = {
-      type: 'warning' as const,
-      buttons: ['Turn off Privacy Mode', 'Keep it on'],
-      defaultId: 1,
-      cancelId: 1,
-      noLink: true,
-      title: 'Turn off Privacy Mode?',
-      message: 'Turn off Privacy Mode?',
-      detail:
-        'BrainCue will become visible to screen sharing and recording — anyone you share your screen with (Zoom, Meet, Teams) could see it. Leave it on unless you are sure.',
-    };
     try {
-      const { response } = parent
-        ? await dialog.showMessageBox(parent, opts)
-        : await dialog.showMessageBox(opts);
-      if (response !== 0) return getPrivacy(); // cancelled — unchanged
+      // In-window confirm (NOT a native dialog — that's a separate OS window
+      // visible in a screen share, exactly when Privacy Mode is still on).
+      const ok = await confirmInWindow({
+        title: 'Turn off Privacy Mode?',
+        detail:
+          'BrainCue will become visible to screen sharing and recording — anyone you share your screen with (Zoom, Meet, Teams) could see it. Leave it on unless you are sure.',
+        confirmLabel: 'Turn off Privacy Mode',
+        cancelLabel: 'Keep it on',
+        tone: 'danger',
+      });
+      if (!ok) return getPrivacy(); // cancelled — unchanged
     } finally {
       confirming = false;
     }

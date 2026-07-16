@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { EVENTS, IPC } from '@shared/ipc';
-import type { AnswerPrefs, ClientInfo, SavePrompt, UpdateStatus } from '@shared/ipc';
+import type { AnswerPrefs, ClientInfo, ConfirmRequest, SavePrompt, UpdateStatus } from '@shared/ipc';
 import type {
   Application,
   ApplicationListItem,
@@ -274,6 +274,11 @@ const api = {
     toggle: () => invoke<{ enabled: boolean }>(IPC.privacy.toggle),
     set: (enabled: boolean) => invoke<{ enabled: boolean }>(IPC.privacy.set, { enabled }),
   },
+  ui: {
+    // Reply to a main-initiated in-window confirm (see events.onConfirmRequest).
+    confirmResponse: (id: string, ok: boolean) =>
+      invoke<{ ok: true }>(IPC.ui.confirmResponse, { id, ok }),
+  },
   update: {
     getStatus: () => invoke<UpdateStatus>(IPC.update.getStatus),
     check: () => invoke<{ ok: true }>(IPC.update.check),
@@ -319,6 +324,7 @@ const api = {
     ) => on(EVENTS.transcriberStatus, cb),
     onSavePrompt: (cb: (p: SavePrompt) => void) => on(EVENTS.savePrompt, cb),
     onCaptureBuffer: (cb: (p: { images: string[] }) => void) => on(EVENTS.captureBuffer, cb),
+    onConfirmRequest: (cb: (p: ConfirmRequest) => void) => on(EVENTS.confirmRequest, cb),
   },
 };
 

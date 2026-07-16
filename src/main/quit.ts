@@ -1,7 +1,8 @@
-import { app, BrowserWindow, dialog } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import { unregisterGlobalShortcuts } from './shortcuts';
 import { sessionManager } from './services/session/sessionManager';
 import { stopProtectionObserver } from './services/session/privacy';
+import { confirmInWindow } from './services/ui/confirm';
 import { destroyTray } from './windows/tray';
 import { log } from './services/security/logger';
 
@@ -53,23 +54,14 @@ export function quitApp(): void {
   app.quit();
 }
 
-/** Tray "Exit": ask for confirmation, then fully quit. */
+/** Tray "Exit": ask for confirmation (in-window, not a native dialog), then quit. */
 export async function confirmQuit(): Promise<void> {
-  const parent =
-    BrowserWindow.getFocusedWindow() ??
-    BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
-  const opts = {
-    type: 'question' as const,
-    buttons: ['Exit', 'Cancel'],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true,
-    title: 'Exit BrainCue Copilot',
-    message: 'Exit BrainCue Copilot?',
+  const ok = await confirmInWindow({
+    title: 'Exit BrainCue Copilot?',
     detail: 'The app will fully close and stop running in the background tray.',
-  };
-  const { response } = parent
-    ? await dialog.showMessageBox(parent, opts)
-    : await dialog.showMessageBox(opts);
-  if (response === 0) quitApp();
+    confirmLabel: 'Exit',
+    cancelLabel: 'Cancel',
+    tone: 'question',
+  });
+  if (ok) quitApp();
 }
