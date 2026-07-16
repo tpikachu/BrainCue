@@ -288,6 +288,94 @@ export function Dropdown({
   );
 }
 
+/**
+ * Converts native HTML `title` tooltips into an in-window tooltip, app-wide.
+ *
+ * A native `title` tooltip renders as a SEPARATE OS window that does NOT inherit
+ * the app window's screen-capture exclusion — so hovering any titled element
+ * (nav links, buttons, icons) shows the tooltip in a Zoom/Meet screen share even
+ * while the app itself is hidden. This intercepts the `title` on hover (well
+ * before the OS tooltip's ~0.5s delay), strips it so the native tooltip never
+ * appears, and renders the same text inside the window's own DOM instead (which
+ * IS covered by the exclusion). Mount ONCE at the app root — it covers every
+ * view and every current/future `title`, so individual call sites keep using the
+ * ordinary `title` attribute.
+ */
+export function TooltipShield() {
+  const [tip, setTip] = useState<{ text: string; x: number; y: number; up: boolean } | null>(null);
+  useEffect(() => {
+    let curEl: HTMLElement | null = null;
+    const titled = (n: EventTarget | null): HTMLElement | null => {
+      let el = n as HTMLElement | null;
+      while (el && el !== document.body) {
+        if (el.getAttribute && (el.getAttribute('title') || el.getAttribute('data-tip'))) return el;
+        el = el.parentElement;
+      }
+      return null;
+    };
+    const show = (el: HTMLElement): void => {
+      let text = el.getAttribute('title');
+      if (text) {
+        // Strip the native title so the OS tooltip window never appears; keep the
+        // text for our in-window tooltip and (if the control has no visible text)
+        // for accessibility.
+        el.setAttribute('data-tip', text);
+        if (!el.getAttribute('aria-label') && !el.textContent?.trim()) el.setAttribute('aria-label', text);
+        el.removeAttribute('title');
+      } else {
+        text = el.getAttribute('data-tip');
+      }
+      if (!text) return setTip(null);
+      const r = el.getBoundingClientRect();
+      const up = r.bottom + 44 > window.innerHeight;
+      setTip({
+        text,
+        x: Math.min(Math.max(r.left + r.width / 2, 8), window.innerWidth - 8),
+        y: up ? r.top - 6 : r.bottom + 6,
+        up,
+      });
+    };
+    const onOver = (e: Event): void => {
+      const el = titled(e.target);
+      if (el === curEl) return;
+      curEl = el;
+      if (el) show(el);
+      else setTip(null);
+    };
+    const hide = (): void => {
+      curEl = null;
+      setTip(null);
+    };
+    document.addEventListener('mouseover', onOver, true);
+    document.addEventListener('mousedown', hide, true);
+    window.addEventListener('scroll', hide, true);
+    window.addEventListener('blur', hide);
+    return () => {
+      document.removeEventListener('mouseover', onOver, true);
+      document.removeEventListener('mousedown', hide, true);
+      window.removeEventListener('scroll', hide, true);
+      window.removeEventListener('blur', hide);
+    };
+  }, []);
+  if (!tip) return null;
+  return (
+    <div
+      role="tooltip"
+      style={{
+        position: 'fixed',
+        left: tip.x,
+        top: tip.y,
+        transform: `translate(-50%, ${tip.up ? '-100%' : '0'})`,
+        zIndex: 9999,
+        pointerEvents: 'none',
+      }}
+      className="max-w-xs rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-[11px] leading-snug text-neutral-100 shadow-lg shadow-black/60"
+    >
+      {tip.text}
+    </div>
+  );
+}
+
 /** Flatten an <option>'s children (strings, numbers, fragments) to plain text. */
 function nodeText(node: React.ReactNode): string {
   if (node == null || typeof node === 'boolean') return '';

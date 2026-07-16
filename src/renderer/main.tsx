@@ -4,6 +4,7 @@ import { HashRouter } from 'react-router-dom';
 import App from './dashboard/App';
 import Overlay from './overlay/Overlay';
 import RegionSelector from './selection/RegionSelector';
+import { TooltipShield } from './components/ui';
 import './index.css';
 
 class ErrorBoundary extends React.Component<
@@ -38,7 +39,7 @@ const view = new URLSearchParams(window.location.search).get('view');
 // black so there's never a transparent/flashing gap before the frame paints.
 if (view === 'selection') document.body.style.background = '#000000';
 
-function Root() {
+function View() {
   if (view === 'overlay')
     return (
       <ErrorBoundary label="overlay">
@@ -57,6 +58,17 @@ function Root() {
         <App />
       </HashRouter>
     </ErrorBoundary>
+  );
+}
+
+function Root() {
+  return (
+    <>
+      <View />
+      {/* Replaces native `title` tooltips (separate OS windows that leak into
+          screen shares) with an in-window tooltip. Covers every view. */}
+      <TooltipShield />
+    </>
   );
 }
 
