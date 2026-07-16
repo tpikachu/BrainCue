@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { Children, isValidElement, useEffect, useRef, useState } from 'react';
 import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, SearchIcon } from './icons';
 
 /** Centered modal dialog. Closes on overlay click or Escape. */
@@ -231,7 +231,13 @@ export function Dropdown({
         aria-haspopup="listbox"
         aria-expanded={open}
         className={buttonClassName}
-        onClick={() => {
+        onClick={(e) => {
+          // When this Dropdown stands in for a <select> inside a <label> (e.g.
+          // dashboard Field), the label would re-dispatch a synthetic click onto
+          // this button and toggle it a second time (open→closed). Cancel both so
+          // one physical click = one toggle.
+          e.preventDefault();
+          e.stopPropagation();
           if (!open && rootRef.current) {
             // Open upward when the list would run past the window bottom and
             // there is more room above (the Cue Card is small).
@@ -282,8 +288,51 @@ export function Dropdown({
   );
 }
 
-export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} className={`${inputBase} ${props.className ?? ''}`} />;
+/** Flatten an <option>'s children (strings, numbers, fragments) to plain text. */
+function nodeText(node: React.ReactNode): string {
+  if (node == null || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join('');
+  if (isValidElement(node)) return nodeText((node.props as { children?: React.ReactNode }).children);
+  return '';
+}
+
+/**
+ * A drop-in for a native `<select>` that renders the in-window {@link Dropdown}
+ * instead — a native select's option list opens as a SEPARATE OS popup window
+ * that is NOT covered by the app's screen-capture exclusion, so it shows in
+ * Zoom/Meet even with Privacy Mode on. Keeps the native-select call shape
+ * (`value` + `<option>` children + an event-style `onChange`) so existing call
+ * sites need no changes.
+ */
+export function Select({
+  value,
+  onChange,
+  disabled,
+  className,
+  children,
+}: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  const options: { value: string; label: string }[] = [];
+  Children.forEach(children, (child) => {
+    if (!isValidElement(child) || child.type !== 'option') return;
+    const p = child.props as { value?: string | number; children?: React.ReactNode };
+    options.push({ value: String(p.value ?? ''), label: nodeText(p.children) });
+  });
+  return (
+    <Dropdown
+      value={String(value ?? '')}
+      options={options}
+      disabled={disabled}
+      className={className ?? ''}
+      buttonClassName={`${inputBase} flex items-center justify-between gap-2 text-left`}
+      onChange={(v) =>
+        onChange?.({
+          target: { value: v },
+          currentTarget: { value: v },
+        } as unknown as React.ChangeEvent<HTMLSelectElement>)
+      }
+    />
+  );
 }
 
 /** Text input with a leading search icon — for filter/search boxes. */
