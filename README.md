@@ -21,34 +21,42 @@
 ## See it in action
 
 <p align="center">
-  <img src="docs/media/cuecard-teaser.gif" width="440" alt="The Cue Card during a live mock interview: a question is detected, a grounded answer streams in, the previous answer collapses into history, and the format switches to Story mid-stream." />
-  <br /><sub><b>Live, in real time</b> — the question is heard, and a grounded answer streams into the Cue Card.</sub>
+  <img src="docs/media/cuecard-stream.gif" width="360" alt="The floating Cue Card: the interviewer's question is transcribed live, then a grounded, cited answer streams in." />
+  <br /><sub><b>Live, in real time</b> — the interviewer's question is heard, and a grounded, cited answer streams into the Cue Card.</sub>
 </p>
 
 <p align="center">
-  <a href="docs/media/braincue-demo.mp4"><b>▶ Watch the full demo (76s)</b></a>
+  <img src="docs/media/stealth-split.gif" width="820" alt="The same moment in two views: your screen shows the Cue Card over a video call; the interviewer's screen share shows the call with the app absent." />
+  <br /><sub><b>The same moment, two views</b> — your screen has the copilot; the interviewer's screen share (and any recording) has nothing.</sub>
 </p>
-
-## Screenshots
-
-<!-- Drop PNGs at the paths below to fill these in. Capture guide: docs/images/README.md.
-     (Turn Privacy Mode OFF in Settings before capturing, then turn it back on.) -->
 
 <p align="center">
-  <img src="docs/images/cue-card.png" alt="The floating Cue Card during a live interview — transcript and grounded answer" width="820" />
-  <br /><sub><b>The Cue Card</b> — live transcript, streamed answer, and on-the-fly controls; invisible to screen sharing.</sub>
+  <a href="docs/media/braincue-demo.mp4"><b>▶ Watch the full demo</b></a> — 74s, narrated with on-screen captions.
 </p>
+
+### The whole interview, one copilot
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/interview.png" alt="Interview page" /><br /><sub><b>Interview</b> — pick a profile, start a saved interview.</sub></td>
-    <td width="50%"><img src="docs/images/reports.png" alt="Reports page" /><br /><sub><b>Reports</b> — every session, with a coaching report.</sub></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="docs/images/mock.png" alt="Mock interview" /><br /><sub><b>Mock</b> — an AI interviewer; answers stream to the Cue Card.</sub></td>
-    <td width="50%"><img src="docs/images/settings.png" alt="Settings" /><br /><sub><b>Settings</b> — your key, models, privacy, hotkeys.</sub></td>
+    <td width="33%" align="center" valign="top">
+      <img src="docs/media/format-switch.gif" width="240" alt="Re-tell any answer as key points, an explanation, or a STAR story — switched live." />
+      <br /><sub><b>Re-tell it your way</b><br />key points · explanation · STAR story</sub>
+    </td>
+    <td width="33%" align="center" valign="top">
+      <img src="docs/media/coding-solve.gif" width="240" alt="A captured coding problem is solved in the Cue Card with an optimal solution and complexity analysis." />
+      <br /><sub><b>Live coding rounds</b><br />optimal solution + complexity</sub>
+    </td>
+    <td width="33%" align="center" valign="top">
+      <img src="docs/media/mock-interview.gif" width="240" alt="An AI interviewer asks a question aloud and the copilot answers it in the Cue Card." />
+      <br /><sub><b>Mock interviews</b><br />the AI asks · the copilot answers</sub>
+    </td>
   </tr>
 </table>
+
+<p align="center">
+  <img src="docs/media/interview-grounded.gif" width="640" alt="The Interview page: pick a profile, and each interview is grounded in its own résumé, job description, and company research." />
+  <br /><sub><b>Grounded in your story</b> — every interview draws on its own résumé, JD, and company research, parsed and indexed on your machine.</sub>
+</p>
 
 ---
 
