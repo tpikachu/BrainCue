@@ -3,7 +3,7 @@ import { join } from 'path';
 import { EVENTS } from '@shared/ipc';
 import { attachDiagnostics, loadRenderer } from './loadRenderer';
 import { captureScreen } from '../services/capture/screenshot';
-import { applyPrivacyToWindow, keepContentProtected } from '../services/session/privacy';
+import { applyPrivacyToWindow, protectWindow } from '../services/session/privacy';
 import { log } from '../services/security/logger';
 import { broadcast } from '../ipc/broadcast';
 import { getMainWindow } from './mainWindow';
@@ -70,10 +70,10 @@ export function createSelectionWindow(): BrowserWindow {
   });
 
   selectionWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  // Keep the (fullscreen) selector excluded from capture across show/move/resize;
-  // on Windows the exclude-from-capture affinity is only reliable once realized
-  // and is dropped by move/resize, so re-assert (matches the other windows).
-  keepContentProtected(selectionWin);
+  // Exclude the (fullscreen) selector from capture at creation and on show;
+  // OS-side wipes are detected and healed by the protection observer
+  // (matches the other windows).
+  protectWindow(selectionWin);
   attachDiagnostics(selectionWin, 'selector');
 
   // SAFETY NET: cancel from the main process on Escape, even if the renderer's own

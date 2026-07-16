@@ -6,11 +6,12 @@ import { sparringManager } from './services/mock/sparringManager';
 import { createMainWindow, showMainWindow } from './windows/mainWindow';
 import { createOverlayWindow, showOverlay } from './windows/overlayWindow';
 import { createSelectionWindow } from './windows/selectionWindow';
-import { createLoopbackAnchor, LOOPBACK_ANCHOR_TITLE } from './windows/loopbackAnchor';
+import { createLoopbackAnchor, getLoopbackAnchor, LOOPBACK_ANCHOR_TITLE } from './windows/loopbackAnchor';
 import { createTray } from './windows/tray';
 import { registerGlobalShortcuts } from './shortcuts';
 import { performShutdown } from './quit';
-import { applyContentProtectionToAll, getPrivacy } from './services/session/privacy';
+import { applyContentProtectionToAll, getPrivacy, startProtectionObserver } from './services/session/privacy';
+import { affinityReadable } from './services/session/displayAffinity';
 import { initAutoUpdate } from './services/update/updater';
 import { log } from './services/security/logger';
 
@@ -97,18 +98,38 @@ app.whenReady().then(() => {
   // afterwards sticks. The renderer discards the video track and keeps only audio.
   session.defaultSession.setDisplayMediaRequestHandler(
     (_request, callback) => {
+      // Capture-start clears our windows' capture-exclusion; the protection
+      // observer detects the real wipe and heals it within one tick. Only when
+      // the affinity oracle is missing (no observer) fall back to blind timed
+      // re-asserts — better a possible one-frame flicker than staying visible
+      // for the whole interview.
+      const scheduleBlindHeals = (): void => {
+        if (affinityReadable()) return;
+        for (const ms of [250, 600, 1000, 1600, 2400, 3500]) {
+          setTimeout(() => applyContentProtectionToAll(getPrivacy()), ms);
+        }
+      };
+      const anchor = getLoopbackAnchor();
+      if (anchor) {
+        // Hand the media stack the anchor's source id DIRECTLY. Enumerating via
+        // desktopCapturer.getSources can NOT find it: on Windows the enumerator
+        // does not return the calling process's own windows (measured on Win 11
+        // 26200), so the old title/id match silently fell back to whole-screen
+        // capture — the exact mode that continuously wipes our capture
+        // exclusion — on every single session.
+        callback({
+          video: { id: anchor.getMediaSourceId(), name: LOOPBACK_ANCHOR_TITLE },
+          audio: 'loopback',
+        });
+        scheduleBlindHeals();
+        return;
+      }
+      log.warn('loopback anchor window missing; falling back to screen capture (may reveal windows)');
       desktopCapturer
-        .getSources({ types: ['window', 'screen'] })
+        .getSources({ types: ['screen'] })
         .then((sources) => {
-          const anchor = sources.find((s) => s.name === LOOPBACK_ANCHOR_TITLE);
-          if (!anchor) log.warn('loopback anchor window not found; falling back to screen capture (may reveal windows)');
-          callback({ video: anchor ?? sources[0], audio: 'loopback' });
-          // Capture-start clears our windows' capture-exclusion once; restore it a
-          // few times over the next few seconds (window capture makes it durable —
-          // no watchdog, no flicker). Tied to the real event, not a timer loop.
-          for (const ms of [250, 600, 1000, 1600, 2400, 3500]) {
-            setTimeout(() => applyContentProtectionToAll(getPrivacy()), ms);
-          }
+          callback({ video: sources[0], audio: 'loopback' });
+          scheduleBlindHeals();
         })
         .catch(() => callback({}));
     },
@@ -134,6 +155,9 @@ app.whenReady().then(() => {
     // The off-screen video source for system-audio (loopback) capture — created up
     // front so it's enumerable the instant a live session starts. See its handler.
     createLoopbackAnchor();
+    // Watch every window's REAL OS-level capture-exclusion and re-protect only
+    // on an actual wipe (see privacy.ts) — replaces all blind re-assert timers.
+    startProtectionObserver();
     createTray();
     registerGlobalShortcuts();
     // Build marker: if you DON'T see this line on `npm run dev`, the main process

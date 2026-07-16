@@ -19,3 +19,6 @@ playwright-report/
 # OS
 .DS_Store
 Thumbs.db
+
+# privacy affinity harness output (contains logs + an isolated userData dir)
+scripts/privacy-affinity/.out/

@@ -43,7 +43,15 @@ overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
 - **Font size**: handled purely in renderer (CSS var).
 - **Show/Hide**: global shortcut toggles `overlay.show()/hide()`.
 - **Privacy Mode**: `overlay.setContentProtection(true)` excludes it from screen
-  capture on supported OSes.
+  capture on supported OSes. Protection is applied ONCE per window (creation +
+  `show`); a **protection observer** (`startProtectionObserver`, privacy.ts)
+  polls the real `GetWindowDisplayAffinity` via koffi every ~50ms and re-calls
+  `setContentProtection` only on a window the OS has actually wiped (Windows
+  wipes it while an external screen share runs, and at loopback-capture start).
+  Blind re-asserts (interval shields, event cascades) are gone — each re-call
+  can flash one frame in an active WGC capture, so we only heal real breaks.
+  Verify with `node scripts/privacy-affinity/drive.js` (separate-process
+  affinity probe + driven live session).
 - **Click-through (optional)**: `overlay.setIgnoreMouseEvents(true,{forward:true})`
   for a passive mode.
 

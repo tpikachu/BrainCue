@@ -1,9 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// Drive getPrivacy() via a stubbed settings repo (avoids better-sqlite3), and
-// capture broadcasts/app-events so the module loads without electron windows.
+// Drive getPrivacy() via a stubbed settings repo (avoids better-sqlite3), stub
+// the native affinity oracle, and capture broadcasts/app-events so the module
+// loads without electron windows.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const state = vi.hoisted(() => ({ privacy: '1' as string | null, windows: [] as any[] }));
+const state = vi.hoisted(() => ({
+  privacy: '1' as string | null,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  windows: [] as any[],
+  readable: true,
+  // Per-window REAL OS affinity, as the stubbed oracle reports it.
+  affinity: new Map<unknown, number | null>(),
+}));
 vi.mock('../../db/repositories/settings.repo', () => ({
   SETTINGS_KEYS: { privacyMode: 'privacy_mode' },
   settingsRepo: {
@@ -17,140 +25,92 @@ vi.mock('electron', () => ({ BrowserWindow: { getAllWindows: () => state.windows
 vi.mock('../../ipc/broadcast', () => ({ broadcast: vi.fn() }));
 vi.mock('@shared/ipc', () => ({ EVENTS: { privacyChanged: 'privacy:changed' } }));
 vi.mock('../../appEvents', () => ({ appEvents: { emit: vi.fn() }, APP_EVENT: { privacyChanged: 'x' } }));
+vi.mock('../security/logger', () => ({
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock('./displayAffinity', () => ({
+  WDA_NONE: 0x0,
+  WDA_EXCLUDEFROMCAPTURE: 0x11,
+  affinityReadable: () => state.readable,
+  readWindowAffinity: (w: unknown) => state.affinity.get(w) ?? 0x11,
+}));
 
-import { keepContentProtected, applyPrivacyToWindow, startCaptureShield, stopCaptureShield } from './privacy';
+import {
+  protectWindow,
+  applyPrivacyToWindow,
+  startProtectionObserver,
+  stopProtectionObserver,
+  getProtectionObserverStats,
+} from './privacy';
 
 /** A fake BrowserWindow that records setContentProtection calls and lets tests
- *  fire lifecycle events, native window messages, and webContents input events. */
-function fakeWindow() {
+ *  fire lifecycle events. */
+function fakeWindow(title = 'win') {
   const handlers = new Map<string, (() => void)[]>();
-  const msgHooks = new Map<number, (() => void)[]>();
-  const inputHandlers: ((e: unknown, input: { type: string }) => void)[] = [];
   const calls: boolean[] = [];
   return {
     isDestroyed: () => false,
     isVisible: () => true,
+    getTitle: () => title,
     setContentProtection: (v: boolean) => calls.push(v),
-    webContents: {
-      on(ev: string, fn: (e: unknown, input: { type: string }) => void) {
-        if (ev === 'input-event') inputHandlers.push(fn);
-      },
-    },
     on(ev: string, fn: () => void) {
       const l = handlers.get(ev) ?? [];
       l.push(fn);
       handlers.set(ev, l);
       return this;
     },
-    hookWindowMessage(msg: number, fn: () => void) {
-      const l = msgHooks.get(msg) ?? [];
-      l.push(fn);
-      msgHooks.set(msg, l);
-    },
     fire(ev: string) {
       for (const fn of handlers.get(ev) ?? []) fn();
     },
-    fireMsg(msg: number) {
-      for (const fn of msgHooks.get(msg) ?? []) fn();
-    },
-    fireInput(type: string) {
-      for (const fn of inputHandlers) fn({}, { type });
-    },
     calls,
     handlers,
-    msgHooks,
   };
 }
 
 beforeEach(() => {
   state.privacy = '1';
   state.windows = [];
+  state.readable = true;
+  state.affinity = new Map();
+  process.env.BRAINCUE_OBSERVER_MS = '50'; // pin the tick so tests don't depend on the default
   vi.useFakeTimers();
 });
 afterEach(() => {
-  stopCaptureShield();
+  stopProtectionObserver();
+  delete process.env.BRAINCUE_OBSERVER_MS;
   vi.clearAllTimers();
   vi.useRealTimers();
 });
 
-describe('keepContentProtected', () => {
-  it('applies protection once up front, then re-asserts via a deferred cascade on a drop-trigger event (no synchronous re-call per message — keeps re-call count, hence capture flicker, low)', () => {
+describe('protectWindow', () => {
+  it('applies protection exactly once at creation — set-once, no cascades, no timers', () => {
     const w = fakeWindow();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    keepContentProtected(w as any);
-    expect(w.calls).toEqual([true]); // applied up front, nothing scheduled yet
-
-    w.fire('focus');
-    // NOTHING synchronous — the cascade is fully deferred (first tap at next tick)
-    expect(w.calls.length).toBe(1);
-    vi.advanceTimersByTime(400);
-    expect(w.calls.length).toBe(5); // 1 initial + the 0/16/48/120ms cascade
-    expect(w.calls.every((c) => c === true)).toBe(true);
-  });
-
-  it('coalesces the cascade across an event burst — one click (or a drag) is a handful of re-calls, not dozens', () => {
-    const w = fakeWindow();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    keepContentProtected(w as any);
-    for (let i = 0; i < 10; i++) w.fire('move'); // burst of 10 signals
-    expect(w.calls.length).toBe(1); // still nothing synchronous
-    vi.advanceTimersByTime(400);
-    // 1 initial + only ONE coalesced cascade of 4 taps (not 10×4)
-    expect(w.calls.length).toBe(5);
-  });
-
-  it('re-asserts the CURRENT state — clears protection when Privacy Mode is off', () => {
-    const w = fakeWindow();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    keepContentProtected(w as any);
+    protectWindow(w as any);
     expect(w.calls).toEqual([true]);
+    // NOTHING may be scheduled or event-driven beyond 'show': blind re-asserts
+    // were themselves the one-frame flicker in active WGC captures.
+    vi.advanceTimersByTime(5000);
+    expect(w.calls).toEqual([true]);
+    expect([...w.handlers.keys()]).toEqual(['show']);
+  });
+
+  it('re-applies on show (hide/show wipes the affinity; a hidden window is in no capture, so this cannot flash)', () => {
+    const w = fakeWindow();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    protectWindow(w as any);
+    w.fire('show');
+    expect(w.calls).toEqual([true, true]);
+  });
+
+  it('applies the CURRENT state — a window shown while Privacy Mode is off stays capturable', () => {
+    const w = fakeWindow();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    protectWindow(w as any);
     state.privacy = '0'; // user turned Privacy Mode off
-    w.fire('move'); // a later move must not re-hide against the user's choice
-    vi.advanceTimersByTime(200); // let the deferred cascade run
+    w.fire('show');
     expect(w.calls[w.calls.length - 1]).toBe(false);
   });
-
-  it('subscribes to move + resize (the Windows drag/resize drop points)', () => {
-    const w = fakeWindow();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    keepContentProtected(w as any);
-    expect(w.handlers.has('move')).toBe(true);
-    expect(w.handlers.has('resize')).toBe(true);
-  });
-
-  it('schedules a re-assert on webContents mouseDown — a click on an ALREADY-ACTIVE window fires no activation message but can still drop the exclusion', () => {
-    const w = fakeWindow();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    keepContentProtected(w as any);
-    w.fireInput('mouseMove'); // moves are noise — must NOT schedule a cascade
-    vi.advanceTimersByTime(400);
-    expect(w.calls.length).toBe(1); // still just the initial
-    w.fireInput('mouseDown');
-    vi.advanceTimersByTime(400);
-    expect(w.calls.length).toBe(5); // initial + 0/16/48/120ms cascade
-    expect(w.calls.every((c) => c === true)).toBe(true);
-  });
-
-  it.runIf(process.platform === 'win32')(
-    'hooks the native messages for activation, child-window clicks, and window-pos/z-order changes, and each schedules a re-assert',
-    () => {
-      const w = fakeWindow();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      keepContentProtected(w as any);
-      // WM_MOUSEACTIVATE (click on inactive window), WM_PARENTNOTIFY (click on
-      // active window, via child HWND), WM_WINDOWPOSCHANGED (move/size/Z-ORDER —
-      // a pure z-order change fires NO Electron event but drops the exclusion).
-      for (const msg of [0x0021, 0x0210, 0x0047]) {
-        expect(w.msgHooks.has(msg)).toBe(true);
-        w.calls.length = 0;
-        w.fireMsg(msg);
-        expect(w.calls.length).toBe(0); // deferred, not synchronous
-        vi.advanceTimersByTime(200);
-        expect(w.calls.length).toBe(4); // the 0/16/48/120ms cascade
-        expect(w.calls.every((c) => c === true)).toBe(true);
-      }
-    },
-  );
 
   it('applyPrivacyToWindow reflects the stored setting', () => {
     const w = fakeWindow();
@@ -161,30 +121,61 @@ describe('keepContentProtected', () => {
   });
 });
 
-describe('capture shield', () => {
-  it('re-asserts protection on every window on an interval while running, and stops on stopCaptureShield', () => {
-    const a = fakeWindow();
-    const b = fakeWindow();
+describe.runIf(process.platform === 'win32')('protection observer', () => {
+  it('makes ZERO setContentProtection calls while every window is genuinely excluded (the no-flicker property)', () => {
+    const a = fakeWindow('a');
+    const b = fakeWindow('b');
     state.windows = [a, b];
-    startCaptureShield();
-    expect(a.calls.length).toBe(0); // nothing synchronous — first re-assert is on the first tick
-    vi.advanceTimersByTime(80 * 5); // ~5 ticks at the default 80ms cadence
-    expect(a.calls.length).toBeGreaterThanOrEqual(4);
-    expect(b.calls.length).toBe(a.calls.length); // every window re-asserted together
-    expect(a.calls.every((c) => c === true)).toBe(true); // Privacy Mode on -> protect
-    const after = a.calls.length;
-    stopCaptureShield();
-    vi.advanceTimersByTime(80 * 5);
-    expect(a.calls.length).toBe(after); // no more re-asserts once stopped
+    startProtectionObserver();
+    vi.advanceTimersByTime(50 * 20); // 1s of ticks, all healthy (default 0x11)
+    expect(a.calls.length).toBe(0);
+    expect(b.calls.length).toBe(0);
   });
 
-  it('re-asserts the CURRENT privacy state — clears protection when Privacy Mode is off', () => {
+  it('re-protects ONLY a window whose OS affinity was actually wiped, and counts the breach', () => {
+    const wiped = fakeWindow('wiped');
+    const healthy = fakeWindow('healthy');
+    state.windows = [wiped, healthy];
+    const before = getProtectionObserverStats().breaches;
+    startProtectionObserver();
+    state.affinity.set(wiped, 0x0); // the OS made it capturable behind our back
+    vi.advanceTimersByTime(50);
+    expect(wiped.calls).toEqual([true]);
+    expect(healthy.calls.length).toBe(0);
+    expect(getProtectionObserverStats().breaches).toBe(before + 1);
+    // once the oracle reads excluded again, no further calls
+    state.affinity.set(wiped, 0x11);
+    vi.advanceTimersByTime(50 * 10);
+    expect(wiped.calls).toEqual([true]);
+  });
+
+  it('never fights the user: with Privacy Mode OFF a capturable window is left alone', () => {
     const w = fakeWindow();
     state.windows = [w];
     state.privacy = '0';
-    startCaptureShield();
-    vi.advanceTimersByTime(80);
-    expect(w.calls[w.calls.length - 1]).toBe(false);
-    stopCaptureShield();
+    state.affinity.set(w, 0x0);
+    startProtectionObserver();
+    vi.advanceTimersByTime(50 * 5);
+    expect(w.calls.length).toBe(0);
+  });
+
+  it('stops on stopProtectionObserver', () => {
+    const w = fakeWindow();
+    state.windows = [w];
+    startProtectionObserver();
+    stopProtectionObserver();
+    state.affinity.set(w, 0x0);
+    vi.advanceTimersByTime(50 * 10);
+    expect(w.calls.length).toBe(0);
+  });
+
+  it('does not start without the affinity oracle (falls back to set-once; blind healing is elsewhere)', () => {
+    const w = fakeWindow();
+    state.windows = [w];
+    state.readable = false;
+    state.affinity.set(w, 0x0);
+    startProtectionObserver();
+    vi.advanceTimersByTime(50 * 10);
+    expect(w.calls.length).toBe(0);
   });
 });

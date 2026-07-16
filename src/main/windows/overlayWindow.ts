@@ -3,7 +3,7 @@ import { join } from 'path';
 import { EVENTS } from '@shared/ipc';
 import { SETTINGS_KEYS, settingsRepo } from '../db/repositories/settings.repo';
 import { attachDiagnostics, loadRenderer } from './loadRenderer';
-import { keepContentProtected } from '../services/session/privacy';
+import { protectWindow } from '../services/session/privacy';
 import { getMainWindow } from './mainWindow';
 import type { OverlayMode } from '@shared/types';
 
@@ -98,9 +98,9 @@ export function createOverlayWindow(): BrowserWindow {
     // "Ask a question" box all work exactly as expected. Its screen-capture
     // stealth does NOT depend on being non-activating — the real leak was the
     // app's own loopback screen-capture clearing WDA on all our windows, which
-    // is fixed by capturing an off-screen window (loopbackAnchor) + the capture
-    // shield (see startCaptureShield). Keeping it focusable is what makes the
-    // Ask box typeable.
+    // is fixed by capturing an off-screen window (loopbackAnchor) + the
+    // protection observer (see startProtectionObserver). Keeping it focusable
+    // is what makes the Ask box typeable.
     focusable: true,
     hasShadow: true,
     alwaysOnTop: true,
@@ -115,11 +115,10 @@ export function createOverlayWindow(): BrowserWindow {
   overlay.setAlwaysOnTop(true, 'screen-saver');
   overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
-  // Hide from screen capture (Privacy Mode) and re-assert across the events that
-  // drop the exclusion on Windows. The dominant leak — the app's own loopback
-  // capture clearing WDA during a live session — is handled by the capture
-  // shield (startCaptureShield), not here.
-  keepContentProtected(overlay);
+  // Hide from screen capture (Privacy Mode). Set once (and on show); an OS-side
+  // wipe of the exclusion — e.g. the loopback capture starting with a live
+  // session — is detected and healed by the protection observer.
+  protectWindow(overlay);
   overlay.on('show', () => notifyVisibility(true));
   overlay.on('hide', () => notifyVisibility(false));
 

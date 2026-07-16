@@ -2,7 +2,7 @@ import { BrowserWindow, shell } from 'electron';
 import { join } from 'path';
 import { EVENTS } from '@shared/ipc';
 import { attachDiagnostics, loadRenderer } from './loadRenderer';
-import { applyPrivacyToWindow, keepContentProtected } from '../services/session/privacy';
+import { applyPrivacyToWindow, protectWindow } from '../services/session/privacy';
 import { broadcastMaximizeState } from '../ipc/window.ipc';
 import { appIconImage } from './appIcon';
 import { isQuitting } from '../quit';
@@ -40,10 +40,10 @@ export function createMainWindow(): BrowserWindow {
     },
   });
 
-  // Hide from screen capture when Privacy Mode is on (default), and KEEP it
-  // applied across move/resize/restore/focus — dragging or resizing the window
-  // drops the capture exclusion on Windows unless re-asserted.
-  keepContentProtected(win);
+  // Hide from screen capture when Privacy Mode is on (default). Set once (and
+  // on show); an OS-side wipe of the exclusion is detected and healed by the
+  // protection observer (see startProtectionObserver in privacy.ts).
+  protectWindow(win);
 
   // Reveal the window exactly once. On some hybrid-GPU laptops (e.g. NVIDIA
   // Optimus on MSI machines) `ready-to-show` can be delayed or never fire, which

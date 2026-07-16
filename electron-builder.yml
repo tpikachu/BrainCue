@@ -22,8 +22,10 @@ extraResources:
   - from: resources/icon.png
     to: icon.png
 asarUnpack:
-  # native module must stay unpacked
+  # native modules must stay unpacked
   - "**/node_modules/better-sqlite3/**"
+  # koffi loads its prebuilt .node from disk (the display-affinity oracle)
+  - "**/node_modules/koffi/**"
 win:
   icon: resources/icon.ico
   target:

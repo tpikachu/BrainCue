@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog } from 'electron';
 import { unregisterGlobalShortcuts } from './shortcuts';
 import { sessionManager } from './services/session/sessionManager';
+import { stopProtectionObserver } from './services/session/privacy';
 import { destroyTray } from './windows/tray';
 import { log } from './services/security/logger';
 
@@ -18,6 +19,7 @@ export function isQuitting(): boolean {
  *  Electron's helper processes alive after the user exits. Idempotent. */
 export function performShutdown(): void {
   quitting = true;
+  stopProtectionObserver();
   try {
     sessionManager.shutdown();
   } catch (e) {

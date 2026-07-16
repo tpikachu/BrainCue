@@ -3,6 +3,8 @@ import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo
 import { broadcast } from '../../ipc/broadcast';
 import { EVENTS } from '@shared/ipc';
 import { appEvents, APP_EVENT } from '../../appEvents';
+import { affinityReadable, readWindowAffinity, WDA_EXCLUDEFROMCAPTURE } from './displayAffinity';
+import { log } from '../security/logger';
 
 /** Whether setContentProtection actually works on this platform. On Linux
  *  (X11/Wayland) it is a silent no-op — the app IS visible in screen shares no
@@ -20,7 +22,7 @@ export function getPrivacy(): boolean {
 }
 
 /** Apply the given protection state to every open window. New windows should
- *  also call `applyPrivacyToWindow` on creation so they inherit current state. */
+ *  also call `protectWindow` on creation so they inherit current state. */
 export function applyContentProtectionToAll(enabled: boolean): void {
   for (const w of BrowserWindow.getAllWindows()) {
     if (!w.isDestroyed()) w.setContentProtection(enabled);
@@ -32,93 +34,86 @@ export function applyPrivacyToWindow(win: BrowserWindow): void {
   if (!win.isDestroyed()) win.setContentProtection(getPrivacy());
 }
 
-let shieldTimer: ReturnType<typeof setInterval> | null = null;
-
 /**
- * While a live interview is running, the app captures system (loopback) audio,
- * which requires a video capture. We point that at a tiny off-screen window (not
- * the screen — see loopbackAnchor.ts), but even a window capture makes Chromium
- * momentarily clear WDA_EXCLUDEFROMCAPTURE on our own windows every few seconds.
- * Each clear is rare and a re-assert restores it durably, so a modest re-assert
- * interval — running ONLY for the life of the capture — keeps the Cue Card and
- * dashboard hidden. (This is NOT the old always-on watchdog: it runs only during
- * an active capture, where a *screen* capture's continuous clearing turned every
- * re-assert into a visible flicker; a window capture doesn't fight back.)
+ * Apply Privacy Mode to a window once at creation and again whenever it
+ * (re)shows — hide()/show() can wipe the affinity on this Electron, and a
+ * hidden window is in no capture, so that write can never flash.
+ *
+ * That is the ONLY proactive protection. Earlier revisions also re-asserted
+ * blindly on click/focus/move/z-order events and on interval shields; every
+ * such re-CALL of setContentProtection composites a fresh frame that an active
+ * WGC capture (Zoom/Meet) can show as a one-frame flicker — the "flash" users
+ * saw. Detecting real breakage is the protection observer's job
+ * (startProtectionObserver below): it READS the OS-level affinity, which is
+ * side-effect-free, and re-calls setContentProtection only on a window the OS
+ * has actually made capturable again.
  */
-export function startCaptureShield(): void {
-  stopCaptureShield();
-  const intervalMs = Number(process.env.BRAINCUE_SHIELD_MS) || 80;
-  shieldTimer = setInterval(() => applyContentProtectionToAll(getPrivacy()), intervalMs);
+export function protectWindow(win: BrowserWindow): void {
+  applyPrivacyToWindow(win); // protect once, now, at creation
+  win.on('show', () => applyPrivacyToWindow(win));
 }
 
-export function stopCaptureShield(): void {
-  if (shieldTimer) {
-    clearInterval(shieldTimer);
-    shieldTimer = null;
+let observerTimer: ReturnType<typeof setInterval> | null = null;
+const observerStats = { breaches: 0, lastBreachAt: 0 };
+
+/** How often (and how many times) the observer caught the OS with a window's
+ *  capture-exclusion wiped. Diagnostics for tests and support. */
+export function getProtectionObserverStats(): { breaches: number; lastBreachAt: number } {
+  return { ...observerStats };
+}
+
+function observeTick(): void {
+  if (!getPrivacy()) return; // Privacy Mode off — windows are MEANT to be capturable
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.isDestroyed()) continue;
+    const affinity = readWindowAffinity(w);
+    if (affinity === null || affinity === WDA_EXCLUDEFROMCAPTURE) continue;
+    // Breach: the OS wiped the exclusion, so this window is visible to screen
+    // capture RIGHT NOW — the one situation where re-calling
+    // setContentProtection cannot make anything worse.
+    observerStats.breaches++;
+    observerStats.lastBreachAt = Date.now();
+    w.setContentProtection(true);
+    const after = readWindowAffinity(w);
+    log.warn(
+      `[privacy] capture protection was wiped on "${w.getTitle()}" ` +
+        `(affinity 0x${affinity.toString(16)}) — re-protected ` +
+        `(now 0x${(after ?? 0xffff).toString(16)}; breach #${observerStats.breaches})`,
+    );
   }
 }
 
 /**
- * Apply Privacy Mode to a window and keep it excluded from screen capture
- * across the operations that momentarily drop the exclusion on Windows.
- *
- * The dominant leak — the app's OWN loopback screen-capture clearing
- * WDA_EXCLUDEFROMCAPTURE on all its windows for the life of an interview — is
- * NOT handled here; it's handled by capturing an off-screen window instead of
- * the screen (loopbackAnchor.ts) plus the capture shield (startCaptureShield).
- *
- * This function covers the smaller, event-driven drops: on Windows, activating
- * (clicking), moving, resizing, or z-ordering a window can momentarily drop the
- * exclusion, and Windows keeps reporting it as still excluded
- * (GetWindowDisplayAffinity stays 0x11), so the only cure is to re-CALL
- * setContentProtection. We do that ONLY on a real drop-causing event (never on
- * a timer) and coalesce a burst of messages from one interaction into a single
- * short cascade of re-asserts. `applyPrivacyToWindow` respects the on/off state,
- * so this also clears protection when Privacy Mode is off. Call once per window
- * at creation.
+ * The protection observer ("observe bot"): every ~50ms, read the REAL
+ * `GetWindowDisplayAffinity` of every window and re-protect only a window the
+ * OS has actually wiped (known trigger: our own loopback capture starting with
+ * a live session; see loopbackAnchor.ts). Reading is a plain user32 query with
+ * zero visual side effects, so a healthy steady state produces ZERO
+ * setContentProtection calls — no interval flicker — while a real wipe (the
+ * window becoming visible in the share) is healed within one tick and logged.
+ * Runs for the app's whole life; each tick is a handful of native reads.
  */
-export function keepContentProtected(win: BrowserWindow): void {
-  const reassert = (): void => applyPrivacyToWindow(win);
-  reassert(); // protect once, now, at creation
-  win.on('show', reassert); // (re)establish protection when the window becomes visible
-
-  // Coalesced cascade for windows that CAN activate (and thus drop): 0 = next
-  // tick (collapses a click's message burst into one re-assert), then a couple
-  // more to cover the drop that lands a frame or two later.
-  const TAPS = [0, 16, 48, 120];
-  let taps: ReturnType<typeof setTimeout>[] = [];
-  const clearTaps = (): void => {
-    for (const t of taps) clearTimeout(t);
-    taps = [];
-  };
-  const reassertSoon = (): void => {
-    clearTaps(); // coalesce: a burst of signals schedules ONE cascade, not many
-    taps = TAPS.map((ms) => setTimeout(reassert, ms));
-  };
-  if (process.platform === 'win32') {
-    //   WM_MOUSEACTIVATE 0x0021 — click on an inactive window (activation)
-    //   WM_ACTIVATE 0x0006 · WM_NCACTIVATE 0x0086 · WM_SETFOCUS 0x0007 — activation
-    //   WM_PARENTNOTIFY 0x0210 — button-down inside child HWNDs (click on an
-    //     ALREADY-active window, which fires no activation message)
-    //   WM_WINDOWPOSCHANGED 0x0047 — move/size/Z-ORDER change (no Electron event)
-    //   WM_NCLBUTTONDOWN 0x00A1 · WM_ENTERSIZEMOVE 0x0231 — drag/modal-loop start
-    //   WM_EXITSIZEMOVE 0x0232 · WM_CAPTURECHANGED 0x0215 — drag/loop end
-    for (const msg of [0x0021, 0x0006, 0x0086, 0x0007, 0x0210, 0x0047, 0x00a1, 0x0231, 0x0232, 0x0215]) {
-      // hookWindowMessage is Windows-only; guarded above.
-      (win as unknown as { hookWindowMessage: (m: number, cb: () => void) => void }).hookWindowMessage(
-        msg,
-        reassertSoon,
-      );
-    }
+export function startProtectionObserver(): void {
+  stopProtectionObserver();
+  if (process.platform !== 'win32') return; // the wipe + the oracle are Windows-only
+  if (!affinityReadable()) {
+    log.warn(
+      '[privacy] protection observer unavailable (no affinity oracle) — ' +
+        'a wiped capture-exclusion cannot be detected or healed on this machine',
+    );
+    return;
   }
-  win.webContents.on('input-event', (_e, input) => {
-    if (input.type === 'mouseDown') reassertSoon();
-  });
-  win.on('move', reassertSoon);
-  win.on('resize', reassertSoon);
-  win.on('restore', reassertSoon);
-  win.on('focus', reassertSoon);
-  win.on('closed', clearTaps);
+  const intervalMs = Number(process.env.BRAINCUE_OBSERVER_MS) || 50;
+  observerTimer = setInterval(observeTick, intervalMs);
+  observerTimer.unref?.();
+  log.info(`[privacy] protection observer active (affinity check every ${intervalMs}ms)`);
+}
+
+export function stopProtectionObserver(): void {
+  if (observerTimer) {
+    clearInterval(observerTimer);
+    observerTimer = null;
+  }
 }
 
 export function setPrivacy(enabled: boolean): boolean {
