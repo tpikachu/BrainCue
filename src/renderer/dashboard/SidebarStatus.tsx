@@ -2,21 +2,32 @@ import type React from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { api } from '../lib/api';
-import { UserIcon, MicIcon, ReportIcon } from '../components/icons';
+import { useLiveSession } from '../store/useLiveSession';
+import { UserIcon, LibraryIcon, ReportIcon } from '../components/icons';
 import { APP_VERSION } from './changelog';
 
 interface Stats {
   profiles: number;
-  interviews: number;
+  interviews: number; // physical name kept for IPC compat — these are Spaces
   sessions: number;
   liveSessions: number;
 }
+
+/** What a live session is called, per mode — the status card must speak every
+ *  mode's language, not assume an interview. */
+const LIVE_LABELS: Record<string, string> = {
+  interview: 'Interview live',
+  practice: 'Practice live',
+  meeting: 'Meeting live',
+  companion: 'Companion live',
+};
 
 /** Live status block at the bottom of the dashboard sidebar: profile/session
  *  counts, an "active session" indicator, and the changelog link. Refreshes on
  *  session-state changes, data wipes, and when the window regains focus. */
 export function SidebarStatus() {
   const [stats, setStats] = useState<Stats | null>(null);
+  const session = useLiveSession((s) => s.session);
 
   const refresh = useCallback(() => {
     void api.data.stats().then(setStats);
@@ -51,13 +62,13 @@ export function SidebarStatus() {
             />
           </span>
           <span className="text-xs font-medium text-neutral-300">
-            {live ? 'Interview live' : 'Idle'}
+            {live ? (LIVE_LABELS[session?.mode ?? ''] ?? 'Session live') : 'Idle'}
           </span>
         </div>
 
         <div className="space-y-1">
           <Stat icon={<UserIcon className="h-3.5 w-3.5" />} label="Profiles" value={stats?.profiles} />
-          <Stat icon={<MicIcon className="h-3.5 w-3.5" />} label="Interviews" value={stats?.interviews} />
+          <Stat icon={<LibraryIcon className="h-3.5 w-3.5" />} label="Spaces" value={stats?.interviews} />
           <Stat icon={<ReportIcon className="h-3.5 w-3.5" />} label="Sessions" value={stats?.sessions} />
         </div>
       </div>

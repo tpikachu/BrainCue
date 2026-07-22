@@ -85,21 +85,37 @@ export default function HomePage() {
       subtitle="It listens, grounds itself in your documents, and cues you in real time."
       width="max-w-5xl"
     >
-      {session && (
-        <Link
-          to="/interview"
-          className="mb-4 flex items-center justify-between rounded-2xl border border-green-500/20 bg-green-500/10 px-5 py-3.5 transition-colors hover:bg-green-500/15"
-        >
-          <span className="flex items-center gap-3">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-400" />
+      {/* Live banner — mode-aware: interview/practice have a workspace to
+          return to; ambient modes (meeting/companion) live in the Cue Card. */}
+      {session &&
+        (session.mode === 'meeting' || session.mode === 'companion' ? (
+          <div className="mb-4 flex items-center justify-between rounded-2xl border border-green-500/20 bg-green-500/10 px-5 py-3.5">
+            <span className="flex items-center gap-3">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-400" />
+              </span>
+              <span className="text-sm font-medium text-green-200">
+                {session.mode === 'meeting' ? 'Meeting Copilot is live' : 'Companion is live'}
+              </span>
             </span>
-            <span className="text-sm font-medium text-green-200">A session is live</span>
-          </span>
-          <span className="text-sm text-green-300">Return to it →</span>
-        </Link>
-      )}
+            <span className="text-sm text-green-300">Cards stream to the Cue Card</span>
+          </div>
+        ) : (
+          <Link
+            to="/interview"
+            className="mb-4 flex items-center justify-between rounded-2xl border border-green-500/20 bg-green-500/10 px-5 py-3.5 transition-colors hover:bg-green-500/15"
+          >
+            <span className="flex items-center gap-3">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-400" />
+              </span>
+              <span className="text-sm font-medium text-green-200">A session is live</span>
+            </span>
+            <span className="text-sm text-green-300">Return to it →</span>
+          </Link>
+        ))}
 
       {settings && !settings.apiKeyPresent && (
         <Link
@@ -162,7 +178,14 @@ export default function HomePage() {
         />
         <StatusChip
           label="Listening to"
-          value={settings?.audio?.source === 'mic' ? 'microphone' : 'system audio'}
+          // Companion always listens to YOUR mic, whatever the saved default.
+          value={
+            session?.mode === 'companion'
+              ? 'microphone'
+              : settings?.audio?.source === 'mic'
+                ? 'microphone'
+                : 'system audio'
+          }
           tone="idle"
         />
         <StatusChip label="Screen" value="on demand" tone="idle" />
@@ -194,7 +217,11 @@ export default function HomePage() {
                 <span className="min-w-0 truncate text-sm text-neutral-200">
                   {s.jobCompany || s.jobTitle || 'General session'}
                   <span className="ml-2 text-xs text-neutral-500">
-                    {s.interviewType.replace(/_/g, ' ')}
+                    {s.mode === 'meeting'
+                      ? 'meeting'
+                      : s.mode === 'companion'
+                        ? 'companion'
+                        : s.interviewType.replace(/_/g, ' ')}
                     {s.kind === 'sparring' ? ' · practice' : ''}
                   </span>
                 </span>
