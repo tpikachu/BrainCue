@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { EVENTS } from '@shared/ipc';
 import type {
   AnswerMetaEvent,
@@ -16,6 +17,21 @@ import { broadcast } from './broadcast';
  */
 
 type Targets = ('main' | 'overlay')[];
+
+/** Main-process tap: mirrors every contribution open/delta/done INSIDE main,
+ *  so output surfaces (the voice layer) can follow a stream without a second
+ *  generation path or any change to what renderers receive. Fires AFTER the
+ *  broadcast, with the generic payload. */
+export const bridgeTap = new EventEmitter();
+// Several subscribers (voice + future surfaces) may listen; silence the
+// default 10-listener warning rather than sizing it speculatively.
+bridgeTap.setMaxListeners(50);
+
+export interface BridgeOpen {
+  contributionId: string;
+  kind: ContributionKind;
+  title: string;
+}
 
 /** A new contribution began. `legacyExtra` = the extra fields this call site's
  *  v1 questionDetected payload carried (beyond id/text), reproduced verbatim. */
@@ -38,6 +54,7 @@ export function emitContributionOpen(
     { contributionId: p.contributionId, kind: p.kind, title: p.title },
     targets,
   );
+  bridgeTap.emit('open', { contributionId: p.contributionId, kind: p.kind, title: p.title });
 }
 
 export function emitContributionDelta(
@@ -47,6 +64,7 @@ export function emitContributionDelta(
 ): void {
   broadcast(EVENTS.answerDelta, { questionId: contributionId, token }, targets);
   broadcast(EVENTS.contributionDelta, { contributionId, token }, targets);
+  bridgeTap.emit('delta', { contributionId, token });
 }
 
 /** `meta` is the legacy answerMeta payload verbatim (questionId + the stream's
@@ -81,6 +99,7 @@ export function emitContributionFollowup(
 export function emitContributionDone(contributionId: string, targets?: Targets): void {
   broadcast(EVENTS.answerDone, { questionId: contributionId }, targets);
   broadcast(EVENTS.contributionDone, { contributionId }, targets);
+  bridgeTap.emit('done', { contributionId });
 }
 
 export function emitContributionReset(contributionId: string, targets?: Targets): void {
@@ -122,4 +141,40 @@ export function emitAmbientContribution(
     targets,
   );
   broadcast(EVENTS.contributionDone, { contributionId: p.contributionId }, targets);
+}
+
+// --- Generic-only STREAMING emits (voice quick ask) --------------------------
+// Like emitAmbientContribution these have no legacy answer-event twin (v1
+// surfaces never knew these contributions, and mirroring them as fake
+// "questions" would corrupt the dashboard's Q&A views) — but the body streams
+// token-by-token instead of landing whole.
+
+export function emitGenericOpen(
+  p: { contributionId: string; kind: ContributionKind; title: string },
+  targets: Targets = ['overlay'],
+): void {
+  broadcast(EVENTS.contributionOpen, p, targets);
+  bridgeTap.emit('open', p);
+}
+
+export function emitGenericDelta(
+  contributionId: string,
+  token: string,
+  targets: Targets = ['overlay'],
+): void {
+  broadcast(EVENTS.contributionDelta, { contributionId, token }, targets);
+  bridgeTap.emit('delta', { contributionId, token });
+}
+
+export function emitGenericContext(
+  contributionId: string,
+  context: ContextSentEvent,
+  targets: Targets = ['overlay'],
+): void {
+  broadcast(EVENTS.contributionPatch, { contributionId, context }, targets);
+}
+
+export function emitGenericDone(contributionId: string, targets: Targets = ['overlay']): void {
+  broadcast(EVENTS.contributionDone, { contributionId }, targets);
+  bridgeTap.emit('done', { contributionId });
 }

@@ -58,6 +58,7 @@ export const SETTINGS_KEYS = {
   hideTaskbarIcon: 'hide_taskbar_icon',
   codingLanguage: 'coding_language',
   memoryEnabled: 'memory_enabled', // global memory consent ('1'/'0'; absent = off)
+  voicePrefs: 'voice_prefs', // json VoicePrefs (TTS voice, mute, output device, quick-ask opts)
 } as const;
 
 /** Non-secret settings cleared by a factory reset (everything except the API key). */
@@ -75,4 +76,5 @@ const APP_SETTING_KEYS: string[] = [
   SETTINGS_KEYS.hideTaskbarIcon,
   SETTINGS_KEYS.codingLanguage,
   SETTINGS_KEYS.memoryEnabled,
+  SETTINGS_KEYS.voicePrefs,
 ];

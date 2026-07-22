@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
+import { FLAGS } from '@shared/flags';
 import type { ClientInfo } from '@shared/ipc';
 import type {
   AnswerFormat,
@@ -19,6 +20,8 @@ import { createStreamBuffer } from './lib/streamBuffer';
 import { noDrag } from './lib/style';
 import { AnswerControls } from './controls/AnswerControls';
 import { AskBar } from './controls/AskBar';
+import { VoiceBar } from './controls/VoiceBar';
+import { useVoice } from './voice/useVoice';
 import { EqualizerBars } from './controls/EqualizerBars';
 import { HeaderBar } from './controls/HeaderBar';
 import { SessionBar } from './controls/SessionBar';
@@ -72,6 +75,10 @@ export default function Overlay() {
   const [answerInterviewer, setAnswerInterviewer] = useState(false);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Voice/summon runtime (Prompt 9): dialogue state mirror, push-to-talk
+  // capture + VAD, and speech playback. Inert while the flag is off.
+  const { voice, prefs: voicePrefs, level: voiceLevel, toggleMute, savePrefs } = useVoice(FLAGS.voice);
 
   // Backend session failure (transcription socket dropped, OpenAI auth, etc.).
   const [sessionError, setSessionError] = useState<string | null>(null);
@@ -407,6 +414,12 @@ export default function Overlay() {
 
       {live && <AskBar />}
 
+      {/* Voice is session-independent: with nothing live a summon quick-asks
+          over the default Space, so the bar renders whenever the flag is on. */}
+      {FLAGS.voice && (
+        <VoiceBar voice={voice} prefs={voicePrefs} level={voiceLevel} onToggleMute={() => void toggleMute()} />
+      )}
+
       {meta?.riskWarning && (
         <p
           className="mt-2 shrink-0 rounded bg-amber-900/40 px-2 py-1 text-[11px] text-amber-300"
@@ -427,6 +440,8 @@ export default function Overlay() {
         onOpacity={applyOpacity}
         fontSize={fontSize}
         onFontSize={setFontSize}
+        voicePrefs={FLAGS.voice ? voicePrefs : null}
+        onSaveVoicePrefs={(patch) => void savePrefs(patch)}
       />
     </div>
   );

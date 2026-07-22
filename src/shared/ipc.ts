@@ -114,6 +114,19 @@ export const IPC = {
     delete: 'memory:delete', // hard delete — removes the row AND its embedding
     setPackEnabled: 'memory:set-pack-enabled', // per-Space opt-out
   },
+  // Voice / summon layer (v2): push-to-talk capture + spoken replies. Audio
+  // flows renderer→main as PCM frames (listening only) and main→renderer as
+  // synthesized segments (EVENTS.voiceAudio); the OpenAI key never leaves main.
+  voice: {
+    summon: 'voice:summon', // press: idle→listen, listening→commit, speaking→interrupt
+    commit: 'voice:commit', // end of push-to-talk (silence VAD or explicit send)
+    cancel: 'voice:cancel', // abandon the current turn at any stage
+    interrupt: 'voice:interrupt', // barge-in: stop speaking, listen again
+    audio: 'voice:audio', // one-way PCM16 frames while listening (send, no reply)
+    playbackDone: 'voice:playback-done', // renderer finished the last segment
+    getPrefs: 'voice:get-prefs',
+    setPrefs: 'voice:set-prefs',
+  },
   mock: {
     start: 'mock:start',
     next: 'mock:next',
@@ -208,6 +221,8 @@ export const EVENTS = {
   savePrompt: 'session:save-prompt', // a session just stopped → ask the dashboard to save/discard it
   captureBuffer: 'capture:buffer', // current multi-image problem captures, for the Cue Card strip
   confirmRequest: 'ui:confirm-request', // main asks a protected window to show a confirm modal (reply via IPC.ui.confirmResponse)
+  voiceState: 'voice:state', // dialogue controller transitions (VoiceStateEvent)
+  voiceAudio: 'voice:audio-segment', // synthesized speech segments (VoiceAudioEvent)
 } as const;
 
 /** Pushed to the dashboard when a session stops, to prompt save-or-discard. */

@@ -569,3 +569,61 @@ export interface ContributionDoneEvent {
 export interface ContributionResetEvent {
   contributionId: string;
 }
+
+// --- Voice / summon layer (v2, Prompt 9) ------------------------------------
+// Voice is an OUTPUT SURFACE over the generic contribution pipeline, not a
+// mode: a summon transcribes the user's speech, routes it as a direct ask
+// (live session) or a quick ask (default Space), and the reply streams to the
+// Cue Card as text while sentence-chunked TTS plays it aloud. Only summoned
+// replies are ever spoken — ambient cards never trigger speech.
+
+/** Dialogue controller states (explicit, main-owned; see
+ *  services/voice/dialogueController.ts for the transition table). */
+export type VoiceState =
+  | 'idle'
+  | 'listening'
+  | 'thinking'
+  | 'speaking'
+  | 'interrupted'
+  | 'paused'
+  | 'error';
+
+/** Pushed on EVENTS.voiceState whenever the dialogue controller transitions.
+ *  `generation` invalidates everything from earlier turns: the renderer drops
+ *  queued audio whose generation no longer matches (stale-audio cancellation). */
+export interface VoiceStateEvent {
+  state: VoiceState;
+  generation: number;
+  /** What the STT heard (set once transcription completes, from `thinking` on). */
+  transcript?: string;
+  /** The contribution being spoken (set from `speaking` on). */
+  contributionId?: string;
+  /** Speech synthesis was unavailable/muted — the reply is text-only. */
+  textOnly?: boolean;
+  error?: string;
+}
+
+/** One synthesized speech segment (a sentence), pushed on EVENTS.voiceAudio.
+ *  Segments play strictly in `seq` order; `last` marks the reply's final one. */
+export interface VoiceAudioEvent {
+  generation: number;
+  seq: number;
+  audioBase64: string;
+  mime: string;
+  last: boolean;
+}
+
+/** Voice preferences (settings key `voice_prefs`). */
+export interface VoicePrefs {
+  /** TTS voice id (provider-interpreted; OpenAI: alloy/echo/fable/…). */
+  voice: string;
+  /** Hard mute: no speech output at all (replies stay text-only). */
+  muted: boolean;
+  /** Preferred audio output device (renderer setSinkId), null = system default. */
+  outputDeviceId: string | null;
+  /** Persist no-session quick asks (as contributions in a per-profile
+   *  'companion' session). OFF by default — ephemeral unless opted in. */
+  saveQuickAsks: boolean;
+  /** Default Space grounding no-session quick asks (null = profile only). */
+  quickAskPackId: string | null;
+}

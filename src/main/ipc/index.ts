@@ -9,6 +9,7 @@ import { registerStoriesIpc } from './stories.ipc';
 import { registerSessionIpc } from './session.ipc';
 import { registerContributionsIpc } from './contributions.ipc';
 import { registerMemoryIpc } from './memory.ipc';
+import { registerVoiceIpc } from './voice.ipc';
 import { registerMockIpc } from './mock.ipc';
 import { registerSparringIpc } from './sparring.ipc';
 import { registerCaptureIpc } from './capture.ipc';
@@ -32,6 +33,7 @@ export function registerIpc(): void {
   registerSessionIpc();
   registerContributionsIpc();
   registerMemoryIpc();
+  registerVoiceIpc();
   registerMockIpc();
   registerSparringIpc();
   registerCaptureIpc();

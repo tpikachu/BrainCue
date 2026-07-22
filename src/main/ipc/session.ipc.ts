@@ -7,6 +7,7 @@ import { sessionManager } from '../services/session/sessionManager';
 import { sessionsRepo } from '../db/repositories/sessions.repo';
 import { generateReport } from '../services/session/report';
 import { getOrGenerateMeetingReport } from '../services/engine/meetingReport';
+import { voiceService } from '../services/voice/voiceService';
 
 const interviewType = zInterviewType;
 const answerFormat = zAnswerFormat;
@@ -43,19 +44,31 @@ export function registerSessionIpc(): void {
     ({ sessionId, answerFormat: f }) => sessionManager.resume(sessionId, f),
   );
 
-  handle(IPC.session.stop, z.object({ sessionId: z.string().min(1) }), ({ sessionId }) =>
-    sessionManager.stop(sessionId),
-  );
+  handle(IPC.session.stop, z.object({ sessionId: z.string().min(1) }), ({ sessionId }) => {
+    voiceService.cancel(); // a stopping session takes any in-flight voice turn with it
+    return sessionManager.stop(sessionId);
+  });
 
   handle(
     IPC.session.togglePause,
     z.object({ sessionId: z.string().min(1) }),
-    ({ sessionId }) => sessionManager.togglePause(sessionId),
+    ({ sessionId }) => {
+      const r = sessionManager.togglePause(sessionId);
+      voiceService.syncSessionPaused(r.paused); // hard pause silences voice too
+      return r;
+    },
   );
 
-  handle(IPC.session.togglePauseActive, z.void(), () => sessionManager.togglePauseActive());
+  handle(IPC.session.togglePauseActive, z.void(), () => {
+    const r = sessionManager.togglePauseActive();
+    if (r.active) voiceService.syncSessionPaused(r.paused);
+    return r;
+  });
 
-  handle(IPC.session.stopActive, z.void(), () => sessionManager.stopActive());
+  handle(IPC.session.stopActive, z.void(), () => {
+    voiceService.cancel();
+    return sessionManager.stopActive();
+  });
 
   handle(
     IPC.session.audioChunk,

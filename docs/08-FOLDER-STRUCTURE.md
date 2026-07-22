@@ -50,7 +50,20 @@ AI_Inter/
 │  │  │  └─ repositories/       # typed data access per entity
 │  │  │     ├─ profiles.repo.ts  jobs.repo.ts
 │  │  │     ├─ sessions.repo.ts  settings.repo.ts
+│  │  ├─ providers/             # capability seam (v2): types.ts registry.ts errors.ts + openai/ impls
 │  │  ├─ services/
+│  │  │  ├─ engine/             # v2 conversation engine (see 12-ENGINE-PLAN.md)
+│  │  │  │  ├─ engine.ts  engineSession.ts  modeDefinition.ts  grounding.ts
+│  │  │  │  ├─ meetingReport.ts  contextEvent.ts  sourceAdapter.ts
+│  │  │  │  ├─ modes/           # interview.mode.ts  meeting.mode.ts
+│  │  │  │  ├─ trigger/         # reactiveQuestion  summoned  meetingHeuristics  salience  ambientPolicy  presence
+│  │  │  │  └─ persistence/enginePersistence.ts
+│  │  │  ├─ memory/             # local memory (Prompt 8): extractor  memoryService  recall  sensitiveFilter
+│  │  │  ├─ voice/              # voice/summon layer (Prompt 9)
+│  │  │  │  ├─ dialogueController.ts  # explicit FSM: idle/listening/thinking/speaking/interrupted/paused/error
+│  │  │  │  ├─ voiceService.ts        # orchestrator: PTT buffer, STT, routing, sentence-chunked TTS
+│  │  │  │  ├─ quickAnswer.ts         # no-session quick ask (spoken-style persona)
+│  │  │  │  └─ sentenceStream.ts  wav.ts
 │  │  │  ├─ openai/             # see 06-OPENAI-SERVICE.md
 │  │  │  │  ├─ client.ts  models.ts  parsing.ts  embeddings.ts
 │  │  │  │  ├─ questions.ts  answer.ts  transcription.ts
@@ -104,8 +117,9 @@ AI_Inter/
 │     │  ├─ Overlay.tsx          # shell: window state, IPC subscriptions, composition
 │     │  ├─ store/useOverlayStore.ts   # zustand card feed (reducers in cards/model.ts)
 │     │  ├─ cards/               # ContributionCard frame + registry.ts + per-kind views + UnknownCardView
-│     │  ├─ controls/            # HeaderBar  SessionBar  AnswerControls  AskBar  Btn  EqualizerBars
+│     │  ├─ controls/            # HeaderBar  SessionBar  AnswerControls  AskBar  VoiceBar  Btn  EqualizerBars
 │     │  ├─ panels/              # ClientNotes  Captures  ErrorBanner  AudioMeter  Transcript  DataSent  SettingsModal
+│     │  ├─ voice/               # useVoice.ts (state mirror + VAD)  voiceCapture.ts  voicePlayer.ts (setSinkId queue)
 │     │  └─ lib/                 # streamBuffer.ts (rAF token coalescer)  style.ts
 │     └─ selection/RegionSelector.tsx  # region-capture window
 │

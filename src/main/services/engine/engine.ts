@@ -364,6 +364,13 @@ class Engine {
     return this.current?.settings.answerFormat ?? null;
   }
 
+  /** The live session's identity (null when idle) — the voice layer routes a
+   *  summon through the engine when a session is live, quick ask otherwise. */
+  activeInfo(): { sessionId: string; profileId: string; packId: string | null } | null {
+    const s = this.current;
+    return s ? { sessionId: s.sessionId, profileId: s.profileId, packId: s.packId } : null;
+  }
+
   /** Update the live answer preferences (type / format / pronunciation). Type is
    *  dynamic — switching it mid-session just changes how subsequent answers are
    *  framed (each question is still classified + tagged independently). Takes

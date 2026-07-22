@@ -11,6 +11,7 @@ import { togglePrivacyGuarded } from './services/session/privacy';
 import { sessionManager } from './services/session/sessionManager';
 import { openSelector } from './windows/selectionWindow';
 import { quickSolveFromClipboard } from './services/capture/codingMode';
+import { voiceService } from './services/voice/voiceService';
 import { quitApp } from './quit';
 import { log } from './services/security/logger';
 
@@ -44,8 +45,14 @@ function handle(action: ShortcutAction): void {
     case 'privacy:toggle':
       void togglePrivacyGuarded();
       break;
-    case 'session:toggle-pause':
-      sessionManager.togglePauseActive();
+    case 'session:toggle-pause': {
+      const r = sessionManager.togglePauseActive();
+      if (r.active) voiceService.syncSessionPaused(r.paused); // pause silences voice too
+      break;
+    }
+    case 'voice:summon':
+      // Push-to-talk from anywhere: one key that listens / sends / barges in.
+      voiceService.summon();
       break;
     case 'capture:quick':
       void quickSolveFromClipboard();

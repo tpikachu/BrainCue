@@ -191,6 +191,12 @@ Known keys (see `SETTINGS_KEYS` in `settings.repo.ts`):
 - `data_consent_ack` — `'1'` once user acknowledges the compliance reminder.
 - `memory_enabled` — `'1'`/`'0'` global memory consent (absent = off; no
   extraction or recall until the user enables it in Library › Memory).
+- `voice_prefs` — json `VoicePrefs` `{voice, muted, outputDeviceId,
+  saveQuickAsks, quickAskPackId}` for the voice/summon layer. Quick asks
+  (summons with no session live) are EPHEMERAL unless `saveQuickAsks` is on —
+  then they persist as `contributions` in one reused per-profile session row
+  with `mode='companion'` (`status='stopped'`; the contributions table needs a
+  session FK, and one row per profile keeps Sessions tidy).
 - `tour_done` — `'1'` once the first-run guided tour is completed/skipped.
 
 ## Deletion semantics

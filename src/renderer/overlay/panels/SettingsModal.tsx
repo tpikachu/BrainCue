@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
-import type { AppSettings } from '@shared/types';
-import { Dropdown, Modal } from '../../components/ui';
+import type { AppSettings, VoicePrefs } from '@shared/types';
+import { Dropdown, Modal, Switch } from '../../components/ui';
 import { noDrag } from '../lib/style';
 
-/** Cue Card settings: audio device, coding-solver model/effort/language, and
- *  appearance. Owns its own persisted state — loaded fresh each time it opens,
- *  so overrides changed meanwhile from the dashboard Settings page are never
- *  silently reverted. Appearance (opacity/text size) is window-level state and
- *  comes in via props. */
+/** Cue Card settings: audio device, voice output, coding-solver
+ *  model/effort/language, and appearance. Owns its own persisted state —
+ *  loaded fresh each time it opens, so overrides changed meanwhile from the
+ *  dashboard Settings page are never silently reverted. Appearance
+ *  (opacity/text size) is window-level state and comes in via props; voice
+ *  prefs live with the Overlay's voice runtime (the player must react to an
+ *  output-device change immediately) and come in via props too. */
 export function SettingsModal(props: {
   open: boolean;
   onClose: () => void;
@@ -16,6 +18,9 @@ export function SettingsModal(props: {
   onOpacity: (v: number) => void;
   fontSize: number;
   onFontSize: (v: number) => void;
+  /** null = voice layer disabled (section hidden). */
+  voicePrefs: VoicePrefs | null;
+  onSaveVoicePrefs: (patch: Partial<VoicePrefs>) => void;
 }) {
   const [audioSource, setAudioSource] = useState<'system' | 'mic'>('system');
   const [micDeviceId, setMicDeviceId] = useState<string | null>(null);
@@ -26,6 +31,9 @@ export function SettingsModal(props: {
   const [codingEffort, setCodingEffort] = useState('');
   const [codingLanguage, setCodingLanguage] = useState('javascript');
   const [codingDefaults, setCodingDefaults] = useState({ model: 'gpt-5-mini', effort: 'low' });
+  // Voice output devices + quick-ask Spaces (loaded on open, voice section only).
+  const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [spaces, setSpaces] = useState<{ id: string; label: string }[]>([]);
 
   useEffect(() => {
     if (!props.open) return;
@@ -51,12 +59,34 @@ export function SettingsModal(props: {
         const probe = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
         const devices = await navigator.mediaDevices.enumerateDevices();
         setMicDevices(devices.filter((d) => d.kind === 'audioinput'));
+        setOutputDevices(devices.filter((d) => d.kind === 'audiooutput'));
         probe?.getTracks().forEach((t) => t.stop());
       } catch {
         setMicDevices([]);
+        setOutputDevices([]);
       }
     })();
-  }, [props.open]);
+    // Spaces for the quick-ask default (voice section) — usually one profile.
+    if (props.voicePrefs) {
+      void (async () => {
+        try {
+          const profiles = (await api.profiles.list()) as { id: string }[];
+          const all: { id: string; label: string }[] = [];
+          for (const p of profiles) {
+            const jobs = (await api.jobs.list(p.id)) as {
+              id: string;
+              title: string;
+              company: string | null;
+            }[];
+            for (const j of jobs) all.push({ id: j.id, label: j.company ? `${j.company} — ${j.title}` : j.title });
+          }
+          setSpaces(all);
+        } catch {
+          setSpaces([]);
+        }
+      })();
+    }
+  }, [props.open, props.voicePrefs !== null]);
 
   const saveAudio = (next: { source?: 'system' | 'mic'; micDeviceId?: string | null }) => {
     const source = next.source ?? audioSource;
@@ -130,6 +160,67 @@ export function SettingsModal(props: {
                 : ''}
             </p>
           </div>
+
+          {props.voicePrefs && (
+            <div className="space-y-3 border-t border-white/5 pt-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                Voice
+              </p>
+              <div>
+                <span className="mb-1 block text-xs font-medium text-neutral-400">
+                  BrainCue&apos;s voice
+                </span>
+                <Dropdown
+                  value={props.voicePrefs.voice}
+                  options={['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'].map((v) => ({
+                    value: v,
+                    label: v,
+                  }))}
+                  onChange={(v) => props.onSaveVoicePrefs({ voice: v })}
+                />
+              </div>
+              <div>
+                <span className="mb-1 block text-xs font-medium text-neutral-400">
+                  Speaker output
+                </span>
+                <Dropdown
+                  value={props.voicePrefs.outputDeviceId ?? ''}
+                  options={[
+                    { value: '', label: 'System default' },
+                    ...outputDevices.map((d, i) => ({
+                      value: d.deviceId,
+                      label: d.label || `Output ${i + 1}`,
+                    })),
+                  ]}
+                  onChange={(v) => props.onSaveVoicePrefs({ outputDeviceId: v || null })}
+                />
+              </div>
+              <div>
+                <span className="mb-1 block text-xs font-medium text-neutral-400">
+                  Quick-ask Space <span className="text-neutral-600">(no-session summons)</span>
+                </span>
+                <Dropdown
+                  value={props.voicePrefs.quickAskPackId ?? ''}
+                  options={[
+                    { value: '', label: 'Most recent profile (no Space)' },
+                    ...spaces.map((s) => ({ value: s.id, label: s.label })),
+                  ]}
+                  onChange={(v) => props.onSaveVoicePrefs({ quickAskPackId: v || null })}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-neutral-400">Save quick asks</span>
+                <Switch
+                  checked={props.voicePrefs.saveQuickAsks}
+                  onChange={(next) => props.onSaveVoicePrefs({ saveQuickAsks: next })}
+                />
+              </div>
+              <p className="text-xs text-neutral-500">
+                Quick asks (summons with no session live) are ephemeral unless saved. In-session
+                summons are part of that session as usual.
+              </p>
+            </div>
+          )}
 
           <div className="space-y-3 border-t border-white/5 pt-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">

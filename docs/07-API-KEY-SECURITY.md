@@ -87,6 +87,26 @@ The local memory subsystem's standing guarantees:
 - **Provenance is visible**: every recalled memory appears in the Cue Card's
   "data sent" panel and in the contribution's sourceRefs.
 
+## Voice privacy (v2 Prompt 9)
+
+The voice/summon layer's standing guarantees:
+- **Push-to-talk only**: the microphone opens exclusively for an explicit
+  summon (hotkey or Cue Card button) and is released when the turn ends —
+  there is no standing voice capture. PCM frames are buffered in the MAIN
+  process only while the dialogue state is `listening`, sent to the STT
+  provider once, and dropped; they are never persisted or echoed back.
+- **Key isolation unchanged**: STT and TTS both run in main through the
+  provider capability seam. The renderer receives only synthesized audio
+  segments and state events — never the API key or raw request material.
+- **Nothing is spoken unprompted**: only summoned replies reach TTS (ambient
+  cards are text-only by construction), the hard mute wins over everything,
+  and a hard-paused session pauses voice with it.
+- **No audio in logs**: log lines carry messages/lengths only — never PCM
+  buffers or base64 segments (pinned by `voiceService.test.ts`).
+- **Persistence follows user settings**: an in-session summon persists exactly
+  like a typed ask (part of that session); a no-session quick ask is ephemeral
+  unless `saveQuickAsks` is enabled (see 04-DATABASE `voice_prefs`).
+
 ### Encryption at rest — design (implementation deferred)
 
 Goal: memory `content` unreadable if `app.db` is copied off the machine,

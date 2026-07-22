@@ -18,8 +18,10 @@ export const FLAGS = {
    *  with the review-first substrate (Prompt 8): consent is still OFF by
    *  default per user — this flag only surfaces the UI. */
   memory: true,
-  /** "Talk to BrainCue" — spoken replies / voice conversation. */
-  voice: false,
+  /** "Talk to BrainCue" — the voice/summon layer (Prompt 9): global
+   *  push-to-talk, spoken replies with barge-in, no-session quick ask. Voice
+   *  is an output surface over the contribution pipeline, not a mode. */
+  voice: true,
 } as const;
 
 export type FlagName = keyof typeof FLAGS;

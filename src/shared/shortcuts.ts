@@ -10,6 +10,7 @@ export type ShortcutAction =
   | 'session:toggle-pause'
   | 'privacy:toggle'
   | 'overlay:toggle-clickthrough'
+  | 'voice:summon'
   | 'app:quit';
 
 export interface ShortcutDef {
@@ -56,6 +57,13 @@ export const SHORTCUT_DEFS: ShortcutDef[] = [
     label: 'Cue Card click-through',
     description: 'Let the mouse pass through the Cue Card.',
     default: 'CommandOrControl+Shift+\\',
+  },
+  {
+    id: 'voice:summon',
+    label: 'Talk to BrainCue',
+    description:
+      'Push-to-talk from anywhere: press to start listening, press again to send. Interrupts BrainCue if it is speaking.',
+    default: 'CommandOrControl+Shift+T',
   },
   {
     id: 'app:quit',

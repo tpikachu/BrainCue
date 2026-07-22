@@ -246,6 +246,21 @@ returns `{ contributionId, report: MeetingReport }` (get-or-generate);
 title/body/meta/status (the meeting report's action items / open questions
 stay editable). Ambient meeting cards broadcast ONLY the generic
 `contribution:*` events — no legacy `answer-*` twins.
+
+Voice/summon additions (Prompt 9): request channels `voice:summon` (the
+push-to-talk press — state-dependent: idle→listen, listening→send,
+speaking→interrupt), `voice:commit`, `voice:cancel`, `voice:interrupt`,
+`voice:playback-done` (`{ generation }`), `voice:get-prefs` /
+`voice:set-prefs` (`VoicePrefs`: TTS voice, hard mute, output device,
+saveQuickAsks, quickAskPackId); plus one-way `voice:audio` (PCM16 frames while
+listening, `ipcRenderer.send` like `session:realtime-audio`). Events:
+`voice:state` (`VoiceStateEvent` — every dialogue-controller transition, with
+the turn `generation` that stale audio is dropped against) and
+`voice:audio-segment` (`VoiceAudioEvent` — one synthesized sentence per
+segment, in `seq` order; an empty `last:true` marker ends the reply). An
+in-session summon is a normal engine direct ask (dual-emitted events, v1
+persistence); a no-session quick ask streams GENERIC-only `contribution:*`
+events like ambient cards.
 | `session:client-info` | `ClientInfo \| null` | overlay (active interview: company/title/notes + profileName + grounding flags hasResume/hasJd/hasCompany, for the Cue Card header + session bar + ⓘ panel; `null` clears on stop) |
 | `session:answer-prefs` | `AnswerPrefs` (`{ interviewType, format, pronunciation }`) | overlay (seeds the Cue Card answer-control toggles) |
 | `session:audio-level` | `{ level }` (0-1 RMS, ~12/sec) | overlay (drives the Cue Card mic meter; computed in `feedRealtimeAudio` since the stream lives in the dashboard renderer) |

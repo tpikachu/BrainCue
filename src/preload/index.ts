@@ -16,6 +16,9 @@ import type {
   Presence,
   SparringFeedback,
   Story,
+  VoiceAudioEvent,
+  VoicePrefs,
+  VoiceStateEvent,
 } from '@shared/types';
 import type { Result } from '@shared/result';
 
@@ -252,6 +255,19 @@ const api = {
     setPackEnabled: (packId: string, enabled: boolean) =>
       invoke<{ packId: string; enabled: boolean }>(IPC.memory.setPackEnabled, { packId, enabled }),
   },
+  // Voice/summon layer: push-to-talk controls + prefs. Raw PCM goes one-way
+  // (send, no reply); synthesized speech arrives via events.onVoiceAudio.
+  voice: {
+    summon: () => invoke<{ state: string }>(IPC.voice.summon),
+    commit: () => invoke<{ state: string }>(IPC.voice.commit),
+    cancel: () => invoke<{ state: string }>(IPC.voice.cancel),
+    interrupt: () => invoke<{ state: string }>(IPC.voice.interrupt),
+    sendAudio: (pcm: ArrayBuffer) => ipcRenderer.send(IPC.voice.audio, { pcm }),
+    playbackDone: (generation: number) =>
+      invoke<{ state: string }>(IPC.voice.playbackDone, { generation }),
+    getPrefs: () => invoke<VoicePrefs>(IPC.voice.getPrefs),
+    setPrefs: (patch: Partial<VoicePrefs>) => invoke<VoicePrefs>(IPC.voice.setPrefs, patch),
+  },
   mock: {
     start: (
       profileId: string,
@@ -386,6 +402,8 @@ const api = {
     onSavePrompt: (cb: (p: SavePrompt) => void) => on(EVENTS.savePrompt, cb),
     onCaptureBuffer: (cb: (p: { images: string[] }) => void) => on(EVENTS.captureBuffer, cb),
     onConfirmRequest: (cb: (p: ConfirmRequest) => void) => on(EVENTS.confirmRequest, cb),
+    onVoiceState: (cb: (p: VoiceStateEvent) => void) => on(EVENTS.voiceState, cb),
+    onVoiceAudio: (cb: (p: VoiceAudioEvent) => void) => on(EVENTS.voiceAudio, cb),
   },
 };
 

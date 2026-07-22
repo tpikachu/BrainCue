@@ -114,9 +114,13 @@ export default function HomePage() {
         </Link>
       )}
 
-      {/* Primary actions. "Talk to BrainCue" joins when voice ships (FLAGS.voice)
-          — until then it lives in the Labs strip, not as a dead button. */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3" data-tour="primary-actions">
+      {/* Primary actions. "Talk to BrainCue" joined when voice shipped
+          (FLAGS.voice) — a summon starts push-to-talk listening in the Cue
+          Card, with or without a session. */}
+      <div
+        className={`grid grid-cols-1 gap-3 ${FLAGS.voice ? 'sm:grid-cols-2 lg:grid-cols-4' : 'sm:grid-cols-3'}`}
+        data-tour="primary-actions"
+      >
         <PrimaryAction
           Icon={MicIcon}
           title="Start listening"
@@ -127,6 +131,14 @@ export default function HomePage() {
           }}
           tour="action-start"
         />
+        {FLAGS.voice && (
+          <PrimaryAction
+            Icon={SparklesIcon}
+            title="Talk to BrainCue"
+            desc="Push-to-talk: ask by voice, hear the answer"
+            onClick={() => void api.voice.summon()}
+          />
+        )}
         <PrimaryAction
           Icon={FrameIcon}
           title="Share screen"
