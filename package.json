@@ -7,7 +7,7 @@
   "private": true,
   "repository": {
     "type": "git",
-    "url": "https://github.com/tpikachu/Interview-Copilot.git"
+    "url": "https://github.com/tpikachu/BrainCue.git"
   },
   "main": "./out/main/index.js",
   "scripts": {

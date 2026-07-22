@@ -1,0 +1,456 @@
+---
+layout: null
+---
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BrainCue — the AI that's in the room with you</title>
+<meta name="description" content="A local-first desktop companion that hears the conversation you're actually in — interview, meeting, or your working day — and contributes through a floating, screen-share-invisible Cue Card, or its own voice." />
+<meta property="og:title" content="BrainCue — the AI that's in the room with you" />
+<meta property="og:description" content="Local-first. Screen-share-invisible. Bring your own AI key." />
+<meta property="og:type" content="website" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 1024'%3E%3Crect width='1024' height='1024' rx='232' fill='%234F46E5'/%3E%3Cpath d='M326 250H698a104 104 0 0 1 104 104v212a104 104 0 0 1-104 104H470L332 778l46-108h-52a104 104 0 0 1-104-104V354a104 104 0 0 1 104-104z' fill='%23fff'/%3E%3C/svg%3E" />
+<style>
+  :root {
+    --bg: #0a0a0b;
+    --bg-soft: #131315;
+    --card: rgba(255,255,255,.035);
+    --border: rgba(255,255,255,.09);
+    --fg: #f4f4f5;
+    --fg-dim: #a1a1aa;
+    --fg-faint: #71717a;
+    --accent: #7c7df7;
+    --accent-strong: #4f46e5;
+    --green: #3fb950;
+    --amber: #d29922;
+    --radius: 16px;
+    --maxw: 1080px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #ffffff;
+      --bg-soft: #f6f6f8;
+      --card: rgba(0,0,0,.025);
+      --border: rgba(0,0,0,.1);
+      --fg: #18181b;
+      --fg-dim: #52525b;
+      --fg-faint: #71717a;
+      --accent: #4f46e5;
+      --accent-strong: #4338ca;
+      --green: #1a7f37;
+      --amber: #9a6700;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  img, video { max-width: 100%; height: auto; display: block; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+  section { padding: 72px 0; border-top: 1px solid var(--border); }
+  section:first-of-type { border-top: 0; }
+  h1, h2, h3 { line-height: 1.25; letter-spacing: -.02em; margin: 0 0 12px; }
+  h2 { font-size: clamp(24px, 3.2vw, 32px); }
+  h3 { font-size: 17px; }
+  p { margin: 0 0 14px; }
+  .lede { color: var(--fg-dim); font-size: 17px; max-width: 62ch; }
+  .eyebrow {
+    text-transform: uppercase; letter-spacing: .12em; font-size: 12px;
+    font-weight: 600; color: var(--fg-faint); margin-bottom: 10px;
+  }
+
+  /* ── header ───────────────────────────────────────────────── */
+  header {
+    position: sticky; top: 0; z-index: 20;
+    backdrop-filter: blur(12px);
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav { display: flex; align-items: center; gap: 20px; height: 60px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; color: var(--fg); }
+  .brand:hover { text-decoration: none; }
+  .brand svg { width: 26px; height: 26px; border-radius: 7px; }
+  .nav .spacer { flex: 1; }
+  .nav a.navlink { color: var(--fg-dim); font-size: 14px; }
+  .nav a.navlink:hover { color: var(--fg); text-decoration: none; }
+  @media (max-width: 640px) { .nav a.navlink.hide-sm { display: none; } }
+
+  /* ── hero ─────────────────────────────────────────────────── */
+  .hero { padding: 84px 0 64px; text-align: center; }
+  .hero-mark { width: 72px; height: 72px; border-radius: 18px; margin: 0 auto 22px; }
+  .hero h1 { font-size: clamp(34px, 6vw, 54px); }
+  .grad {
+    background: linear-gradient(100deg, var(--accent) 0%, var(--accent-strong) 55%, var(--accent) 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero .lede { margin: 0 auto 26px; font-size: 18px; }
+  .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 11px 20px; border-radius: 11px; font-weight: 600; font-size: 15px;
+    border: 1px solid var(--border); color: var(--fg); background: var(--card);
+    transition: transform .12s ease, border-color .12s ease;
+  }
+  .btn:hover { text-decoration: none; transform: translateY(-1px); border-color: var(--accent); }
+  .btn.primary {
+    background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
+    border-color: transparent; color: #fff;
+  }
+  .note { color: var(--fg-faint); font-size: 13px; margin-top: 18px; }
+
+  /* ── grids / cards ────────────────────────────────────────── */
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .card {
+    border: 1px solid var(--border); background: var(--card);
+    border-radius: var(--radius); padding: 20px;
+  }
+  .card.dim { opacity: .62; }
+  .card h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+  .card p { color: var(--fg-dim); font-size: 14.5px; margin: 0; }
+  .who { color: var(--fg-faint); font-size: 12.5px; margin: 0 0 8px !important; }
+  .badge {
+    font-size: 11px; font-weight: 700; letter-spacing: .03em;
+    padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+    border: 1px solid currentColor;
+  }
+  .b-ship { color: var(--green); }
+  .b-labs { color: var(--amber); }
+  .b-soon { color: var(--fg-faint); }
+
+  /* ── media ────────────────────────────────────────────────── */
+  figure { margin: 0 0 28px; }
+  figure img, figure video { border: 1px solid var(--border); border-radius: 12px; margin-inline: auto; }
+  figcaption { color: var(--fg-faint); font-size: 13.5px; text-align: center; margin-top: 10px; }
+  figcaption b { color: var(--fg-dim); }
+  .media-3 { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+
+  /* ── feature list ─────────────────────────────────────────── */
+  .feat { display: grid; gap: 22px 28px; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+  .feat h3 { margin-bottom: 4px; }
+  .feat p { color: var(--fg-dim); font-size: 14.5px; margin: 0; }
+
+  /* ── callout ──────────────────────────────────────────────── */
+  .callout {
+    border: 1px solid var(--border); border-left: 3px solid var(--amber);
+    background: var(--card); border-radius: 10px; padding: 16px 18px;
+    color: var(--fg-dim); font-size: 14.5px;
+  }
+
+  /* ── docs index ───────────────────────────────────────────── */
+  .docs-col h3 { color: var(--fg-faint); font-size: 12px; text-transform: uppercase; letter-spacing: .1em; margin-bottom: 10px; }
+  .docs-col ul { list-style: none; margin: 0; padding: 0; }
+  .docs-col li { padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .docs-col li:last-child { border-bottom: 0; }
+  .docs-col small { display: block; color: var(--fg-faint); font-size: 12.5px; }
+
+  /* ── table ────────────────────────────────────────────────── */
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+  th { color: var(--fg-faint); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: .06em; }
+  td { color: var(--fg-dim); }
+  td:first-child { color: var(--fg); font-weight: 600; white-space: nowrap; }
+
+  footer { border-top: 1px solid var(--border); padding: 32px 0 48px; color: var(--fg-faint); font-size: 13.5px; }
+  .footlinks { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="#top">
+      <svg viewBox="0 0 1024 1024" aria-hidden="true">
+        <rect width="1024" height="1024" rx="232" fill="#4F46E5"/>
+        <path d="M326 250H698a104 104 0 0 1 104 104v212a104 104 0 0 1-104 104H470L332 778l46-108h-52a104 104 0 0 1-104-104V354a104 104 0 0 1 104-104z" fill="#fff"/>
+      </svg>
+      BrainCue
+    </a>
+    <span class="spacer"></span>
+    <a class="navlink hide-sm" href="#modes">Modes</a>
+    <a class="navlink hide-sm" href="#demo">Demo</a>
+    <a class="navlink hide-sm" href="#docs">Docs</a>
+    <a class="navlink" href="https://github.com/tpikachu/BrainCue">GitHub</a>
+  </div>
+</header>
+
+<a id="top"></a>
+
+<!-- ── HERO ──────────────────────────────────────────────────── -->
+<div class="wrap hero">
+  <svg class="hero-mark" viewBox="0 0 1024 1024" aria-hidden="true">
+    <defs>
+      <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#7C7DF7"/><stop offset=".5" stop-color="#4F46E5"/><stop offset="1" stop-color="#3A2FB0"/>
+      </linearGradient>
+      <linearGradient id="spark" x1="384" y1="318" x2="640" y2="574" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#4F46E5"/><stop offset="1" stop-color="#7C7DF7"/>
+      </linearGradient>
+    </defs>
+    <rect width="1024" height="1024" rx="232" fill="url(#bg)"/>
+    <rect width="1024" height="512" rx="232" fill="#fff" opacity=".06"/>
+    <ellipse cx="512" cy="712" rx="262" ry="46" opacity=".18"/>
+    <path d="M326 250H698a104 104 0 0 1 104 104v212a104 104 0 0 1-104 104H470L332 778l46-108h-52a104 104 0 0 1-104-104V354a104 104 0 0 1 104-104z" fill="#fff"/>
+    <g stroke="url(#spark)" stroke-width="40" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M452 350V566"/><path d="M452 350h60c54 0 54 104 0 104h-60"/><path d="M452 454h84c58 0 58 112 0 112h-84"/>
+    </g>
+    <path d="M648 356q10 48 50 56-40 8-50 56-10-48-50-56 40-8 50-56z" fill="#A5A6FB"/>
+    <path d="M392 522q7 34 36 40-29 6-36 40-7-34-36-40 29-6 36-40z" fill="#C7C8FD"/>
+  </svg>
+
+  <h1>The AI that's <span class="grad">in the room with you</span></h1>
+  <p class="lede">
+    BrainCue hears the conversation you're actually in — an interview, a meeting,
+    or just your working day — and contributes through a floating,
+    <b>screen-share-invisible</b> Cue Card, or its own voice.
+    Local-first. Bring your own AI key.
+  </p>
+  <div class="cta">
+    <a class="btn primary" href="https://github.com/tpikachu/BrainCue/releases">Download</a>
+    <a class="btn" href="#demo">Watch the demo</a>
+    <a class="btn" href="https://github.com/tpikachu/BrainCue">View source</a>
+  </div>
+  <p class="note">Windows · macOS · Linux — free and open source (MIT). Your data stays on your machine.</p>
+</div>
+
+<!-- ── MODES ─────────────────────────────────────────────────── -->
+<section id="modes">
+  <div class="wrap">
+    <p class="eyebrow">One engine, many modes</p>
+    <h2>Modes are presets, not separate products</h2>
+    <p class="lede" style="margin-bottom:28px">
+      BrainCue is a single conversation engine — <i>listen → decide when to contribute →
+      ground in your documents → respond via overlay or voice</i>. Each mode is a
+      configuration over it, so what it learns in one, it keeps in all.
+    </p>
+
+    <div class="grid">
+      <div class="card">
+        <h3>Interview Copilot <span class="badge b-ship">Shipped</span></h3>
+        <p class="who">You're the candidate</p>
+        <p>Detects the interviewer's questions and streams grounded answer cues into the Cue Card — retellable live as key points, an explanation, or a STAR story.</p>
+      </div>
+      <div class="card">
+        <h3>Practice <span class="badge b-ship">Shipped</span></h3>
+        <p class="who">You're rehearsing</p>
+        <p>A mock interviewer asks out loud with a real voice, or a sparring drill coaches every spoken answer — then reports on how you did.</p>
+      </div>
+      <div class="card">
+        <h3>Meeting Copilot <span class="badge b-labs">Labs</span></h3>
+        <p class="who">You're a participant</p>
+        <p>Sits in quietly and surfaces context, unanswered questions, action items, and decisions — only above a confidence threshold you set.</p>
+      </div>
+      <div class="card">
+        <h3>Companion <span class="badge b-labs">Labs</span></h3>
+        <p class="who">You're working or thinking</p>
+        <p>An ambient presence with memory: flags tasks, offers context, recalls what you saved — behind deterministic gates, quiet hours, and a hard spend cap.</p>
+      </div>
+      <div class="card dim">
+        <h3>Interviewer Assist <span class="badge b-soon">Coming soon</span></h3>
+        <p class="who">You're the one asking</p>
+        <p>Suggests questions and follow-ups, tracks competency coverage as the interview runs, and drafts the evaluation afterwards.</p>
+      </div>
+      <div class="card dim">
+        <h3>Tutor <span class="badge b-soon">Coming soon</span></h3>
+        <p class="who">You're learning something</p>
+        <p>Voice dialogue and drills grounded in whatever material you give it — notes, a textbook chapter, a spec.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── DEMO ──────────────────────────────────────────────────── -->
+<section id="demo">
+  <div class="wrap">
+    <p class="eyebrow">See it in action</p>
+    <h2>Live, in real time</h2>
+    <p class="lede" style="margin-bottom:28px">
+      The clips below show Interview Copilot, the most mature mode.
+    </p>
+
+    <figure>
+      <img src="media/cuecard-stream.gif" width="380" loading="lazy"
+           alt="The floating Cue Card: the interviewer's question is transcribed live, then a grounded, cited answer streams in." />
+      <figcaption><b>The question is heard</b> — and a grounded, cited answer streams into the Cue Card.</figcaption>
+    </figure>
+
+    <figure>
+      <img src="media/stealth-split.gif" width="860" loading="lazy"
+           alt="The same moment in two views: your screen shows the Cue Card over a video call; the other side's screen share shows the call with the app absent." />
+      <figcaption><b>The same moment, two views</b> — your screen has BrainCue; the shared screen (and any recording) has nothing.</figcaption>
+    </figure>
+
+    <figure>
+      <video controls preload="none" width="860" playsinline>
+        <source src="media/braincue-demo.mp4" type="video/mp4" />
+        Your browser can't play this video —
+        <a href="media/braincue-demo.mp4">download it instead</a>.
+      </video>
+      <figcaption><b>The full walkthrough</b> — 74 seconds, narrated with on-screen captions.</figcaption>
+    </figure>
+
+    <div class="media-3">
+      <figure>
+        <img src="media/format-switch.gif" loading="lazy" alt="Re-tell any answer as key points, an explanation, or a STAR story — switched live." />
+        <figcaption><b>Re-tell it your way</b><br />key points · explanation · STAR story</figcaption>
+      </figure>
+      <figure>
+        <img src="media/coding-solve.gif" loading="lazy" alt="A captured coding problem is solved in the Cue Card with an optimal solution and complexity analysis." />
+        <figcaption><b>Live coding rounds</b><br />optimal solution + complexity</figcaption>
+      </figure>
+      <figure>
+        <img src="media/mock-interview.gif" loading="lazy" alt="An AI interviewer asks a question aloud and BrainCue answers it in the Cue Card." />
+        <figcaption><b>Practice mode</b><br />the AI asks · BrainCue answers</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ── WHY ───────────────────────────────────────────────────── -->
+<section id="why">
+  <div class="wrap">
+    <p class="eyebrow">Why BrainCue</p>
+    <h2>Things a cloud assistant structurally can't do</h2>
+    <div class="feat" style="margin-top:28px">
+      <div>
+        <h3>🎙️ Hears the real conversation</h3>
+        <p>System-audio loopback puts it inside your actual calls and meetings; a microphone covers in-person. It flags the moment worth responding to, as it happens.</p>
+      </div>
+      <div>
+        <h3>🪟 Invisible to screen sharing</h3>
+        <p>The Cue Card is always-on-top for you and excluded from screen capture and recording for everyone else — OS-level window affinity, not a trick.</p>
+      </div>
+      <div>
+        <h3>💡 Grounded in your documents</h3>
+        <p>Answers are retrieved from <i>your</i> résumé, job descriptions, and notes by on-device search — and it says when it doesn't know instead of inventing.</p>
+      </div>
+      <div>
+        <h3>🗣️ A voice of its own</h3>
+        <p>Push-to-talk from anywhere: ask by voice and hear the answer back. Start talking over it and it stops to listen.</p>
+      </div>
+      <div>
+        <h3>🧠 Memory you approve</h3>
+        <p>It can remember across sessions, but nothing is kept silently — memories are proposed, and only ones you approve are ever recalled. Correct or forget any of them.</p>
+      </div>
+      <div>
+        <h3>🔒 Local-first, bring your own key</h3>
+        <p>Data lives in a local database. Your API key is encrypted by the OS keychain and never leaves the main process — the UI only ever learns whether one exists.</p>
+      </div>
+    </div>
+
+    <div class="callout" style="margin-top:32px">
+      ⚠️ <b>Use only where AI assistance is permitted.</b> Your data stays on your machine;
+      only the retrieved context and the current moment of conversation are sent to your AI provider.
+    </div>
+  </div>
+</section>
+
+<!-- ── DOCS ──────────────────────────────────────────────────── -->
+<section id="docs">
+  <div class="wrap">
+    <p class="eyebrow">Documentation</p>
+    <h2>How it's built</h2>
+    <p class="lede" style="margin-bottom:28px">
+      BrainCue is docs-driven: the design documents below are the source of truth the
+      implementation follows.
+    </p>
+
+    <div class="grid">
+      <div class="docs-col card">
+        <h3>Start here</h3>
+        <ul>
+          <li><a href="00-VISION.html">Vision</a><small>The north star: ambient companion, mode catalog, principles</small></li>
+          <li><a href="01-PRD.html">Product spec</a><small>Domain model, the engine, per-mode requirements</small></li>
+          <li><a href="10-ROADMAP.html">Roadmap</a><small>Phases, release trains, and the development rules</small></li>
+        </ul>
+      </div>
+      <div class="docs-col card">
+        <h3>Architecture</h3>
+        <ul>
+          <li><a href="02-ARCHITECTURE.html">Architecture</a><small>Processes, data flow, module boundaries</small></li>
+          <li><a href="12-ENGINE-PLAN.html">Engine plan</a><small>The six-stage pipeline every mode configures</small></li>
+          <li><a href="03-WINDOWS.html">Windows</a><small>Main, renderer, and the capture-excluded overlay</small></li>
+          <li><a href="11-UX-NAVIGATION.html">UX &amp; navigation</a><small>The mode-first layout</small></li>
+        </ul>
+      </div>
+      <div class="docs-col card">
+        <h3>Reference</h3>
+        <ul>
+          <li><a href="04-DATABASE.html">Database</a><small>Schema, context packs, migrations</small></li>
+          <li><a href="05-IPC-MAP.html">IPC map</a><small>Every channel and event across the bridge</small></li>
+          <li><a href="06-OPENAI-SERVICE.html">Provider services</a><small>Transcription, answers, embeddings, speech</small></li>
+          <li><a href="07-API-KEY-SECURITY.html">Key security</a><small>Where the key lives and why it never leaves</small></li>
+          <li><a href="08-FOLDER-STRUCTURE.html">Folder structure</a><small>Where things go</small></li>
+        </ul>
+      </div>
+      <div class="docs-col card">
+        <h3>Process &amp; history</h3>
+        <ul>
+          <li><a href="sessions/README.html">Session log</a><small>The running development diary, one file per day</small></li>
+          <li><a href="09-MVP-PLAN.html">MVP plan</a><small>Historical — the record of the v1 build</small></li>
+          <li><a href="https://github.com/tpikachu/BrainCue/tree/master/changelog">Changelog</a><small>What shipped in each release</small></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── DOWNLOAD ──────────────────────────────────────────────── -->
+<section id="download">
+  <div class="wrap">
+    <p class="eyebrow">Get it</p>
+    <h2>Download</h2>
+    <p class="lede">
+      Grab the latest installer from the releases page. Builds are currently
+      <b>unsigned</b>, so the OS may warn on first launch — Windows SmartScreen
+      ("More info → Run anyway"), macOS Gatekeeper (right-click → Open).
+    </p>
+    <div class="cta" style="justify-content:flex-start; margin:22px 0 34px">
+      <a class="btn primary" href="https://github.com/tpikachu/BrainCue/releases">All releases</a>
+      <a class="btn" href="https://github.com/tpikachu/BrainCue#getting-started">Build from source</a>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>What you need</th><th>Minimum</th><th>Recommended</th></tr></thead>
+        <tbody>
+          <tr><td>OS</td><td>Windows 10 64-bit (build 19041+), macOS 11, or modern 64-bit Linux</td><td>Windows 11, macOS 13+</td></tr>
+          <tr><td>RAM</td><td>4 GB</td><td>8 GB+</td></tr>
+          <tr><td>Audio</td><td>Microphone</td><td>Mic + system-audio loopback</td></tr>
+          <tr><td>Network</td><td>Broadband</td><td>Low-latency broadband</td></tr>
+          <tr><td>AI key</td><td colspan="2">Your own OpenAI API key (Realtime/STT, Responses, embeddings, TTS, Vision). More providers planned.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">
+      Privacy Mode is most reliable on Windows 10 build 19041+ and Windows 11. On macOS,
+      capturing system audio needs a virtual audio device (e.g. BlackHole); the microphone
+      path works without one.
+    </p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="footlinks">
+      <a href="https://github.com/tpikachu/BrainCue">GitHub</a>
+      <a href="https://github.com/tpikachu/BrainCue/releases">Releases</a>
+      <a href="00-VISION.html">Vision</a>
+      <a href="10-ROADMAP.html">Roadmap</a>
+      <a href="https://github.com/tpikachu/BrainCue/issues">Issues</a>
+    </div>
+    <div>MIT licensed · Local-first · Bring your own AI key</div>
+  </div>
+</footer>
+
+</body>
+</html>

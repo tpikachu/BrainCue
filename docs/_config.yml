@@ -1,0 +1,39 @@
+# Jekyll config for the GitHub Pages site built from this folder.
+# See .github/workflows/pages.yml for the deploy.
+
+title: BrainCue
+description: >-
+  The AI that's in the room with you — a local-first, screen-share-invisible
+  companion for the conversations you're actually in.
+url: https://tpikachu.github.io
+baseurl: /BrainCue
+
+# A GitHub-supported theme, so no Gemfile / remote theme is required.
+theme: jekyll-theme-primer
+
+plugins:
+  # Render .md files that have no YAML front matter — every design doc in this
+  # folder is plain markdown and stays readable on github.com as-is.
+  - jekyll-optional-front-matter
+  # Give those front-matter-less pages the theme layout instead of emitting
+  # bare, unstyled HTML.
+  - jekyll-default-layout
+  # Rewrite inter-doc links like [Roadmap](10-ROADMAP.md) to the built URL, so
+  # the same link works both on github.com and on the site.
+  - jekyll-relative-links
+  # Page <title> comes from each doc's leading H1.
+  - jekyll-titles-from-headings
+  - jekyll-seo-tag
+  - jekyll-sitemap
+
+# index.html is a hand-written, self-contained landing page — it must not be
+# wrapped in the doc theme. (Also declared in the file's own front matter; this
+# is the belt to that braces.)
+defaults:
+  - scope:
+      path: index.html
+    values:
+      layout: null
+
+exclude:
+  - _config.yml

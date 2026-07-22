@@ -1,0 +1,56 @@
+name: Deploy site to GitHub Pages
+
+# Builds docs/ (the hand-written landing page + the design docs as markdown)
+# with GitHub's own Jekyll pipeline and publishes it to GitHub Pages.
+#
+# One-time repo setup: Settings → Pages → "Build and deployment" → Source:
+# "GitHub Actions". No Gemfile is needed — actions/jekyll-build-pages ships the
+# github-pages gem, which is where the theme and the plugins in
+# docs/_config.yml come from.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/pages.yml'
+  # Lets you republish without a docs change (e.g. after flipping the Pages
+  # source setting on for the first time).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two deployments at once, and let an in-flight one finish rather
+# than cancelling it — a half-applied deploy would leave the site inconsistent.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      - name: Build with Jekyll
+        uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./docs
+          destination: ./_site
+
+      - uses: actions/upload-pages-artifact@v3
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

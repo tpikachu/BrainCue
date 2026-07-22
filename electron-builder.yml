@@ -6,7 +6,7 @@ productName: BrainCue Copilot
 publish:
   provider: github
   owner: tpikachu
-  repo: Interview-Copilot
+  repo: BrainCue
 directories:
   output: release
   buildResources: resources
