@@ -4,6 +4,7 @@ import { FLAGS } from '@shared/flags';
 import type { ClientInfo } from '@shared/ipc';
 import type {
   AnswerFormat,
+  CompanionStatusEvent,
   ContributionDeltaEvent,
   ContributionDoneEvent,
   ContributionOpenEvent,
@@ -20,6 +21,7 @@ import { createStreamBuffer } from './lib/streamBuffer';
 import { noDrag } from './lib/style';
 import { AnswerControls } from './controls/AnswerControls';
 import { AskBar } from './controls/AskBar';
+import { CompanionBar } from './controls/CompanionBar';
 import { VoiceBar } from './controls/VoiceBar';
 import { useVoice } from './voice/useVoice';
 import { EqualizerBars } from './controls/EqualizerBars';
@@ -79,6 +81,11 @@ export default function Overlay() {
   // Voice/summon runtime (Prompt 9): dialogue state mirror, push-to-talk
   // capture + VAD, and speech playback. Inert while the flag is off.
   const { voice, prefs: voicePrefs, level: voiceLevel, toggleMute, savePrefs } = useVoice(FLAGS.voice);
+
+  // Companion session status (presence dial + live cost) — null outside
+  // companion sessions. Memory cards can be corrected in place (small editor).
+  const [companionStatus, setCompanionStatus] = useState<CompanionStatusEvent | null>(null);
+  const [memoryEdit, setMemoryEdit] = useState<{ id: string; cardId: number; content: string } | null>(null);
 
   // Backend session failure (transcription socket dropped, OpenAI auth, etc.).
   const [sessionError, setSessionError] = useState<string | null>(null);
@@ -175,6 +182,8 @@ export default function Overlay() {
           setLevel(0);
           setSpeaking(false);
           setReconnecting(false);
+          setCompanionStatus(null);
+          setMemoryEdit(null);
         }
         prevLive.current = nowLive;
       }),
@@ -198,6 +207,7 @@ export default function Overlay() {
         setLevel(p.level);
         setSpeaking((was) => (was ? p.level > SPEAK_OFF : p.level > SPEAK_ON));
       }),
+      api.events.onCompanionStatus((p) => setCompanionStatus(p)),
     );
     void api.privacy.get().then((p) => {
       setPrivacy(p.enabled);
@@ -285,6 +295,40 @@ export default function Overlay() {
     void api.session.clearAnswer();
   };
 
+  // --- memory card actions (companion) ---
+  // A surfaced memory can be corrected or forgotten RIGHT ON the card — trust
+  // requires the fix to live where the mistake showed up.
+  const cardMemoryId = (card: CardModel): string | null => {
+    const id = (card.meta as Record<string, unknown> | null)?.memoryId;
+    return typeof id === 'string' ? id : null;
+  };
+  const correctMemory = (card: CardModel) => {
+    const id = cardMemoryId(card);
+    if (id) setMemoryEdit({ id, cardId: card.id, content: card.body });
+  };
+  const saveMemoryEdit = async () => {
+    if (!memoryEdit) return;
+    const text = memoryEdit.content.trim();
+    if (!text) return;
+    try {
+      await api.memory.update(memoryEdit.id, { content: text });
+      useOverlayStore.getState().replaceBody(memoryEdit.cardId, text);
+      setMemoryEdit(null);
+    } catch (e) {
+      setSessionError((e as Error).message); // e.g. the sensitive-content guard
+    }
+  };
+  const forgetMemory = async (card: CardModel) => {
+    const id = cardMemoryId(card);
+    if (!id) return;
+    try {
+      await api.memory.delete(id);
+      useOverlayStore.getState().remove(card.id);
+    } catch (e) {
+      setSessionError((e as Error).message);
+    }
+  };
+
   // The global shortcut (Ctrl+Shift+\) toggles click-through via the main process.
   useEffect(() => api.events.onOverlayClickthrough(() => setClickthrough((c) => !c)), []);
 
@@ -349,6 +393,11 @@ export default function Overlay() {
 
       {live && <SessionBar clientInfo={clientInfo} paused={paused} />}
 
+      {/* Companion sessions: live presence dial + visible cost estimate. */}
+      {live && companionStatus && <CompanionBar status={companionStatus} />}
+
+      {live && companionStatus && <CompanionBar status={companionStatus} />}
+
       {live && (
         <AnswerControls
           interviewType={interviewType}
@@ -407,12 +456,78 @@ export default function Overlay() {
               onCopy={() => copyCard(c)}
               onRegenerate={() => void regenerateCard(c)}
               onRemove={() => useOverlayStore.getState().remove(c.id)}
+              onCorrectMemory={() => correctMemory(c)}
+              onForgetMemory={() => void forgetMemory(c)}
             />
           ))
         )}
       </div>
 
+      {/* Inline memory editor — correcting a surfaced memory updates the saved
+          item itself (and re-embeds it), not just this card. */}
+      {memoryEdit && (
+        <div
+          data-ct-interactive
+          className="mt-2 shrink-0 rounded-lg border border-violet-500/40 bg-neutral-950 p-2"
+          style={noDrag}
+        >
+          <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-violet-300">
+            Correct this memory
+          </p>
+          <textarea
+            value={memoryEdit.content}
+            onChange={(e) => setMemoryEdit((m) => (m ? { ...m, content: e.target.value } : m))}
+            rows={3}
+            className="w-full resize-none rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-100 outline-none focus:border-violet-500"
+          />
+          <div className="mt-1 flex justify-end gap-1.5">
+            <button
+              onClick={() => setMemoryEdit(null)}
+              className="rounded-md bg-neutral-800 px-2 py-1 text-[11px] text-neutral-300 hover:bg-neutral-700"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => void saveMemoryEdit()}
+              className="rounded-md bg-violet-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-violet-500"
+            >
+              Save memory
+            </button>
+          </div>
+        </div>
+      )}
+
       {live && <AskBar />}
+
+      {/* In-place memory correction (a memory card's ✎). Saves through the
+          same review-guarded update path as Library › Memory. */}
+      {memoryEdit && (
+        <div data-ct-interactive className="mt-2 shrink-0 rounded-md border border-violet-500/40 bg-neutral-950 p-2" style={noDrag}>
+          <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-violet-300">
+            Correct memory
+          </p>
+          <textarea
+            value={memoryEdit.content}
+            onChange={(e) => setMemoryEdit({ ...memoryEdit, content: e.target.value })}
+            rows={3}
+            className="w-full resize-none rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-100 outline-none focus:border-violet-500"
+          />
+          <div className="mt-1 flex justify-end gap-1.5">
+            <button
+              onClick={() => setMemoryEdit(null)}
+              className="rounded-md bg-neutral-800 px-2 py-1 text-[11px] text-neutral-300 hover:bg-neutral-700"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => void saveMemoryEdit()}
+              className="rounded-md bg-violet-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-violet-500"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Voice is session-independent: with nothing live a summon quick-asks
           over the default Space, so the bar renders whenever the flag is on. */}

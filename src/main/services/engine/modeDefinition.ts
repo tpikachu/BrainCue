@@ -11,7 +11,7 @@ import type {
 } from '@shared/types';
 import type { AnswerEvent } from '../openai/answer';
 import type { TriggerPolicy } from './trigger/triggerPolicy';
-import type { AmbientDecision, AmbientTriggerPolicy } from './trigger/ambientPolicy';
+import type { AmbientDecision } from './trigger/ambientPolicy';
 
 /**
  * Per-session runtime settings the user can flip live from the Cue Card.
@@ -55,11 +55,36 @@ export interface AmbientCardContext {
   packId: string | null;
 }
 
+/** The contract an ambient trigger policy exposes to the ENGINE. Meeting's
+ *  AmbientTriggerPolicy and Companion's InterjectionPolicy both satisfy it;
+ *  the optional hooks are engine-fed signals a policy may gate on. */
+export interface AmbientPolicy {
+  /** Evaluate one finalized turn. At most ONE decision per turn. */
+  evaluate(text: string, now: number): Promise<AmbientDecision>;
+  /** Live posture change (each policy validates its own presence vocabulary —
+   *  meeting speaks Presence, companion speaks CompanionPresence). */
+  setPresence?(presence: string): void;
+  /** An interim transcript delta arrived — the user is (still) speaking. */
+  noteInterim?(now: number): void;
+}
+
+/** Session identity handed to createPolicy so per-Space configuration
+ *  (companion overrides) and budgets can shape the policy instance. */
+export interface AmbientSessionContext {
+  sessionId: string;
+  profileId: string;
+  packId: string | null;
+  /** Hard session budget in cents (null/undefined = the mode's default). */
+  budgetCents?: number | null;
+  /** Explicit start-time companion posture (wins over Space/global config). */
+  companionPresence?: string;
+}
+
 /** The ambient capability: modes that quietly contribute on their own
- *  (Meeting; later Companion). The policy instance holds per-session state
+ *  (Meeting, Companion). The policy instance holds per-session state
  *  (cooldowns, dedupe, pending questions), so it's CREATED per session. */
 export interface AmbientMode {
-  createPolicy(presence: Presence): AmbientTriggerPolicy;
+  createPolicy(presence: Presence, ctx: AmbientSessionContext): AmbientPolicy;
   /** Turn an acted decision into a concrete card, or null for silence (e.g.
    *  a context card whose retrieval found nothing relevant). */
   buildCard(decision: AmbientDecision, ctx: AmbientCardContext): Promise<AmbientCard | null>;

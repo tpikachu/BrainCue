@@ -4,6 +4,7 @@ import { IPC } from '@shared/ipc';
 import { handle, zId } from './helpers';
 import { zAnswerFormat, zInterviewType, zPresence, zSessionMode } from './schemas';
 import { sessionManager } from '../services/session/sessionManager';
+import { engine } from '../services/engine/engine';
 import { sessionsRepo } from '../db/repositories/sessions.repo';
 import { generateReport } from '../services/session/report';
 import { getOrGenerateMeetingReport } from '../services/engine/meetingReport';
@@ -24,9 +25,31 @@ export function registerSessionIpc(): void {
       // and, for ambient modes, how present the companion should be.
       mode: zSessionMode.default('interview'),
       presence: zPresence.optional(),
+      // Companion cost governance: hard session budget in cents (null = none;
+      // absent = the companion prefs default).
+      budgetCents: z.number().int().positive().nullable().optional(),
+      // Explicit start-time companion posture (off/on_demand/assistive/proactive).
+      companionPresence: z.enum(['off', 'on_demand', 'assistive', 'proactive']).optional(),
     }),
-    ({ profileId, interviewType: t, jobId, answerFormat: f, mode, presence }) =>
-      sessionManager.start(profileId, t, jobId, f, { mode, presence }),
+    ({
+      profileId,
+      interviewType: t,
+      jobId,
+      answerFormat: f,
+      mode,
+      presence,
+      budgetCents,
+      companionPresence,
+    }) =>
+      sessionManager.start(profileId, t, jobId, f, { mode, presence, budgetCents, companionPresence }),
+  );
+
+  // Live posture change for the active ambient session (companion presence
+  // select in the Cue Card). Vocabulary is validated by the policy itself.
+  handle(
+    IPC.session.setPresence,
+    z.object({ presence: z.string().min(1) }),
+    ({ presence }) => engine.setPresenceActive(presence),
   );
 
   handle(

@@ -74,6 +74,8 @@ A Context Pack. One profile → many packs; each parsed/indexed independently.
 | company_research | text | nullable — readable text scraped from the company site (parsed + embedded as `company` chunks) |
 | parsed_company | text(json) | nullable — structured interview-relevant research |
 | notes | text | nullable — free-form client notes (shown in setup + Cue Card) |
+| memory_enabled | int | 0011 — per-Space memory opt-out (default 1) |
+| companion_prefs | text(json) | 0012 — per-Space CompanionSpaceOverrides (tone/brevity/humor/presence; null = inherit global) |
 | created_at / updated_at | int | |
 
 ### `documents`
@@ -191,12 +193,14 @@ Known keys (see `SETTINGS_KEYS` in `settings.repo.ts`):
 - `data_consent_ack` — `'1'` once user acknowledges the compliance reminder.
 - `memory_enabled` — `'1'`/`'0'` global memory consent (absent = off; no
   extraction or recall until the user enables it in Library › Memory).
-- `voice_prefs` — json `VoicePrefs` `{voice, muted, outputDeviceId,
-  saveQuickAsks, quickAskPackId}` for the voice/summon layer. Quick asks
-  (summons with no session live) are EPHEMERAL unless `saveQuickAsks` is on —
-  then they persist as `contributions` in one reused per-profile session row
-  with `mode='companion'` (`status='stopped'`; the contributions table needs a
-  session FK, and one row per profile keeps Sessions tidy).
+- `voice_prefs` — json VoicePrefs (TTS voice, hard mute, output device,
+  quick-ask persistence + default Space). Quick asks (summons with no session
+  live) are EPHEMERAL unless `saveQuickAsks` is on — then they persist as
+  `contributions` in one reused per-profile session row with
+  `mode='companion'` (`status='stopped'`).
+- `companion_prefs` — json CompanionPrefs (personality name/tone/brevity/humor,
+  default presence, DND windows, default session budget). Per-Space overrides
+  live on `jobs.companion_prefs` (0012).
 - `tour_done` — `'1'` once the first-run guided tour is completed/skipped.
 
 ## Deletion semantics

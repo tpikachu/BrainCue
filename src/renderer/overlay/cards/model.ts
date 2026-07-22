@@ -13,7 +13,9 @@ export interface CardModel {
   kind: string; // ContributionKind, or an unknown future kind
   title: string; // e.g. the detected question / solve label
   body: string; // streamed markdown
-  meta: AnswerMetaEvent | null;
+  /** Legacy answerMeta shape; ambient cards ride kind-specific annotations
+   *  (memory cards: memoryId/why/category) on it as extra fields. */
+  meta: (AnswerMetaEvent & Record<string, unknown>) | null;
   context: ContextSentEvent | null;
   followup: string | null; // predicted likely interviewer follow-up (post-stream)
   streaming: boolean;

@@ -119,6 +119,9 @@ export function emitAmbientContribution(
     body: string;
     /** Retrieved grounding to surface in "data sent" (context cards). */
     contextChunks?: RetrievedChunk[];
+    /** Card annotations the view renders (e.g. a memory card's id + "why
+     *  recalled") — patched generic-only, shaped as the meta patch payload. */
+    meta?: Record<string, unknown> | null;
   },
   targets: Targets = ['overlay'],
 ): void {
@@ -127,6 +130,16 @@ export function emitAmbientContribution(
     { contributionId: p.contributionId, kind: p.kind, title: p.title },
     targets,
   );
+  if (p.meta) {
+    broadcast(
+      EVENTS.contributionPatch,
+      {
+        contributionId: p.contributionId,
+        meta: { questionId: p.contributionId, riskWarning: null, ...p.meta },
+      },
+      targets,
+    );
+  }
   if (p.contextChunks) {
     const context: ContextSentEvent = {
       questionId: p.contributionId,

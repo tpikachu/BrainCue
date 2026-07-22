@@ -4,6 +4,8 @@ import type { AnswerPrefs, ClientInfo, ConfirmRequest, SavePrompt, UpdateStatus 
 import type {
   Application,
   ApplicationListItem,
+  CompanionSpaceOverrides,
+  CompanionStatusEvent,
   Contribution,
   ContributionDeltaEvent,
   ContributionDoneEvent,
@@ -124,6 +126,8 @@ const api = {
         companyError: string | null;
       }>(IPC.jobs.save, input),
     setNotes: (id: string, notes: string | null) => invoke(IPC.jobs.setNotes, { id, notes }),
+    setCompanionPrefs: (id: string, prefs: CompanionSpaceOverrides | null) =>
+      invoke(IPC.jobs.setCompanionPrefs, { id, prefs }),
     brief: (id: string) => invoke<InterviewBrief>(IPC.jobs.brief, { id }),
     delete: (id: string) => invoke(IPC.jobs.delete, { id }),
   },
@@ -181,7 +185,21 @@ const api = {
       answerFormat = 'key_points',
       mode = 'interview',
       presence?: Presence,
-    ) => invoke(IPC.session.start, { profileId, interviewType, jobId, answerFormat, mode, presence }),
+      budgetCents?: number | null,
+      companionPresence?: string,
+    ) =>
+      invoke(IPC.session.start, {
+        profileId,
+        interviewType,
+        jobId,
+        answerFormat,
+        mode,
+        presence,
+        budgetCents,
+        companionPresence,
+      }),
+    setPresence: (presence: string) =>
+      invoke<{ applied: boolean }>(IPC.session.setPresence, { presence }),
     resume: (sessionId: string, answerFormat = 'key_points') =>
       invoke(IPC.session.resume, { sessionId, answerFormat }),
     setAnswerPrefs: (prefs: { interviewType?: string; format?: string; pronunciation?: boolean }) =>
@@ -404,6 +422,7 @@ const api = {
     onConfirmRequest: (cb: (p: ConfirmRequest) => void) => on(EVENTS.confirmRequest, cb),
     onVoiceState: (cb: (p: VoiceStateEvent) => void) => on(EVENTS.voiceState, cb),
     onVoiceAudio: (cb: (p: VoiceAudioEvent) => void) => on(EVENTS.voiceAudio, cb),
+    onCompanionStatus: (cb: (p: CompanionStatusEvent) => void) => on(EVENTS.companionStatus, cb),
   },
 };
 

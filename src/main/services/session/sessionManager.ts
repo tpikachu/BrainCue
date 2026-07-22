@@ -41,7 +41,12 @@ export const sessionManager = {
     interviewType: InterviewType,
     jobId: string | null = null,
     answerFormat: AnswerFormat = 'key_points',
-    opts: { mode?: SessionMode; presence?: Presence } = {},
+    opts: {
+      mode?: SessionMode;
+      presence?: Presence;
+      budgetCents?: number | null;
+      companionPresence?: string;
+    } = {},
   ): Session {
     return engine.start(profileId, interviewType, jobId, answerFormat, opts);
   },

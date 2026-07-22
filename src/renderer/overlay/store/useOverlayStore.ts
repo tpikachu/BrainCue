@@ -31,6 +31,8 @@ interface OverlayCardsState {
   reset(contributionId: string): void;
   remove(id: number): void;
   toggle(id: number): void;
+  /** Replace one card's body in place (memory corrected from the card). */
+  replaceBody(id: number, body: string): void;
   clear(): void;
   /** Session stopped: drop every streaming cursor, keep the cards. */
   stopStreaming(): void;
@@ -78,6 +80,8 @@ export const useOverlayStore = create<OverlayCardsState>((set) => ({
     })),
   remove: (id) => set((s) => ({ cards: removeCard(s.cards, id) })),
   toggle: (id) => set((s) => ({ cards: toggleCollapsed(s.cards, id) })),
+  replaceBody: (id, body) =>
+    set((s) => ({ cards: s.cards.map((c) => (c.id === id ? { ...c, body } : c)) })),
   clear: () => set({ cards: [] }),
   stopStreaming: () =>
     set((s) => ({ cards: s.cards.map((c) => ({ ...c, streaming: false })) })),

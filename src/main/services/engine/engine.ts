@@ -12,6 +12,7 @@ import { log } from '../security/logger';
 import { EngineSession } from './engineSession';
 import { interviewMode } from './modes/interview.mode';
 import { meetingMode } from './modes/meeting.mode';
+import { companionMode } from './modes/companion.mode';
 import { getOrGenerateMeetingReport } from './meetingReport';
 import { extractMemoryCandidates } from '../memory/extractor';
 import { enginePersistence } from './persistence/enginePersistence';
@@ -22,7 +23,9 @@ import type { ModeDefinition } from './modeDefinition';
 /** Mode registry: SessionMode → definition. Practice/mock rehearse through
  *  the interview pipeline; the flagged-off modes land with their prompts. */
 function modeFor(mode: SessionMode | undefined): ModeDefinition {
-  return mode === 'meeting' ? meetingMode : interviewMode;
+  if (mode === 'meeting') return meetingMode;
+  if (mode === 'companion') return companionMode;
+  return interviewMode;
 }
 
 function toSession(r: typeof schema.sessions.$inferSelect): Session {
@@ -62,6 +65,8 @@ class Engine {
     ephemeral?: boolean;
     mode?: SessionMode;
     presence?: Presence;
+    budgetCents?: number | null;
+    companionPresence?: string;
   }): void {
     this.current?.teardown(); // cancel any prior in-flight answer; never leak a socket
     const modeDef = modeFor(opts.mode);
@@ -77,6 +82,8 @@ class Engine {
         presence: opts.presence ?? modeDef.defaultPresence,
       },
       ephemeral: !!opts.ephemeral,
+      budgetCents: opts.budgetCents,
+      companionPresence: opts.companionPresence,
     });
     this.current = session;
     showOverlay();
@@ -89,12 +96,16 @@ class Engine {
     if (!opts.ephemeral) {
       const transcriber = createRealtimeSource(
         {
-          onDelta: (text) =>
+          onDelta: (text) => {
+            // Ambient policies gate on "the user is (still) speaking" — feed
+            // them interim activity so a decision mid-classify can defer.
+            session.ambientPolicy?.noteInterim?.(Date.now());
             broadcast(EVENTS.transcriptDelta, {
               text,
               isFinal: false,
               speaker: session.mode.remoteSpeaker,
-            }),
+            });
+          },
           onFinal: (text) => void this.processFinalTranscript(opts.sessionId, text),
           onError: (message) => broadcast(EVENTS.sessionError, { message }),
           // Socket lifecycle → a subtle "reconnecting audio…" pill in the Cue Card
@@ -141,7 +152,12 @@ class Engine {
     interviewType: InterviewType,
     packId: string | null = null,
     answerFormat: AnswerFormat = 'key_points',
-    opts: { mode?: SessionMode; presence?: Presence } = {},
+    opts: {
+      mode?: SessionMode;
+      presence?: Presence;
+      budgetCents?: number | null;
+      companionPresence?: string;
+    } = {},
   ): Session {
     const profile = profilesRepo.get(profileId);
     if (!profile) throw new Error('Profile not found');
@@ -168,6 +184,8 @@ class Engine {
       language: profile.language,
       mode: opts.mode,
       presence: opts.presence,
+      budgetCents: opts.budgetCents,
+      companionPresence: opts.companionPresence,
     });
     return toSession(db().select().from(schema.sessions).where(eq(schema.sessions.id, id)).get()!);
   }
@@ -369,6 +387,15 @@ class Engine {
   activeInfo(): { sessionId: string; profileId: string; packId: string | null } | null {
     const s = this.current;
     return s ? { sessionId: s.sessionId, profileId: s.profileId, packId: s.packId } : null;
+  }
+
+  /** Live posture change for the active ambient session (companion presence
+   *  select in the Cue Card). Each policy validates its own vocabulary. */
+  setPresenceActive(presence: string): { applied: boolean } {
+    const s = this.current;
+    if (!s?.ambientPolicy?.setPresence) return { applied: false };
+    s.ambientPolicy.setPresence(presence);
+    return { applied: true };
   }
 
   /** Update the live answer preferences (type / format / pronunciation). Type is

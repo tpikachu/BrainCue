@@ -5,6 +5,7 @@ import { AnswerCardView } from './AnswerCardView';
 import { CodeCardView } from './CodeCardView';
 import { ContextCardView } from './ContextCardView';
 import { DecisionCardView } from './DecisionCardView';
+import { MemoryCardView } from './MemoryCardView';
 import { OpenQuestionCardView } from './OpenQuestionCardView';
 import { SuggestedQuestionCardView } from './SuggestedQuestionCardView';
 import { SummaryCardView } from './SummaryCardView';
@@ -20,6 +21,9 @@ export interface CardCapabilities {
    *  uniform (try the session pipeline, fall back to a re-solve) — only the
    *  affordance is per-kind. */
   regenerate: { tooltip: string } | false;
+  /** Memory cards: correct/forget the underlying memory (meta.memoryId) right
+   *  from the card. Handlers come from the shell; only the affordance is here. */
+  memory?: boolean;
 }
 
 export interface CardViewProps {
@@ -43,9 +47,9 @@ export interface CardDefinition {
 
 const noActions: CardCapabilities = { copy: true, regenerate: false };
 
-/** One entry per ContributionKind. `coverage`, `tutor_prompt`, and
- *  `memory_suggestion` share the closest view until their modes land
- *  (Prompts 7–10) — the kind is still first-class on the card and the wire. */
+/** One entry per ContributionKind. `coverage` and `tutor_prompt` share the
+ *  closest view until their modes land — the kind is still first-class on the
+ *  card and the wire. */
 const DEFINITIONS: Record<string, CardDefinition> = {
   answer: {
     capabilities: { copy: true, regenerate: { tooltip: 'Regenerate this answer' } },
@@ -69,7 +73,11 @@ const DEFINITIONS: Record<string, CardDefinition> = {
   warning: { capabilities: { ...noActions, copy: false }, chip: 'Warning', View: WarningCardView },
   decision: { capabilities: noActions, chip: 'Decision', View: DecisionCardView },
   tutor_prompt: { capabilities: noActions, chip: 'Tutor', View: SuggestedQuestionCardView },
-  memory_suggestion: { capabilities: noActions, chip: 'Memory', View: ContextCardView },
+  memory_suggestion: {
+    capabilities: { ...noActions, memory: true }, // correct/forget from the card
+    chip: 'Memory',
+    View: MemoryCardView,
+  },
   summary: { capabilities: noActions, chip: 'Summary', View: SummaryCardView },
 };
 

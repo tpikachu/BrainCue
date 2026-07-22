@@ -1,0 +1,1 @@
+ALTER TABLE `jobs` ADD `companion_prefs` text;
