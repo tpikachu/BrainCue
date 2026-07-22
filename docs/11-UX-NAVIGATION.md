@@ -129,6 +129,11 @@ Each step lands green on the parity gate:
    flows (Interview, Practice variants, Tailor as a "tools" row); sidebar
    becomes Home/Library/Reports/Settings; add redirects; drop the "Copilot"
    subtitle under the brand ([App.tsx](../src/renderer/dashboard/App.tsx)).
+   Card-launched pages (`/interview`, `/mock`, `/sparring`, `/tailor`) have no
+   sidebar entry, so they get a **"← Home / ‹mode›" breadcrumb bar** and keep
+   the Home nav item highlighted — they read as *inside* Home, never orphaned.
+   The breadcrumb is the interim way back until the SetupSheet (step 3)
+   replaces full-page navigation for setup.
 2. **Library merge.** Profiles + Jobs UIs under `/library` tabs (rename +
    re-parent, no behavior change; packs still `kind='job'`-only until schema
    milestone 1.1 lands the other kinds).
