@@ -333,6 +333,81 @@ describe('stale abort vs regeneration (slot-ownership rules)', () => {
       'Hello',
       ' world',
     ]);
+
+    // Dual-write mirrors ai_answers exactly: the aborted A stream produced NO
+    // contribution — only B's completed take exists for the tricky question.
+    const tricky = h.db
+      .select()
+      .from(schema.contributions)
+      .all()
+      .filter((c) => c.title === 'Tricky question?');
+    expect(tricky).toHaveLength(1);
+    expect(tricky[0]).toMatchObject({ kind: 'answer', status: 'completed', body: 'B1B2' });
+    sessionManager.stop(session.id);
+  });
+});
+
+describe('engine behaviors surfaced by the extraction (v2)', () => {
+  it('direct ask (summoned) bypasses the classifier entirely', async () => {
+    const { session } = startSession();
+    let classifyCalls = 0;
+    h.classify = async () => {
+      classifyCalls += 1;
+      return { isQuestion: false, type: 'clarification', confidence: 0, strategy: '' };
+    };
+
+    const { ok } = await sessionManager.askActive('What is your greatest strength?');
+    expect(ok).toBe(true);
+    expect(classifyCalls).toBe(0);
+    expect(evts(EVENTS.answerDelta).length).toBeGreaterThan(0);
+
+    // Manual-ask question rows keep the v1 defaults.
+    const q = h.db
+      .select()
+      .from(schema.detectedQuestions)
+      .all()
+      .find((r) => r.sessionId === session.id)!;
+    expect(q).toMatchObject({ type: 'behavioral', confidence: 1, strategy: '' });
+    sessionManager.stop(session.id);
+  });
+
+  it('a paused session ignores finals; resuming re-arms the pipeline', async () => {
+    const { session } = startSession();
+    const rowsFor = () =>
+      h.db.select().from(schema.transcriptChunks).all().filter((r) => r.sessionId === session.id);
+
+    sessionManager.togglePause(session.id);
+    await sessionManager.processFinalTranscript(session.id, 'Are you still there?');
+    expect(rowsFor()).toHaveLength(0); // pause wins: nothing persisted, nothing answered
+
+    sessionManager.togglePause(session.id);
+    await sessionManager.processFinalTranscript(session.id, 'Ok, back to it.');
+    expect(rowsFor()).toHaveLength(1);
+    sessionManager.stop(session.id);
+  });
+
+  it('a completed answer dual-writes one contribution row with provenance', async () => {
+    const { session } = startSession();
+    h.classify = async () => ({ isQuestion: true, type: 'behavioral', confidence: 0.9, strategy: 'star' });
+    h.retrieve = async () => [{ id: 'cx', sourceType: 'resume', content: 'Led a rewrite', score: 0.9 }];
+
+    await sessionManager.processFinalTranscript(session.id, 'Tell me about a rewrite you led?');
+
+    const contribs = h.db
+      .select()
+      .from(schema.contributions)
+      .all()
+      .filter((c) => c.sessionId === session.id);
+    expect(contribs).toHaveLength(1);
+    expect(contribs[0]).toMatchObject({ kind: 'answer', status: 'completed', body: 'Hello world' });
+
+    const refs = JSON.parse(contribs[0].sourceRefs!) as { type: string; id: string }[];
+    const qId = (evts(EVENTS.questionDetected).at(0)?.payload as { id: string }).id;
+    expect(refs).toContainEqual({ type: 'question', id: qId });
+    expect(refs).toContainEqual({ type: 'chunk', id: 'cx' });
+
+    // ai_answers row still exists in parallel — the parity source of truth.
+    expect(h.db.select().from(schema.aiAnswers).all().some((a) => a.questionId === qId)).toBe(true);
     sessionManager.stop(session.id);
   });
 });

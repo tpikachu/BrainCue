@@ -286,6 +286,30 @@ export const sessionReports = sqliteTable('session_reports', {
   createdAt: integer('created_at').notNull().default(now),
 });
 
+// Generic engine outputs (v2): every generated contribution — answers today;
+// meeting cards, tutor prompts, summaries as their modes land — in one shape
+// with a stable lifecycle. Interview answers DUAL-WRITE here alongside
+// ai_answers (which stays the parity source of truth) until the overlay and
+// reports consume contributions directly.
+export const contributions = sqliteTable(
+  'contributions',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(), // ContributionKind
+    status: text('status').notNull().default('completed'), // ContributionStatus
+    title: text('title'),
+    body: text('body').notNull().default(''),
+    meta: text('meta'), // json (riskWarning, tokens, questionId, …)
+    sourceRefs: text('source_refs'), // json[] — provenance: {type, id} of question/chunks
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => ({ bySession: index('contributions_session_idx').on(t.sessionId) }),
+);
+
 export const settings = sqliteTable('settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
