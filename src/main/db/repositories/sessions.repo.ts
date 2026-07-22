@@ -15,7 +15,8 @@ import type {
 const toSession = (r: typeof schema.sessions.$inferSelect): Session => ({
   id: r.id,
   profileId: r.profileId,
-  jobId: r.jobId,
+  jobId: r.packId, // shared field name kept for IPC compatibility
+  mode: r.mode as Session['mode'],
   kind: r.kind as Session['kind'],
   interviewType: r.interviewType as Session['interviewType'],
   status: r.status as Session['status'],
@@ -53,19 +54,20 @@ export const sessionsRepo = {
       .select({
         id: schema.sessions.id,
         profileId: schema.sessions.profileId,
-        jobId: schema.sessions.jobId,
+        jobId: schema.sessions.packId,
+        mode: schema.sessions.mode,
         kind: schema.sessions.kind,
         interviewType: schema.sessions.interviewType,
         status: schema.sessions.status,
         startedAt: schema.sessions.startedAt,
         endedAt: schema.sessions.endedAt,
         createdAt: schema.sessions.createdAt,
-        jobTitle: schema.jobs.title,
-        jobCompany: schema.jobs.company,
+        jobTitle: schema.contextPacks.title,
+        jobCompany: schema.contextPacks.company,
         profileName: schema.profiles.name,
       })
       .from(schema.sessions)
-      .leftJoin(schema.jobs, eq(schema.jobs.id, schema.sessions.jobId))
+      .leftJoin(schema.contextPacks, eq(schema.contextPacks.id, schema.sessions.packId))
       .leftJoin(schema.profiles, eq(schema.profiles.id, schema.sessions.profileId))
       .orderBy(desc(schema.sessions.createdAt))
       .all();
@@ -92,6 +94,7 @@ export const sessionsRepo = {
       id: r.id,
       profileId: r.profileId,
       jobId: r.jobId,
+      mode: r.mode as Session['mode'],
       kind: r.kind as Session['kind'],
       interviewType: r.interviewType as Session['interviewType'],
       status: r.status as Session['status'],

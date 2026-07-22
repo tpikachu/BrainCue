@@ -1,15 +1,10 @@
 import { z } from 'zod';
 import { IPC } from '@shared/ipc';
 import { handle, zId } from './helpers';
+import { zInterviewType } from './schemas';
 import { profilesRepo } from '../db/repositories/profiles.repo';
 
-const interviewType = z.enum([
-  'behavioral',
-  'technical',
-  'coding',
-  'system_design',
-  'general',
-]);
+const interviewType = zInterviewType;
 const profileInput = z.object({
   name: z.string().min(1),
   targetRole: z.string().default(''),

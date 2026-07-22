@@ -48,7 +48,7 @@ export const sqliteVectorStore: VectorStore = {
     const rows = db()
       .select({
         id: schema.chunks.id,
-        jobId: schema.chunks.jobId,
+        jobId: schema.chunks.packId,
         sourceType: schema.chunks.sourceType,
         content: schema.chunks.content,
         vector: schema.embeddings.vector,

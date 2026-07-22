@@ -2,18 +2,13 @@ import { z } from 'zod';
 import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc';
 import { handle, zId } from './helpers';
+import { zAnswerFormat, zInterviewType } from './schemas';
 import { sessionManager } from '../services/session/sessionManager';
 import { sessionsRepo } from '../db/repositories/sessions.repo';
 import { generateReport } from '../services/session/report';
 
-const interviewType = z.enum([
-  'behavioral',
-  'technical',
-  'coding',
-  'system_design',
-  'general',
-]);
-const answerFormat = z.enum(['key_points', 'explanation', 'detailed', 'story_teller']);
+const interviewType = zInterviewType;
+const answerFormat = zAnswerFormat;
 
 export function registerSessionIpc(): void {
   handle(

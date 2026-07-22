@@ -1,12 +1,11 @@
 import { z } from 'zod';
 import { IPC } from '@shared/ipc';
 import { handle } from './helpers';
+import { zInterviewType, zTtsVoice } from './schemas';
 import { sparringManager } from '../services/mock/sparringManager';
 
-const voice = z.enum(['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']).default('alloy');
-const interviewType = z
-  .enum(['behavioral', 'technical', 'coding', 'system_design', 'general'])
-  .default('general');
+const voice = zTtsVoice.default('alloy');
+const interviewType = zInterviewType.default('general');
 
 export function registerSparringIpc(): void {
   handle(

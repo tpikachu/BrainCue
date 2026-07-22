@@ -57,6 +57,13 @@
       "when": 1784063297162,
       "tag": "0007_jittery_jack_power",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1784689664825,
+      "tag": "0008_flaky_venom",
+      "breakpoints": true
     }
   ]
 }

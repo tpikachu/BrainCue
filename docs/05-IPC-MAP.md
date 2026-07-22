@@ -1,5 +1,13 @@
 # IPC Event Map
 
+> **v2 (migration 0008):** every `Session` returned over IPC now carries an
+> additive `mode` field (`interview|practice|…` — SessionMode); the `jobId`
+> field name is kept for compatibility and refers to a context-pack id. The
+> interviewType/answerFormat/voice zod enums are single-sourced in
+> `src/main/ipc/schemas.ts` (they were previously duplicated inline in four
+> `.ipc.ts` files — note `answerFormat` includes `story_teller`, which an older
+> revision of this doc omitted). Channel names are unchanged.
+
 Two directions:
 - **invoke/handle** — renderer → main request/response (`ipcRenderer.invoke` ↔
   `ipcMain.handle`). Used for all CRUD and commands. Returns a `Result<T>`.

@@ -21,11 +21,89 @@ export type InterviewType =
 export type AnswerFormat = 'key_points' | 'explanation' | 'detailed' | 'story_teller';
 
 export type DocumentKind = 'resume' | 'jd' | 'note' | 'other';
-/** `tailored` = an application's tailored resume, indexed job-scoped; when a job has
- *  tailored chunks, retrieval drops the base `resume` chunks for that job's sessions. */
+/** `tailored` = an application's tailored resume, indexed pack-scoped; when a pack
+ *  has tailored chunks, retrieval drops the base `resume` chunks for its sessions. */
 export type ChunkSource = 'resume' | 'jd' | 'note' | 'company' | 'story' | 'tailored';
 export type SessionStatus = 'idle' | 'live' | 'stopped';
-export type Speaker = 'interviewer' | 'candidate' | 'unknown';
+
+// ---- v2 domain vocabulary (see docs/12-ENGINE-PLAN.md) ----
+
+/** The mode a session runs in. v1 rows are backfilled by migration 0008
+ *  (kind live→interview, mock/sparring→practice); the other modes arrive with
+ *  the engine phases. */
+export type SessionMode =
+  | 'interview'
+  | 'practice'
+  | 'interviewer_assist'
+  | 'meeting'
+  | 'tutor'
+  | 'companion';
+
+/** What a Context Pack ("Space" in the UI) is about. v1 jobs are packs of
+ *  kind 'job'; other kinds arrive with their modes. */
+export type ContextPackKind =
+  | 'job'
+  | 'subject'
+  | 'project'
+  | 'meeting'
+  | 'personal'
+  | 'game'
+  | 'custom';
+
+/** Every engine output is a Contribution of one of these kinds (the overlay
+ *  renders each kind as its own card type from the contribution-cards PR on). */
+export type ContributionKind =
+  | 'answer'
+  | 'code'
+  | 'context'
+  | 'action_item'
+  | 'open_question'
+  | 'suggested_question'
+  | 'coverage'
+  | 'warning'
+  | 'tutor_prompt'
+  | 'memory_suggestion'
+  | 'summary';
+
+/** Stable lifecycle every Contribution moves through. */
+export type ContributionStatus =
+  | 'planned'
+  | 'streaming'
+  | 'completed'
+  | 'dismissed'
+  | 'accepted'
+  | 'corrected'
+  | 'failed';
+
+/** Generic engine output (v2 domain model). Persistence lands with the engine
+ *  extraction; this PR establishes the shared shape. */
+export interface Contribution {
+  id: string;
+  sessionId: string;
+  kind: ContributionKind;
+  status: ContributionStatus;
+  title: string | null;
+  body: string;
+  meta: Record<string, unknown> | null;
+  /** Provenance: transcript turn / chunk / memory ids this contribution drew on. */
+  sourceRefs: { type: string; id: string }[] | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** v2 speaker vocabulary. The legacy literals stay in the union so v1 rows and
+ *  the current write path keep typechecking unchanged; `normalizeSpeaker` maps
+ *  them (the engine adopts the new vocabulary in the extraction PR — no rows
+ *  are rewritten). */
+export type LegacySpeaker = 'interviewer' | 'candidate';
+export type Speaker = 'you' | 'them' | 'agent' | 'unknown' | LegacySpeaker;
+
+export function normalizeSpeaker(s: string): 'you' | 'them' | 'agent' | 'unknown' {
+  if (s === 'candidate' || s === 'you') return 'you';
+  if (s === 'interviewer' || s === 'them') return 'them';
+  if (s === 'agent') return 'agent';
+  return 'unknown';
+}
 
 export type QuestionType =
   | 'behavioral'
@@ -171,9 +249,13 @@ export interface Note {
   createdAt: number;
 }
 
-export interface Job {
+/** A Context Pack ("Space" in the UI): the document bundle a session grounds
+ *  in. v1's Job generalized — a pack of kind 'job' carries the JD/company
+ *  fields exactly as before; other kinds arrive with their modes. */
+export interface ContextPack {
   id: string;
   profileId: string;
+  kind: ContextPackKind;
   title: string;
   company: string | null;
   jdUrl: string | null;
@@ -186,6 +268,9 @@ export interface Job {
   createdAt: number;
   updatedAt: number;
 }
+
+/** @deprecated v1 name for a ContextPack (kind 'job'). */
+export type Job = ContextPack;
 
 /** One application question + its grounded answer (Tailor Resume flow). */
 export interface ApplicationAnswer {
@@ -235,7 +320,9 @@ export type SessionKind = 'live' | 'mock' | 'sparring';
 export interface Session {
   id: string;
   profileId: string;
-  jobId: string | null;
+  jobId: string | null; // context-pack id (field name kept for IPC compatibility)
+  mode: SessionMode;
+  /** @deprecated superseded by `mode`; kept for v1 compatibility. */
   kind: SessionKind;
   interviewType: InterviewType;
   status: SessionStatus;

@@ -42,7 +42,7 @@ export async function reindexProfile(
     .where(
       and(
         eq(schema.chunks.profileId, profileId),
-        isNull(schema.chunks.jobId),
+        isNull(schema.chunks.packId),
         ne(schema.chunks.sourceType, 'story'),
       ),
     )
@@ -65,7 +65,7 @@ export async function reindexProfile(
         .values({
           id,
           profileId,
-          jobId: null,
+          packId: null,
           sourceType: src.type,
           ord: c.ord,
           content: c.content,
@@ -86,7 +86,7 @@ export async function indexJob(jobId: string): Promise<{ chunks: number; embedde
 
   // Always clear this job's chunks first (embeddings cascade), so removing a JD or
   // company research cleans up even with no key.
-  db().delete(schema.chunks).where(eq(schema.chunks.jobId, jobId)).run();
+  db().delete(schema.chunks).where(eq(schema.chunks.packId, jobId)).run();
   if (!apiKeyStore.isPresent()) return { chunks: 0, embedded: 0 };
 
   const sources: { type: 'jd' | 'company' | 'tailored'; text: string }[] = [];
@@ -109,7 +109,7 @@ export async function indexJob(jobId: string): Promise<{ chunks: number; embedde
         .values({
           id,
           profileId: job.profileId,
-          jobId,
+          packId: jobId,
           sourceType: src.type,
           ord: c.ord,
           content: c.content,
@@ -146,7 +146,7 @@ function storyChunkValues(profileId: string, ord: number, content: string) {
   return {
     id: crypto.randomUUID(),
     profileId,
-    jobId: null as string | null,
+    packId: null as string | null,
     sourceType: 'story' as const,
     ord,
     content,

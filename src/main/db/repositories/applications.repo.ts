@@ -9,7 +9,7 @@ function toApplication(r: Row): Application {
   return {
     id: r.id,
     profileId: r.profileId,
-    jobId: r.jobId,
+    jobId: r.packId, // shared field name kept for IPC compatibility
     name: r.name,
     jobTitle: r.jobTitle,
     company: r.company,
@@ -27,13 +27,13 @@ export const applicationsRepo = {
     return r ? toApplication(r) : null;
   },
 
-  /** The application that owns a job (if any) — used by indexJob to pick up the
-   *  tailored resume as `tailored` chunks, and by jobs list filtering. */
-  getByJobId(jobId: string): Application | null {
+  /** The application that owns a pack (if any) — used by indexJob to pick up the
+   *  tailored resume as `tailored` chunks, and by pack list filtering. */
+  getByJobId(packId: string): Application | null {
     const r = db()
       .select()
       .from(schema.applications)
-      .where(eq(schema.applications.jobId, jobId))
+      .where(eq(schema.applications.packId, packId))
       .get();
     return r ? toApplication(r) : null;
   },
@@ -54,7 +54,7 @@ export const applicationsRepo = {
       .values({
         id,
         profileId: input.profileId,
-        jobId: input.jobId,
+        packId: input.jobId,
         name: input.name,
         jobTitle: input.jobTitle,
         company: input.company,

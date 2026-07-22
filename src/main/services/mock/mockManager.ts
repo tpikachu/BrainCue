@@ -36,7 +36,8 @@ function toSession(r: typeof schema.sessions.$inferSelect): Session {
   return {
     id: r.id,
     profileId: r.profileId,
-    jobId: r.jobId,
+    jobId: r.packId, // shared field name kept for IPC compatibility
+    mode: r.mode as Session['mode'],
     kind: r.kind as Session['kind'],
     interviewType: r.interviewType as Session['interviewType'],
     status: r.status as Session['status'],
@@ -83,7 +84,7 @@ export const mockManager = {
     const id = crypto.randomUUID();
     db()
       .insert(schema.sessions)
-      .values({ id, profileId, jobId, kind: 'mock', interviewType, status: 'live', startedAt: Date.now() })
+      .values({ id, profileId, packId: jobId, mode: 'practice', kind: 'mock', interviewType, status: 'live', startedAt: Date.now() })
       .run();
     sessionManager.goLive({
       sessionId: id,

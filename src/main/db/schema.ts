@@ -9,7 +9,6 @@ export const profiles = sqliteTable('profiles', {
   targetRole: text('target_role').notNull().default(''),
   targetCompany: text('target_company'),
   interviewType: text('interview_type').notNull().default('general'),
-  answerStyle: text('answer_style').notNull().default('concise'),
   language: text('language').notNull().default('en'),
   resumeText: text('resume_text'),
   jdText: text('jd_text'),
@@ -49,15 +48,20 @@ export const notes = sqliteTable(
   (t) => ({ byProfile: index('notes_profile_idx').on(t.profileId) }),
 );
 
-// A profile (the candidate/resume) can target multiple jobs; each job holds its
-// own job description + parsed JSON and is added/parsed independently.
-export const jobs = sqliteTable(
+// A Context Pack ("Space" in the UI) — the bundle of documents a session is
+// grounded in. v1's "jobs" generalized: a pack of kind 'job' is exactly the old
+// job (JD + company research); other kinds arrive with their modes (tutor's
+// 'subject', meeting packs, …). PHYSICAL table/column names stay 'jobs'/'job_id'
+// — the rename is logical (TS + APIs) so no table rebuild is needed; see
+// docs/12-ENGINE-PLAN.md.
+export const contextPacks = sqliteTable(
   'jobs',
   {
     id: text('id').primaryKey(),
     profileId: text('profile_id')
       .notNull()
       .references(() => profiles.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull().default('job'), // ContextPackKind
     title: text('title').notNull().default(''),
     company: text('company'),
     jdUrl: text('jd_url'), // optional link to the original posting (reference only)
@@ -72,6 +76,9 @@ export const jobs = sqliteTable(
   },
   (t) => ({ byProfile: index('jobs_profile_idx').on(t.profileId) }),
 );
+
+/** @deprecated v1 name — use {@link contextPacks}. */
+export const jobs = contextPacks;
 
 // Reusable STAR stories extracted from the candidate's résumé, tagged by
 // competency + demonstrated skills. Profile-level (reused across all interviews);
@@ -106,9 +113,9 @@ export const applications = sqliteTable(
     profileId: text('profile_id')
       .notNull()
       .references(() => profiles.id, { onDelete: 'cascade' }),
-    jobId: text('job_id')
+    packId: text('job_id')
       .notNull()
-      .references(() => jobs.id, { onDelete: 'cascade' }),
+      .references(() => contextPacks.id, { onDelete: 'cascade' }),
     name: text('name').notNull().default(''), // candidate/application name
     jobTitle: text('job_title').notNull().default(''), // extracted from the JD
     company: text('company'), // extracted from the JD
@@ -131,9 +138,9 @@ export const chunks = sqliteTable(
     profileId: text('profile_id')
       .notNull()
       .references(() => profiles.id, { onDelete: 'cascade' }),
-    // Resume/notes/story chunks have jobId null; JD/company/tailored chunks belong
-    // to a specific job.
-    jobId: text('job_id').references(() => jobs.id, { onDelete: 'cascade' }),
+    // Resume/notes/story chunks have packId null; JD/company/tailored chunks
+    // belong to a specific context pack (physical column name is legacy 'job_id').
+    packId: text('job_id').references(() => contextPacks.id, { onDelete: 'cascade' }),
     sourceType: text('source_type').notNull(), // resume | jd | note | company | story | tailored
     sourceId: text('source_id'),
     ord: integer('ord').notNull().default(0),
@@ -167,10 +174,14 @@ export const sessions = sqliteTable(
     profileId: text('profile_id')
       .notNull()
       .references(() => profiles.id, { onDelete: 'cascade' }),
-    jobId: text('job_id').references(() => jobs.id, { onDelete: 'set null' }),
+    packId: text('job_id').references(() => contextPacks.id, { onDelete: 'set null' }),
+    // The MODE this session ran in (v2): interview | practice | … (SessionMode).
+    // Migration 0008 backfills live→interview, mock/sparring→practice.
+    mode: text('mode').notNull().default('interview'),
     // What produced this session: a real interview ('live'), a mock rehearsal
     // ('mock' — deleted at stop, only ever transient), or a Sparring practice
     // drill ('sparring' — persisted so coaching scores accumulate in Reports).
+    // @deprecated superseded by `mode`; kept for v1 compatibility.
     kind: text('kind').notNull().default('live'),
     interviewType: text('interview_type').notNull().default('general'),
     status: text('status').notNull().default('idle'),

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from 'fs';
 import Database from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -27,6 +27,53 @@ function migrationCandidates(): string[] {
   ];
 }
 
+/**
+ * Snapshot the DB file before applying PENDING migrations. The migration
+ * runner has no down path and a failed `migrate()` is logged-not-fatal, so
+ * this rolling backup (`app.db.pre-migrate.bak`) is the rollback story: a bad
+ * migration is recovered by replacing the DB file with the backup. `VACUUM
+ * INTO` writes a compact, consistent copy even mid-WAL. Best-effort — a backup
+ * failure must never block startup.
+ */
+function backupBeforeMigrate(sqlite: Database.Database, migrationsFolder: string): void {
+  try {
+    const journal = JSON.parse(
+      readFileSync(join(migrationsFolder, 'meta', '_journal.json'), 'utf8'),
+    ) as { entries: unknown[] };
+    const hasBookkeeping =
+      (
+        sqlite
+          .prepare(
+            "SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = '__drizzle_migrations'",
+          )
+          .get() as { n: number }
+      ).n > 0;
+    let applied = 0;
+    if (hasBookkeeping) {
+      applied = (
+        sqlite.prepare('SELECT count(*) AS n FROM "__drizzle_migrations"').get() as { n: number }
+      ).n;
+    } else {
+      const userTables = (
+        sqlite
+          .prepare(
+            "SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+          )
+          .get() as { n: number }
+      ).n;
+      if (userTables === 0) return; // brand-new DB — nothing to protect
+    }
+    if (journal.entries.length <= applied) return; // nothing pending
+
+    const dest = `${paths.db()}.pre-migrate.bak`;
+    if (existsSync(dest)) unlinkSync(dest);
+    sqlite.prepare('VACUUM INTO ?').run(dest);
+    log.info(`db: ${journal.entries.length - applied} migration(s) pending — backup written to ${dest}`);
+  } catch (e) {
+    log.warn('db: pre-migration backup failed (continuing)', e);
+  }
+}
+
 export function initDb(): BetterSQLite3Database<typeof schema> {
   if (_db) return _db;
 
@@ -51,6 +98,7 @@ export function initDb(): BetterSQLite3Database<typeof schema> {
     // which leaves the DB without tables. Better to fail visibly than silently.
     log.error('db: migrations folder not found — tables will be missing. Looked in:', candidates);
   } else {
+    backupBeforeMigrate(sqlite, migrationsFolder);
     try {
       migrate(_db, { migrationsFolder });
       log.info(`db: migrations applied from ${migrationsFolder}`);

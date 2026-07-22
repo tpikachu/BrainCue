@@ -198,7 +198,8 @@ export const sparringManager = {
       .values({
         id,
         profileId,
-        jobId,
+        packId: jobId,
+        mode: 'practice',
         kind: 'sparring',
         interviewType,
         status: 'live',

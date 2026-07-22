@@ -51,7 +51,7 @@ answer/coding/vision and becomes the provider-neutral `ChatEvent`.
 
 | Mig | Contents | Risk |
 | --- | --- | --- |
-| 0008 | `jobs`→`context_packs` (+`kind`), `job_id`→`pack_id` renames, `sessions.mode` + backfill (live→interview, mock/sparring→practice; `kind` kept deprecated), drop dead `profiles.answer_style`; update `fkRebuild.ts` DDL literals (rebuild also permanently fixes the 0001 FK-action bug) | **High** — transaction + `foreign_key_check` + committed fixture-DB test |
+| 0008 ✅ | **Rename went LOGICAL, not physical** (shipped 2026-07-21): TS/table objects are `contextPacks`/`packId` but physical names stay `jobs`/`job_id` — drizzle maps them, so no table rebuild, no FK re-pointing, no `fkRebuild.ts` changes, and `db:generate` stayed non-interactive. Shipped as three ALTERs (+`jobs.kind` default 'job', +`sessions.mode` default 'interview', −`profiles.answer_style`) + a mode backfill UPDATE (live→interview, mock/sparring→practice) | Was **High** under the physical plan; **Low** as shipped — plus fixture-DB test + backup-before-migrate |
 | 0009 | `contributions` table; interview answers dual-write (`ai_answers` stays source of truth) | Low |
 | 0010 | `embeddings.provider` (default `'openai'`; model+dim already stored); mismatch → explicit re-index requirement | Low |
 

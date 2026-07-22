@@ -5,6 +5,19 @@ epoch millis (integer). JSON columns store stringified JSON. Embeddings are
 stored as `BLOB` (Float32Array bytes) for compactness; the retriever decodes
 them for cosine search.
 
+> **v2 naming (migration 0008):** the domain calls them **Context Packs**
+> ("Spaces" in the UI) — the PHYSICAL table/column names remain `jobs`/`job_id`
+> (a logical rename avoids table rebuilds; see `docs/12-ENGINE-PLAN.md`). In
+> Drizzle the table is `schema.contextPacks` and the columns are `kind`,
+> `packId`, etc. This doc lists physical names with the TS name alongside where
+> they differ.
+
+Before applying **pending** migrations, `initDb` snapshots the DB
+(`app.db.pre-migrate.bak`, via `VACUUM INTO`) — the rollback path, since the
+migration runner has no down-migrations. Migration 0008 is covered by a
+lossless-migration test against a committed v1.5.x fixture
+(`src/main/db/migration.test.ts` + `src/main/test/fixtures/pre-v2.db`).
+
 ## ER overview
 
 ```
@@ -12,19 +25,20 @@ profiles 1───* documents 1───* chunks ──* embeddings
    │                                   (1:1 chunk:embedding)
    ├──* notes
    ├──* stories                      (STAR stories; also indexed as `story` chunks, job_id null)
-   ├──* applications ──1 jobs        (Tailor Resume: each application owns a dedicated, hidden job; its tailored resume = that job's `tailored` chunks)
-   ├──* jobs ────* chunks            (JD + company-research + tailored chunks carry job_id; resume/note/story chunks have job_id null)
-   │       └──── sessions            (a session optionally references the job it's for)
+   ├──* applications ──1 jobs        (Tailor Resume: each application owns a dedicated, hidden pack; its tailored resume = that pack's `tailored` chunks)
+   ├──* jobs (context packs) ──* chunks   (JD + company-research + tailored chunks carry job_id; resume/note/story chunks have job_id null)
+   │       └──── sessions            (a session optionally references the pack it's for)
    └──* sessions 1──* transcript_chunks
                  1──* detected_questions 1──* ai_answers
+                 1──* answer_feedback     (Sparring per-answer coaching)
                  1──1 session_reports
 
 settings (singleton-ish key/value, incl. encrypted API key)
 ```
 
-A **profile** is just the candidate (name, role, resume). Each **job** the
-candidate targets is a separate row holding its own job description; one profile
-can have many jobs, and each job is parsed/indexed independently.
+A **profile** is the user (name, role, resume). Each **context pack** bundles
+what a session is about — every v1 pack is `kind='job'` (its own JD + company
+research); other kinds (`subject`, `project`, …) arrive with their modes.
 
 ## Tables
 
@@ -35,22 +49,22 @@ can have many jobs, and each job is parsed/indexed independently.
 | name | text | |
 | target_role | text | |
 | target_company | text | nullable |
-| interview_type | text | enum: behavioral/technical/coding/system_design/product/sales/general |
-| answer_style | text | enum: concise/detailed/star/technical/conversational |
+| interview_type | text | enum: behavioral/technical/coding/system_design/general (legacy default; type is chosen per run) |
 | language | text | default 'en' |
 | resume_text | text | extracted raw text (nullable) |
-| jd_text | text | extracted raw text (nullable) |
+| jd_text / parsed_jd | text / text(json) | **legacy** — single-JD fields kept for back-compat; JDs live on packs |
 | parsed_resume | text(json) | structured candidate JSON |
-| jd_text / parsed_jd | text / text(json) | **legacy** — single-JD fields kept for back-compat; new JDs live on `jobs` |
 | created_at / updated_at | int | |
 
-### `jobs`
-A job the candidate is targeting. One profile → many jobs; each holds its own
-job description and is parsed/indexed independently.
+`answer_style` was dead (never read or written) and was dropped in 0008.
+
+### `jobs` — TS: `contextPacks`
+A Context Pack. One profile → many packs; each parsed/indexed independently.
 | col | type | notes |
 |---|---|---|
 | id | text PK | uuid |
 | profile_id | text FK | cascade on profile delete |
+| kind | text | ContextPackKind: job/subject/project/meeting/personal/game/custom — all v1 rows are 'job' (0008 default) |
 | title | text | role/interview name, default '' |
 | company | text | nullable |
 | jd_url | text | nullable — optional link to the original posting (reference only; not parsed) |
@@ -58,7 +72,8 @@ job description and is parsed/indexed independently.
 | parsed_jd | text(json) | structured JD JSON |
 | company_url | text | nullable — optional company website to research |
 | company_research | text | nullable — readable text scraped from the company site (parsed + embedded as `company` chunks) |
-| parsed_company | text(json) | nullable — structured interview-relevant research (overview, products, values, culture, …) |
+| parsed_company | text(json) | nullable — structured interview-relevant research |
+| notes | text | nullable — free-form client notes (shown in setup + Cue Card) |
 | created_at / updated_at | int | |
 
 ### `documents`
@@ -71,9 +86,9 @@ Freeform additional notes attached to a profile.
 
 ### `applications`
 A Tailor Resume application: the ATS-friendly resume tailored from a base resume × JD,
-plus grounded answers to the application questions. Owns a dedicated jobs row (hidden
+plus grounded answers to the application questions. Owns a dedicated pack (hidden
 from the Interviews UI) whose `tailored` chunks ground that application's interviews.
-| id | profile_id FK (cascade) | job_id FK (cascade) | name | job_title | company | base_resume | tailored_resume | answers (json[]) | created_at | updated_at |
+| id | profile_id FK (cascade) | job_id FK (cascade) — TS: `packId` | name | job_title | company | base_resume | tailored_resume | answers (json[]) | created_at | updated_at |
 
 ### `stories`
 Reusable STAR stories extracted from the résumé, tagged by competency + skills.
@@ -83,30 +98,56 @@ they can ground live answers.
 
 ### `chunks`
 Chunked text from documents/notes/profile fields/stories/tailored resumes for RAG.
-| id | profile_id FK | job_id FK (nullable) | source_type (resume/jd/note/company/story/tailored) | source_id | ord | content | token_count | created_at |
+| id | profile_id FK | job_id FK (nullable) — TS: `packId` | source_type (resume/jd/note/company/story/tailored) | source_id | ord | content | token_count | created_at |
 
-`job_id` is set on JD, company-research, **and** `tailored` chunks (all cascade on job
-delete); resume/note/story chunks have `job_id` null. `story` chunks are managed
+`job_id` is set on JD, company-research, **and** `tailored` chunks (all cascade on
+pack delete); resume/note/story chunks have `job_id` null. `story` chunks are managed
 by `indexStories` (one chunk per story) and are deliberately **excluded** from the
 résumé/notes re-index, so re-saving a résumé doesn't wipe the curated story bank.
 `tailored` chunks (an application's tailored resume, indexed by `indexJob`) REPLACE the
-base `resume` chunks in retrieval whenever the selected job has them — that's how
+base `resume` chunks in retrieval whenever the selected pack has them — that's how
 "Start interview" on an application grounds in the tailored resume instead of the base.
 
 ### `embeddings`
 | id | chunk_id FK (unique) | model | dim | vector BLOB | created_at |
 
+`model` + `dim` already identify the embedding space; the provider column joins
+them in the provider-seam phase (mixing spaces is refused — a switch requires a
+re-index).
+
 ### `sessions`
-| id | profile_id FK | job_id FK (nullable, on delete set null) | interview_type | status (idle/live/stopped) | started_at | ended_at | created_at |
+| col | type | notes |
+|---|---|---|
+| id | text PK | |
+| profile_id | text FK | cascade |
+| job_id | text FK | nullable, on delete set null — TS: `packId` |
+| mode | text | **SessionMode** (0008): interview/practice/interviewer_assist/meeting/tutor/companion. Backfilled live→interview, mock/sparring→practice |
+| kind | text | **deprecated** v1 discriminator: live/mock/sparring (kept for compatibility) |
+| interview_type | text | behavioral/technical/coding/system_design/general |
+| status | text | idle/live/stopped |
+| started_at / ended_at / created_at | int | |
 
 ### `transcript_chunks`
-| id | session_id FK | speaker (interviewer/candidate/unknown) | text | is_final (int bool) | t_start | t_end | created_at |
+| id | session_id FK | speaker | text | is_final (int bool) | t_start | t_end | created_at |
+
+`speaker` rows are legacy `interviewer`/`candidate`/`unknown` on disk; the v2
+vocabulary is `you`/`them`/`agent`/`unknown` and old values are mapped at read
+via `normalizeSpeaker()` (`@shared/types`) — no rows are rewritten.
 
 ### `detected_questions`
-| id | session_id FK | text | type | confidence (real) | strategy | transcript_chunk_id FK | created_at |
+| id | session_id FK | text | type | confidence (real) | strategy | transcript_chunk_id (plain text column — **no FK constraint**) | created_at |
 
 ### `ai_answers`
-| id | question_id FK | direct_answer | talking_points (json[]) | resume_match (json) | star (json, nullable) | clarifying_question | risk_warning | followup_question | model | tokens (json) | created_at |
+| id | question_id FK | direct_answer | risk_warning | followup_question | model | tokens (json) | created_at |
+
+(The v0 expanded-meta columns — talking_points/resume_match/star/
+clarifying_question — were dropped in migration 0007.)
+
+### `answer_feedback`
+Per-answer coaching from a Sparring drill (the Practice Loop): one row per
+answered question, written as it happens so practice compounds into Reports
+trends; the drill's report is assembled from these at end().
+| id | session_id FK (cascade) | question_id FK (cascade) | answer_transcript | rating (1–5) | verdict | strengths (json[]) | improvements (json[]) | tip | competency (StoryCompetency, nullable) | created_at |
 
 ### `session_reports`
 | id | session_id FK (unique) | summary | strengths (json) | improvements (json) | per_question (json) | created_at |
@@ -115,21 +156,30 @@ base `resume` chunks in retrieval whenever the selected job has them — that's 
 Key/value singleton store.
 | key TEXT PK | value TEXT |
 
-Known keys:
+Known keys (see `SETTINGS_KEYS` in `settings.repo.ts`):
 - `openai_api_key_enc` — safeStorage ciphertext (base64). **Never** returned raw.
 - `openai_api_key_present` — `'1'`/`'0'` flag the renderer may read.
-- `models` — json overrides for model ids.
+- `models` — json per-task model-id overrides.
+- `model_preset` — active cost/quality preset (balanced/low_cost/best).
+- `reasoning_efforts` — json per-task reasoning-effort overrides.
 - `overlay_prefs` — json `{opacity, fontSize, mode}`.
+- `overlay_bounds` — json persisted Cue Card position/size.
+- `audio_prefs` — json `{source, micDeviceId}`.
+- `shortcuts` — json global-shortcut accelerator overrides.
+- `coding_language` — coding-solver output language.
 - `privacy_mode` — `'1'`/`'0'`.
+- `hide_taskbar_icon` — `'1'`/`'0'` (tray-only mode).
 - `data_consent_ack` — `'1'` once user acknowledges the compliance reminder.
 - `tour_done` — `'1'` once the first-run guided tour is completed/skipped.
 
 ## Deletion semantics
-Deleting a profile cascades to its documents, notes, stories, applications, jobs,
+Deleting a profile cascades to its documents, notes, stories, applications, packs,
 chunks, embeddings, sessions, and everything under sessions (FK `on delete cascade`).
-Deleting a job cascades to its JD/company/tailored chunks and nulls `sessions.job_id`
-(the session history is kept). Deleting an application removes its dedicated job the
-same way, then the application row. Original uploaded files in `userData/documents/`
+Deleting a pack cascades to its JD/company/tailored chunks and nulls `sessions.job_id`
+(the session history is kept) — done explicitly in a transaction
+(`contextPacksRepo.delete`) so it works on legacy DBs whose FKs predate the
+cascade actions. Deleting an application removes its dedicated pack the same
+way, then the application row. Original uploaded files in `userData/documents/`
 are removed by the documents service.
 
 ## Indexes
@@ -137,4 +187,5 @@ are removed by the documents service.
   `applications(profile_id)`, `applications(created_at)`,
   `embeddings(chunk_id)`, `transcript_chunks(session_id)`,
   `detected_questions(session_id)`, `ai_answers(question_id)`,
-  `sessions(profile_id)`, `documents(profile_id)`, `notes(profile_id)`.
+  `answer_feedback(session_id)`, `sessions(profile_id)`,
+  `documents(profile_id)`, `notes(profile_id)`.

@@ -58,7 +58,8 @@ function toSession(r: typeof schema.sessions.$inferSelect): Session {
   return {
     id: r.id,
     profileId: r.profileId,
-    jobId: r.jobId,
+    jobId: r.packId, // shared field name kept for IPC compatibility
+    mode: r.mode as Session['mode'],
     kind: r.kind as Session['kind'],
     interviewType: r.interviewType as InterviewType,
     status: r.status as Session['status'],
@@ -165,7 +166,7 @@ export const sessionManager = {
     const id = crypto.randomUUID();
     db()
       .insert(schema.sessions)
-      .values({ id, profileId, jobId, kind: 'live', interviewType, status: 'live', startedAt: Date.now() })
+      .values({ id, profileId, packId: jobId, mode: 'interview', kind: 'live', interviewType, status: 'live', startedAt: Date.now() })
       .run();
     this.goLive({
       sessionId: id,
@@ -195,7 +196,7 @@ export const sessionManager = {
     this.goLive({
       sessionId,
       profileId: row.profileId,
-      jobId: row.jobId,
+      jobId: row.packId,
       interviewType: row.interviewType as InterviewType,
       answerFormat,
       language: profile.language,
@@ -470,7 +471,7 @@ export const sessionManager = {
     try {
       // Retrieval (an embeddings call) is INSIDE the try so a failure here is surfaced
       // + un-wedges the card too — not just streamAnswer failures.
-      const context = await retrieve(profile.id, questionText, 5, session.jobId);
+      const context = await retrieve(profile.id, questionText, 5, session.packId);
       // Transparency: tell the UI exactly what was sent to OpenAI for this question.
       broadcast(EVENTS.contextSent, { questionId, question: questionText, chunks: context });
       for await (const ev of streamAnswer({

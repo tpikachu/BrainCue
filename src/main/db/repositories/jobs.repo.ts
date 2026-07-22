@@ -1,19 +1,23 @@
 import { and, desc, eq, inArray, like, notInArray, or, sql } from 'drizzle-orm';
 import { db, schema } from '../index';
-import type { Job } from '@shared/types';
+import type { ContextPack, ContextPackKind } from '@shared/types';
 
-type Row = typeof schema.jobs.$inferSelect;
+type Row = typeof schema.contextPacks.$inferSelect;
 
-/** Jobs owned by an application (Tailor Resume) are managed from the Applications
+/** Packs owned by an application (Tailor Resume) are managed from the Applications
  *  table — hide them from the regular Interviews list/page so they don't
  *  double-surface (and can't be deleted out from under their application). */
 const notApplicationOwned = () =>
-  notInArray(schema.jobs.id, db().select({ id: schema.applications.jobId }).from(schema.applications));
+  notInArray(
+    schema.contextPacks.id,
+    db().select({ id: schema.applications.packId }).from(schema.applications),
+  );
 
-function toJob(r: Row): Job {
+function toPack(r: Row): ContextPack {
   return {
     id: r.id,
     profileId: r.profileId,
+    kind: r.kind as ContextPackKind,
     title: r.title,
     company: r.company,
     jdUrl: r.jdUrl,
@@ -28,74 +32,83 @@ function toJob(r: Row): Job {
   };
 }
 
-export const jobsRepo = {
-  list(profileId: string): Job[] {
+/** Context Packs ("Spaces" in the UI) — v1's jobs generalized. All v1 rows are
+ *  kind 'job'; the list/page/count views below are the interview-flavored ones
+ *  the current UI uses and therefore filter application-owned packs. */
+export const contextPacksRepo = {
+  list(profileId: string): ContextPack[] {
     return db()
       .select()
-      .from(schema.jobs)
-      .where(and(eq(schema.jobs.profileId, profileId), notApplicationOwned()))
-      .orderBy(desc(schema.jobs.updatedAt))
+      .from(schema.contextPacks)
+      .where(and(eq(schema.contextPacks.profileId, profileId), notApplicationOwned()))
+      .orderBy(desc(schema.contextPacks.updatedAt))
       .all()
-      .map(toJob);
+      .map(toPack);
   },
 
-  get(id: string): Job | null {
-    const r = db().select().from(schema.jobs).where(eq(schema.jobs.id, id)).get();
-    return r ? toJob(r) : null;
+  get(id: string): ContextPack | null {
+    const r = db().select().from(schema.contextPacks).where(eq(schema.contextPacks.id, id)).get();
+    return r ? toPack(r) : null;
   },
 
-  /** Total interviews (jobs) across all profiles — for the sidebar stats. Excludes
-   *  application-owned jobs (those are counted as applications, not interviews). */
+  /** Total interviews (job packs) across all profiles — for the sidebar stats.
+   *  Excludes application-owned packs (counted as applications, not interviews). */
   count(): number {
     return (
       db()
         .select({ c: sql<number>`count(*)` })
-        .from(schema.jobs)
+        .from(schema.contextPacks)
         .where(notApplicationOwned())
         .get()?.c ?? 0
     );
   },
 
-  /** A page of jobs for a profile, newest first, optionally filtered by a search
+  /** A page of packs for a profile, newest first, optionally filtered by a search
    *  over title + company. Server-side LIMIT/OFFSET so the UI never loads them all. */
   page(opts: { profileId: string; query?: string; limit: number; offset: number }): {
-    items: Job[];
+    items: ContextPack[];
     total: number;
   } {
     const q = (opts.query ?? '').trim();
-    const base = and(eq(schema.jobs.profileId, opts.profileId), notApplicationOwned());
+    const base = and(eq(schema.contextPacks.profileId, opts.profileId), notApplicationOwned());
     const where = q
-      ? and(base, or(like(schema.jobs.title, `%${q}%`), like(schema.jobs.company, `%${q}%`)))
+      ? and(
+          base,
+          or(like(schema.contextPacks.title, `%${q}%`), like(schema.contextPacks.company, `%${q}%`)),
+        )
       : base;
     const items = db()
       .select()
-      .from(schema.jobs)
+      .from(schema.contextPacks)
       .where(where)
-      .orderBy(desc(schema.jobs.updatedAt))
+      .orderBy(desc(schema.contextPacks.updatedAt))
       .limit(opts.limit)
       .offset(opts.offset)
       .all()
-      .map(toJob);
+      .map(toPack);
     const total =
-      db().select({ c: sql<number>`count(*)` }).from(schema.jobs).where(where).get()?.c ?? 0;
+      db().select({ c: sql<number>`count(*)` }).from(schema.contextPacks).where(where).get()?.c ??
+      0;
     return { items, total };
   },
 
   create(input: {
     profileId: string;
+    kind?: ContextPackKind;
     title: string;
     company: string | null;
     jdUrl: string | null;
     jdText: string | null;
     companyUrl: string | null;
     notes: string | null;
-  }): Job {
+  }): ContextPack {
     const id = crypto.randomUUID();
     db()
-      .insert(schema.jobs)
+      .insert(schema.contextPacks)
       .values({
         id,
         profileId: input.profileId,
+        kind: input.kind ?? 'job',
         title: input.title,
         company: input.company,
         jdUrl: input.jdUrl,
@@ -107,7 +120,7 @@ export const jobsRepo = {
     return this.get(id)!;
   },
 
-  update(id: string, patch: Partial<Job>): Job {
+  update(id: string, patch: Partial<ContextPack>): ContextPack {
     const set: Record<string, unknown> = { updatedAt: Date.now() };
     if (patch.title !== undefined) set.title = patch.title;
     if (patch.company !== undefined) set.company = patch.company;
@@ -120,29 +133,32 @@ export const jobsRepo = {
     if (patch.companyResearch !== undefined) set.companyResearch = patch.companyResearch;
     if (patch.parsedCompany !== undefined)
       set.parsedCompany = patch.parsedCompany ? JSON.stringify(patch.parsedCompany) : null;
-    db().update(schema.jobs).set(set).where(eq(schema.jobs.id, id)).run();
+    db().update(schema.contextPacks).set(set).where(eq(schema.contextPacks.id, id)).run();
     return this.get(id)!;
   },
 
   delete(id: string): void {
     // Delete dependents explicitly (and detach sessions) in a transaction. Older
-    // DBs were created before the jobs FKs gained ON DELETE cascade/set-null, and
+    // DBs were created before the pack FKs gained ON DELETE cascade/set-null, and
     // SQLite fixes FK actions at table-creation time — so a plain delete trips a
-    // FOREIGN KEY constraint when the job has JD/company chunks. Doing it by hand
+    // FOREIGN KEY constraint when the pack has JD/company chunks. Doing it by hand
     // works regardless of the live schema's FK actions.
     db().transaction((tx) => {
       const chunkIds = tx
         .select({ id: schema.chunks.id })
         .from(schema.chunks)
-        .where(eq(schema.chunks.jobId, id))
+        .where(eq(schema.chunks.packId, id))
         .all()
         .map((r) => r.id);
       if (chunkIds.length) {
         tx.delete(schema.embeddings).where(inArray(schema.embeddings.chunkId, chunkIds)).run();
       }
-      tx.delete(schema.chunks).where(eq(schema.chunks.jobId, id)).run();
-      tx.update(schema.sessions).set({ jobId: null }).where(eq(schema.sessions.jobId, id)).run();
-      tx.delete(schema.jobs).where(eq(schema.jobs.id, id)).run();
+      tx.delete(schema.chunks).where(eq(schema.chunks.packId, id)).run();
+      tx.update(schema.sessions).set({ packId: null }).where(eq(schema.sessions.packId, id)).run();
+      tx.delete(schema.contextPacks).where(eq(schema.contextPacks.id, id)).run();
     });
   },
 };
+
+/** @deprecated v1 name — use {@link contextPacksRepo}. */
+export const jobsRepo = contextPacksRepo;
