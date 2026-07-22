@@ -42,7 +42,7 @@ export default function SessionsPage() {
     const q = query.trim().toLowerCase();
     if (!q) return sessions;
     return sessions.filter((s) =>
-      `${s.jobCompany ?? ''} ${s.jobTitle ?? ''} ${s.profileName ?? ''} ${s.interviewType}`
+      `${s.jobCompany ?? ''} ${s.jobTitle ?? ''} ${s.profileName ?? ''} ${s.interviewType} ${s.mode}`
         .toLowerCase()
         .includes(q),
     );
@@ -55,6 +55,17 @@ export default function SessionsPage() {
     // Meetings have their own structured report (summary/decisions/actions).
     if (s.mode === 'meeting') {
       setMeetingSession(s);
+      return;
+    }
+    // Companion sessions are a card log, not an interview to coach — never
+    // auto-generate the interview coaching report over one.
+    if (s.mode === 'companion') {
+      setOpenSession(s);
+      setReport(null);
+      setLoadingReport(false);
+      setReportError(
+        'Companion sessions keep their cards and summon answers here — they don’t get interview coaching reports.',
+      );
       return;
     }
     setOpenSession(s);
@@ -107,6 +118,8 @@ export default function SessionsPage() {
             <span className="flex items-center gap-1">
               {s.mode === 'meeting' ? (
                 <Badge tone="blue">Meeting</Badge>
+              ) : s.mode === 'companion' ? (
+                <Badge tone="green">Companion</Badge>
               ) : (
                 <Badge>{s.interviewType.replace(/_/g, ' ')}</Badge>
               )}
