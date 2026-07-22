@@ -27,6 +27,7 @@ export const interviewMode: ModeDefinition = {
     return streamAnswer({
       question: input.question,
       contextChunks: input.contextChunks,
+      memories: input.memories,
       profile: input.profile,
       // Answer format + pronunciation are chosen per run (this round) and can
       // be toggled live from the Cue Card.

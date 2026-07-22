@@ -35,6 +35,24 @@ export function DataSentPanel(props: {
               </p>
             ))
           )}
+          {/* Memory is cited separately from documents ([M1]…) and every use
+              is shown here — the provenance-visibility contract. */}
+          {context.memories && context.memories.length > 0 && (
+            <>
+              <p className="pt-1 text-[10px] uppercase tracking-wide text-violet-300/80">
+                Memory used (cited as [M#])
+              </p>
+              {context.memories.map((m, i) => (
+                <p key={m.id}>
+                  <span className="text-violet-300/70">
+                    [M{i + 1} · {m.category} · {m.score.toFixed(2)}]{' '}
+                  </span>
+                  {m.content.slice(0, 140)}
+                  {m.content.length > 140 ? '…' : ''}
+                </p>
+              ))}
+            </>
+          )}
         </div>
       )}
     </div>

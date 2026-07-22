@@ -13,6 +13,7 @@ import {
 import { normalizeOpenAIError } from '../openai/client';
 import { profilesRepo } from '../../db/repositories/profiles.repo';
 import { log } from '../security/logger';
+import { recallMemories } from '../memory/recall';
 import { ground } from './grounding';
 import { enginePersistence as persist } from './persistence/enginePersistence';
 import { summonedPolicy } from './trigger/summonedPolicy';
@@ -273,15 +274,26 @@ export class EngineSession {
     this.answering = true;
     this.answerAbort = abort;
     let context: Awaited<ReturnType<typeof ground>> = [];
+    let memories: Awaited<ReturnType<typeof recallMemories>> = [];
     try {
       // Retrieval (an embeddings call) is INSIDE the try so a failure here is
       // surfaced + un-wedges the card too — not just generate failures.
       context = await ground(profile.id, questionText, session.packId);
-      // Transparency: tell the UI exactly what was sent to the provider.
-      emitContributionContext(questionId, { questionId, question: questionText, chunks: context });
+      // Approved memory joins the grounding (consent-gated; [] when off —
+      // recall never throws). Cited separately from documents as [M1]….
+      memories = await recallMemories(profile.id, questionText, session.packId);
+      // Transparency: tell the UI exactly what was sent to the provider —
+      // memories included, so "data sent" always shows every memory used.
+      emitContributionContext(questionId, {
+        questionId,
+        question: questionText,
+        chunks: context,
+        ...(memories.length ? { memories } : {}),
+      });
       for await (const ev of this.mode.generate({
         question: questionText,
         contextChunks: context,
+        memories,
         profile,
         settings: this.settings,
         signal: abort.signal,
@@ -339,6 +351,8 @@ export class EngineSession {
       sourceRefs: [
         { type: 'question', id: questionId },
         ...context.map((c) => ({ type: 'chunk', id: c.id })),
+        // Provenance: every memory that grounded this answer stays traceable.
+        ...memories.map((m) => ({ type: 'memory', id: m.id })),
       ],
     });
 

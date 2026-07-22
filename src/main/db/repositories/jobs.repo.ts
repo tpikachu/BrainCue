@@ -27,6 +27,7 @@ function toPack(r: Row): ContextPack {
     companyResearch: r.companyResearch,
     parsedCompany: r.parsedCompany ? JSON.parse(r.parsedCompany) : null,
     notes: r.notes,
+    memoryEnabled: r.memoryEnabled === 1,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
@@ -49,6 +50,15 @@ export const contextPacksRepo = {
   get(id: string): ContextPack | null {
     const r = db().select().from(schema.contextPacks).where(eq(schema.contextPacks.id, id)).get();
     return r ? toPack(r) : null;
+  },
+
+  /** Per-Space memory opt-out (Library › Memory). */
+  setMemoryEnabled(id: string, enabled: boolean): void {
+    db()
+      .update(schema.contextPacks)
+      .set({ memoryEnabled: enabled ? 1 : 0, updatedAt: Date.now() })
+      .where(eq(schema.contextPacks.id, id))
+      .run();
   },
 
   /** Total interviews (job packs) across all profiles — for the sidebar stats.

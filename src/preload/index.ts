@@ -12,6 +12,7 @@ import type {
   ContributionResetEvent,
   InterviewBrief,
   MeetingReport,
+  MemoryItem,
   Presence,
   SparringFeedback,
   Story,
@@ -227,6 +228,29 @@ const api = {
         status?: string;
       },
     ) => invoke<Contribution>(IPC.contributions.update, { id, ...patch }),
+  },
+  memory: {
+    list: (profileId: string, opts: { status?: string; query?: string } = {}) =>
+      invoke<MemoryItem[]>(IPC.memory.list, { profileId, ...opts }),
+    review: (
+      id: string,
+      action: 'approve' | 'reject',
+      edits: { content?: string; category?: string; packId?: string | null } = {},
+    ) => invoke<MemoryItem>(IPC.memory.review, { id, action, ...edits }),
+    update: (
+      id: string,
+      patch: {
+        content?: string;
+        category?: string;
+        importance?: number;
+        packId?: string | null;
+        expiresAt?: number | null;
+      },
+    ) => invoke<MemoryItem>(IPC.memory.update, { id, ...patch }),
+    archive: (id: string) => invoke<MemoryItem>(IPC.memory.archive, { id }),
+    delete: (id: string) => invoke<{ deleted: true }>(IPC.memory.delete, { id }),
+    setPackEnabled: (packId: string, enabled: boolean) =>
+      invoke<{ packId: string; enabled: boolean }>(IPC.memory.setPackEnabled, { packId, enabled }),
   },
   mock: {
     start: (

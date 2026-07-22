@@ -71,6 +71,10 @@ export const contextPacks = sqliteTable(
     companyResearch: text('company_research'), // raw text scraped from the site
     parsedCompany: text('parsed_company'), // json — structured interview-relevant research
     notes: text('notes'), // free-form client notes (shown when selecting + in the Cue Card)
+    // Per-Space memory opt-out (only meaningful while the GLOBAL memory
+    // consent is on): sessions in a disabled Space neither extract nor
+    // recall memories.
+    memoryEnabled: integer('memory_enabled').notNull().default(1),
     createdAt: integer('created_at').notNull().default(now),
     updatedAt: integer('updated_at').notNull().default(now),
   },
@@ -295,6 +299,47 @@ export const sessionReports = sqliteTable('session_reports', {
 // with a stable lifecycle. Interview answers DUAL-WRITE here alongside
 // ai_answers (which stays the parity source of truth) until the overlay and
 // reports consume contributions directly.
+// Local memory (v2 Prompt 8): ONE lifecycle table — a row is a
+// MemoryCandidate while status='pending' and a MemoryItem once 'approved'.
+// The embedding lives ON the row (with its identity), so deleting a memory
+// deletes its vector in the same statement — nothing orphaned, and memory
+// vectors can never leak into document retrieval (which joins chunks).
+// Sensitive content is REJECTED at extraction (never stored); the flag exists
+// for user-marked sensitivity. No cloud sync — this table never leaves the
+// machine.
+export const memories = sqliteTable(
+  'memories',
+  {
+    id: text('id').primaryKey(),
+    profileId: text('profile_id')
+      .notNull()
+      .references(() => profiles.id, { onDelete: 'cascade' }),
+    // Scope: null = global to the profile; set = specific to one Space.
+    packId: text('pack_id').references(() => contextPacks.id, { onDelete: 'cascade' }),
+    category: text('category').notNull(), // MemoryCategory
+    content: text('content').notNull(),
+    sourceRefs: text('source_refs'), // json[] — provenance: {type:'session'|'contribution'|'transcript', id}
+    confidence: real('confidence').notNull().default(0),
+    importance: real('importance').notNull().default(0.5),
+    sensitive: integer('sensitive').notNull().default(0),
+    status: text('status').notNull().default('pending'), // MemoryStatus
+    // Embedding (populated on approval) + its identity — vectors from a
+    // different provider/model are ignored at recall until re-embedded.
+    embedProvider: text('embed_provider'),
+    embedModel: text('embed_model'),
+    embedDim: integer('embed_dim'),
+    embedVector: blob('embed_vector', { mode: 'buffer' }),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+    lastUsedAt: integer('last_used_at'),
+    expiresAt: integer('expires_at'),
+  },
+  (t) => ({
+    byProfile: index('memories_profile_idx').on(t.profileId),
+    byStatus: index('memories_status_idx').on(t.status),
+  }),
+);
+
 export const contributions = sqliteTable(
   'contributions',
   {

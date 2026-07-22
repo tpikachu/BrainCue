@@ -71,6 +71,51 @@ export type ContributionKind =
  *  (trigger/presence.ts) — never a vague slider feeding a prompt. */
 export type Presence = 'summoned' | 'quiet' | 'balanced' | 'active';
 
+// --- Local memory (v2 Prompt 8) ---------------------------------------------
+// Memory belongs to the user: candidates are extracted conservatively AFTER
+// consent, reviewed explicitly, and only approved items ever ground answers.
+
+export type MemoryCategory =
+  | 'preference'
+  | 'person'
+  | 'project'
+  | 'goal'
+  | 'decision'
+  | 'fact'
+  | 'workflow'
+  | 'custom';
+
+/** One lifecycle: pending = MemoryCandidate (awaiting review), approved =
+ *  durable MemoryItem, rejected/archived = out of retrieval. */
+export type MemoryStatus = 'pending' | 'approved' | 'rejected' | 'archived';
+
+export interface MemoryItem {
+  id: string;
+  profileId: string;
+  /** null = global to the profile; set = scoped to one Space. */
+  packId: string | null;
+  category: MemoryCategory;
+  content: string;
+  /** Provenance: the session/contribution/transcript ids this came from. */
+  sourceRefs: { type: string; id: string }[] | null;
+  confidence: number;
+  importance: number;
+  sensitive: boolean;
+  status: MemoryStatus;
+  createdAt: number;
+  updatedAt: number;
+  lastUsedAt: number | null;
+  expiresAt: number | null;
+}
+
+/** A memory recalled for grounding — cited separately from documents ([M1]…). */
+export interface RetrievedMemory {
+  id: string;
+  category: MemoryCategory;
+  content: string;
+  score: number;
+}
+
 /** Stable lifecycle every Contribution moves through. */
 export type ContributionStatus =
   | 'planned'
@@ -271,6 +316,8 @@ export interface ContextPack {
   companyResearch: string | null;
   parsedCompany: ParsedCompany | null;
   notes: string | null; // free-form client notes (user-facing, shown in setup + Cue Card)
+  /** Per-Space memory opt-out (matters only while global memory consent is on). */
+  memoryEnabled: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -450,6 +497,9 @@ export interface AppSettings {
   privacyMode: boolean;
   hideTaskbarIcon: boolean; // keep the app off the taskbar (stealth)
   dataConsentAck: boolean;
+  /** Global memory consent — OFF by default: no extraction, no recall until
+   *  the user explicitly enables it (Library › Memory). */
+  memoryEnabled: boolean;
   tourDone: boolean; // first-run guided tour completed/skipped
   shortcuts: Record<string, string>; // effective global-shortcut accelerators per action
   shortcutDefaults: Record<string, string>; // built-in default accelerator per action
@@ -482,6 +532,9 @@ export interface ContextSentEvent {
   questionId: string;
   question: string;
   chunks: RetrievedChunk[];
+  /** Memories that grounded this answer (cited as [M1]… — separate from
+   *  documents). Present only when memory recall returned something. */
+  memories?: RetrievedMemory[];
 }
 
 // --- Generic contribution events (EVENTS.contribution*) ---------------------

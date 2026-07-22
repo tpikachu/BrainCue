@@ -13,6 +13,7 @@ import { EngineSession } from './engineSession';
 import { interviewMode } from './modes/interview.mode';
 import { meetingMode } from './modes/meeting.mode';
 import { getOrGenerateMeetingReport } from './meetingReport';
+import { extractMemoryCandidates } from '../memory/extractor';
 import { enginePersistence } from './persistence/enginePersistence';
 import { createRealtimeSource, pcmLevel } from './sourceAdapter';
 import type { AnswerFormat, InterviewType, Presence, Session, SessionMode } from '@shared/types';
@@ -291,6 +292,12 @@ class Engine {
             log.warn('meeting report generation failed', e),
           );
         }
+        // Memory candidates (Prompt 8): consent-gated inside the extractor —
+        // a no-op until the user enables memory. Candidates land as PENDING;
+        // nothing is remembered until reviewed in Library › Memory.
+        void extractMemoryCandidates(sessionId).catch((e) =>
+          log.warn('memory extraction failed', e),
+        );
       }
     }
     return result;

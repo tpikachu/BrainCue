@@ -109,6 +109,7 @@ export const meetingMode: ModeDefinition = {
     return streamAnswer({
       question: input.question,
       contextChunks: input.contextChunks,
+      memories: input.memories,
       profile: input.profile,
       format: input.settings.answerFormat,
       pronunciation: false, // spoken-cue pronunciation aids are an interview thing

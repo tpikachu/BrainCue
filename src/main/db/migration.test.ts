@@ -104,4 +104,26 @@ describe('migration 0008 on a v1.5.x database', () => {
     expect(fresh.db.select().from(schema.contextPacks).all()[0].kind).toBe('subject');
     expect(fresh.db.select().from(schema.sessions).all()[0].mode).toBe('interview');
   });
+
+  it('0011 adds the memories table (empty) and defaults packs to memory-enabled', () => {
+    // The migrated v1.5 database has the table — with NOTHING in it: memory
+    // never backfills itself from old data (no capture before consent).
+    expect(db.select().from(schema.memories).all()).toHaveLength(0);
+    const packs = db.select().from(schema.contextPacks).all();
+    expect(packs.every((p) => p.memoryEnabled === 1)).toBe(true);
+  });
+
+  it('deleting a profile cascades through its memories (wipe path)', () => {
+    db.insert(schema.memories)
+      .values({
+        id: 'wipe-m1',
+        profileId: 'p1',
+        category: 'fact',
+        content: 'Cascade check',
+        status: 'approved',
+      })
+      .run();
+    db.delete(schema.profiles).where(eq(schema.profiles.id, 'p1')).run();
+    expect(db.select().from(schema.memories).all().filter((m) => m.id === 'wipe-m1')).toHaveLength(0);
+  });
 });

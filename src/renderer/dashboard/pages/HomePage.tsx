@@ -154,7 +154,11 @@ export default function HomePage() {
           tone="idle"
         />
         <StatusChip label="Screen" value="on demand" tone="idle" />
-        <StatusChip label="Memory" value={FLAGS.memory ? 'on' : 'planned'} tone="idle" />
+        <StatusChip
+          label="Memory"
+          value={FLAGS.memory ? (settings?.memoryEnabled ? 'on' : 'off') : 'planned'}
+          tone={FLAGS.memory && settings?.memoryEnabled ? 'ok' : 'idle'}
+        />
         <StatusChip
           label="Active Space"
           value={session ? (activeSpace ?? 'profile only') : 'none'}

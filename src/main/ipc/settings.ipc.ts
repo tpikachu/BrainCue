@@ -39,6 +39,7 @@ function readSettings(): AppSettings {
     privacyMode: settingsRepo.get(SETTINGS_KEYS.privacyMode) !== '0',
     hideTaskbarIcon: settingsRepo.get(SETTINGS_KEYS.hideTaskbarIcon) === '1',
     dataConsentAck: settingsRepo.get(SETTINGS_KEYS.dataConsentAck) === '1',
+    memoryEnabled: settingsRepo.get(SETTINGS_KEYS.memoryEnabled) === '1', // consent: OFF until enabled
     tourDone: settingsRepo.get(SETTINGS_KEYS.tourDone) === '1',
     shortcuts: getShortcuts(),
     shortcutDefaults: { ...SHORTCUT_DEFAULTS },
@@ -64,6 +65,7 @@ const settingsPatch = z.object({
     .optional(),
   codingLanguage: z.string().min(1).max(40).optional(),
   dataConsentAck: z.boolean().optional(),
+  memoryEnabled: z.boolean().optional(),
   tourDone: z.boolean().optional(),
   hideTaskbarIcon: z.boolean().optional(),
 });
@@ -94,6 +96,8 @@ export function registerSettingsIpc(): void {
     }
     if (patch.dataConsentAck !== undefined)
       settingsRepo.set(SETTINGS_KEYS.dataConsentAck, patch.dataConsentAck ? '1' : '0');
+    if (patch.memoryEnabled !== undefined)
+      settingsRepo.set(SETTINGS_KEYS.memoryEnabled, patch.memoryEnabled ? '1' : '0');
     if (patch.tourDone !== undefined)
       settingsRepo.set(SETTINGS_KEYS.tourDone, patch.tourDone ? '1' : '0');
     return readSettings();

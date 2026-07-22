@@ -14,8 +14,10 @@ export const FLAGS = {
   tutor: false,
   /** Companion mode (ambient presence with memory). */
   companion: false,
-  /** Long-term memory (Library tab + status chip + engine recall). */
-  memory: false,
+  /** Long-term memory (Library tab + status chip + engine recall). Shipped
+   *  with the review-first substrate (Prompt 8): consent is still OFF by
+   *  default per user — this flag only surfaces the UI. */
+  memory: true,
   /** "Talk to BrainCue" — spoken replies / voice conversation. */
   voice: false,
 } as const;

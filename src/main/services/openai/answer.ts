@@ -1,9 +1,18 @@
 import { providerFor } from '../../providers/registry';
-import type { AnswerFormat, InterviewType, Profile, RetrievedChunk } from '@shared/types';
+import type {
+  AnswerFormat,
+  InterviewType,
+  Profile,
+  RetrievedChunk,
+  RetrievedMemory,
+} from '@shared/types';
 
 export interface AnswerInput {
   question: string;
   contextChunks: RetrievedChunk[];
+  /** Approved memories recalled for this question. Absent/empty leaves the
+   *  prompt byte-identical to v1 — memory only ever ADDS a section. */
+  memories?: RetrievedMemory[];
   profile: Profile;
   /** The single answer control (v1.2): key_points | explanation | detailed. */
   format: AnswerFormat;
@@ -100,6 +109,13 @@ function buildContext(chunks: RetrievedChunk[]): string {
   return chunks.map((c, i) => `[${i + 1}] (${c.sourceType}) ${c.content}`).join('\n\n');
 }
 
+/** The memory block ([M1]… numbering — deliberately separate from the [n]
+ *  document-context numbers so a citation can never be ambiguous). Exported
+ *  for tests. */
+export function buildMemoryBlock(memories: RetrievedMemory[]): string {
+  return memories.map((m, i) => `[M${i + 1}] (${m.category}) ${m.content}`).join('\n\n');
+}
+
 /**
  * Streams the direct answer as deltas, then yields a structured meta event.
  * Skeleton: streams the prose answer; meta is requested as a final JSON pass.
@@ -122,6 +138,15 @@ export async function* streamAnswer(input: AnswerInput): AsyncGenerator<AnswerEv
     '',
     'CONTEXT:',
     buildContext(input.contextChunks),
+    // Memory only ever ADDS a section — with none recalled, the prompt stays
+    // byte-identical to v1 (pinned by the existing answer tests).
+    ...(input.memories?.length
+      ? [
+          '',
+          "MEMORY (the candidate's own saved notes — cite as [M1], [M2]…, separate from the CONTEXT numbers):",
+          buildMemoryBlock(input.memories),
+        ]
+      : []),
     '',
     `QUESTION: ${input.question}`,
     '',

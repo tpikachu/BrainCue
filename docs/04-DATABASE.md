@@ -152,6 +152,25 @@ trends; the drill's report is assembled from these at end().
 ### `session_reports`
 | id | session_id FK (unique) | summary | strengths (json) | improvements (json) | per_question (json) | created_at |
 
+### `contributions` (v2, migration 0009)
+Generic engine outputs — answers dual-write here; Meeting cards and reports
+live here natively. `meta`/`source_refs` are json (provenance: question /
+chunk / memory / transcript ids).
+| id | session_id FK cascade | kind | status | title | body | meta (json) | source_refs (json) | created_at | updated_at |
+
+### `memories` (v2, migration 0011)
+Local memory, ONE lifecycle table: a row is a MemoryCandidate while
+`status='pending'` and a durable MemoryItem once `'approved'`
+(rejected/archived stay out of recall). The embedding lives ON the row
+(`embed_provider/model/dim/vector`), so deleting a memory removes its vector
+atomically and memory vectors can never leak into document retrieval. Scope:
+`pack_id` null = global to the profile, set = one Space. Sensitive content is
+rejected before insert (see 07). Never synced anywhere.
+| id | profile_id FK cascade | pack_id FK cascade (null=global) | category | content | source_refs (json) | confidence | importance | sensitive | status | embed_provider | embed_model | embed_dim | embed_vector (blob) | created_at | updated_at | last_used_at | expires_at |
+
+`jobs.memory_enabled` (0011) is the per-Space opt-out; the global consent
+switch is the `memory_enabled` settings key (default off).
+
 ### `settings`
 Key/value singleton store.
 | key TEXT PK | value TEXT |
@@ -170,11 +189,15 @@ Known keys (see `SETTINGS_KEYS` in `settings.repo.ts`):
 - `privacy_mode` — `'1'`/`'0'`.
 - `hide_taskbar_icon` — `'1'`/`'0'` (tray-only mode).
 - `data_consent_ack` — `'1'` once user acknowledges the compliance reminder.
+- `memory_enabled` — `'1'`/`'0'` global memory consent (absent = off; no
+  extraction or recall until the user enables it in Library › Memory).
 - `tour_done` — `'1'` once the first-run guided tour is completed/skipped.
 
 ## Deletion semantics
 Deleting a profile cascades to its documents, notes, stories, applications, packs,
-chunks, embeddings, sessions, and everything under sessions (FK `on delete cascade`).
+chunks, embeddings, sessions, memories, and everything under sessions (FK
+`on delete cascade`). Deleting one memory removes its embedding with it (the
+vector is a column on the row).
 Deleting a pack cascades to its JD/company/tailored chunks and nulls `sessions.job_id`
 (the session history is kept) — done explicitly in a transaction
 (`contextPacksRepo.delete`) so it works on legacy DBs whose FKs predate the

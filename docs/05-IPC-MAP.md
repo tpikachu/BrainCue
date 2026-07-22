@@ -230,6 +230,14 @@ Channel constants live in `EVENTS` (`src/shared/ipc.ts`); payload types are in
 | `contribution:done` | `{ contributionId }` | overlay (stream finished — completed or aborted) |
 | `contribution:reset` | `{ contributionId }` | overlay (regenerate: clear that card's body, keep the card) |
 
+Memory additions (Prompt 8): `memory:list` / `memory:review` (approve with
+optional edits, or reject) / `memory:update` / `memory:archive` /
+`memory:delete` (removes the row AND its embedding) /
+`memory:set-pack-enabled` (per-Space opt-out); `settings:set` accepts
+`memoryEnabled` (the global consent switch, default off). Recalled memories
+ride the `session:context` / `contribution:patch` payloads as a separate
+`memories` array so "data sent" always shows every memory used.
+
 Meeting Copilot additions (Prompt 7): `session:start` now accepts `mode`
 (SessionMode, default `interview`) and `presence`
 (summoned|quiet|balanced|active) for ambient modes; `session:meeting-report`

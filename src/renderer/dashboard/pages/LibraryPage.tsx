@@ -4,6 +4,7 @@ import { Page } from '../../components/ui';
 import { ProfilesTab } from '../library/ProfilesTab';
 import { SpacesTab } from '../library/SpacesTab';
 import { DocumentsTab } from '../library/DocumentsTab';
+import { MemoryTab } from '../library/MemoryTab';
 
 type TabId = 'profile' | 'spaces' | 'documents' | 'memory';
 
@@ -46,6 +47,7 @@ export default function LibraryPage() {
       {tab === 'profile' && <ProfilesTab />}
       {tab === 'spaces' && <SpacesTab />}
       {tab === 'documents' && <DocumentsTab />}
+      {tab === 'memory' && <MemoryTab />}
     </Page>
   );
 }

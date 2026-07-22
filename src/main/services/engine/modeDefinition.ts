@@ -5,6 +5,7 @@ import type {
   Presence,
   Profile,
   RetrievedChunk,
+  RetrievedMemory,
   SessionMode,
   Speaker,
 } from '@shared/types';
@@ -28,6 +29,8 @@ export interface RuntimeSettings {
 export interface GenerateInput {
   question: string;
   contextChunks: RetrievedChunk[];
+  /** Approved memories recalled for this question ([] when memory is off). */
+  memories: RetrievedMemory[];
   profile: Profile;
   settings: RuntimeSettings;
   signal: AbortSignal;

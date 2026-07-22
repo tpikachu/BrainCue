@@ -104,6 +104,16 @@ export const IPC = {
   contributions: {
     update: 'contributions:update', // review/edit a persisted contribution (title/body/meta/status)
   },
+  // Local memory (v2): candidates + items live in ONE lifecycle; only approved
+  // memory is ever recalled. All review actions are explicit user actions.
+  memory: {
+    list: 'memory:list',
+    review: 'memory:review', // approve (optionally with edits) or reject a candidate
+    update: 'memory:update', // edit an item (content/category/importance/scope/expiry)
+    archive: 'memory:archive',
+    delete: 'memory:delete', // hard delete — removes the row AND its embedding
+    setPackEnabled: 'memory:set-pack-enabled', // per-Space opt-out
+  },
   mock: {
     start: 'mock:start',
     next: 'mock:next',
