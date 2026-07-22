@@ -1,5 +1,5 @@
 import { FLAGS } from '@shared/flags';
-import type { Presence, Profile } from '@shared/types';
+import type { CompanionPresence, Presence, Profile } from '@shared/types';
 
 /** The universal start flow's mode catalog (StartSessionModal + Home). One
  *  entry per SessionMode; `enabled` is the flag gate — a disabled mode is
@@ -56,6 +56,28 @@ export const PRESENCE_OPTIONS: { value: Presence; label: string; desc: string }[
   { value: 'active', label: 'Active', desc: 'Contributes whenever it plausibly helps.' },
 ];
 
+/** Companion posture options — labels for the InterjectionPolicy levels in
+ *  the engine's trigger/companionPresence.ts. */
+export const COMPANION_PRESENCE_OPTIONS: {
+  value: CompanionPresence;
+  label: string;
+  desc: string;
+}[] = [
+  { value: 'off', label: 'Off', desc: 'Hard mute — no automatic contributions at all.' },
+  { value: 'on_demand', label: 'On demand', desc: 'Answers only when you summon it.' },
+  { value: 'assistive', label: 'Assistive', desc: 'Speaks up for clearly useful things. The default.' },
+  { value: 'proactive', label: 'Proactive', desc: 'Contributes whenever it plausibly helps.' },
+];
+
+/** Hard session budget choices for companion cost governance. */
+export const BUDGET_OPTIONS: { value: number | null; label: string }[] = [
+  { value: null, label: 'No cap' },
+  { value: 25, label: '$0.25 per session' },
+  { value: 50, label: '$0.50 per session' },
+  { value: 100, label: '$1.00 per session' },
+  { value: 200, label: '$2.00 per session' },
+];
+
 /** Can a session start? Returns the FIRST blocking reason so the UI can say
  *  exactly what to fix (and never half-starts anything). */
 export function startBlocker(a: {
@@ -83,9 +105,11 @@ export function captureSummary(a: {
     : 'your profile';
   return {
     captured: [
-      a.source === 'system'
-        ? 'System audio (the other side of your call), transcribed in real time.'
-        : 'Your microphone, transcribed in real time.',
+      a.mode === 'companion'
+        ? 'Your microphone, transcribed in real time — ONLY while this session runs (nothing listens before Start or after Stop).'
+        : a.source === 'system'
+          ? 'System audio (the other side of your call), transcribed in real time.'
+          : 'Your microphone, transcribed in real time.',
       'The transcript stays in the local database on this machine.',
     ],
     sent: [
@@ -95,7 +119,12 @@ export function captureSummary(a: {
             'Ambiguous turns: the turn + a few recent turns, for salience scoring (deterministic rules filter greetings/small talk first).',
             `When a card is made: the turn + the top-5 matching chunks from ${scope}.`,
           ]
-        : [`Per detected question: the question text + the top-5 matching chunks from ${scope}.`]),
+        : a.mode === 'companion'
+          ? [
+              'Ambiguous turns: the turn + a few recent turns, for salience scoring (silence, small talk, mute, DND, and cooldowns never spend a model call).',
+              `When a card is made: the turn + the top-5 matching chunks from ${scope}, plus any APPROVED memories that matched.`,
+            ]
+          : [`Per detected question: the question text + the top-5 matching chunks from ${scope}.`]),
     ],
     neverSent: [
       'Your API key (main process only).',

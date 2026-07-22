@@ -19,8 +19,7 @@ import { enginePersistence as persist } from './persistence/enginePersistence';
 import { summonedPolicy } from './trigger/summonedPolicy';
 import type { RealtimeSttSession } from '../../providers/types';
 import type { ContextEvent } from './contextEvent';
-import type { ModeDefinition, RuntimeSettings } from './modeDefinition';
-import type { AmbientTriggerPolicy } from './trigger/ambientPolicy';
+import type { AmbientPolicy, ModeDefinition, RuntimeSettings } from './modeDefinition';
 
 /** A question we answered, kept so the Cue Card can re-generate it (e.g. after
  *  toggling length/format/pronunciation) by reusing the SAME question row — no
@@ -58,9 +57,9 @@ export class EngineSession {
   suppressAnswers = false;
   pendingQuestionText: string | null = null;
   transcriber: RealtimeSttSession | null = null;
-  /** Ambient trigger state (Meeting) — per-session cooldowns/dedupe/pending
-   *  questions. Null for Q&A modes (interview). */
-  readonly ambientPolicy: AmbientTriggerPolicy | null;
+  /** Ambient trigger state (Meeting/Companion) — per-session cooldowns/
+   *  dedupe/pending questions. Null for Q&A modes (interview). */
+  readonly ambientPolicy: AmbientPolicy | null;
 
   /** Set on teardown/replacement: an in-flight classify/stream/prediction that
    *  wakes up afterwards must act as if the old module-level `live` changed. */
@@ -79,6 +78,10 @@ export class EngineSession {
     mode: ModeDefinition;
     settings: RuntimeSettings;
     ephemeral: boolean;
+    /** Hard session budget in cents (companion cost governance). */
+    budgetCents?: number | null;
+    /** Explicit start-time companion posture. */
+    companionPresence?: string;
   }) {
     this.sessionId = opts.sessionId;
     this.profileId = opts.profileId;
@@ -86,7 +89,14 @@ export class EngineSession {
     this.mode = opts.mode;
     this.settings = opts.settings;
     this.ephemeral = opts.ephemeral;
-    this.ambientPolicy = opts.mode.ambient?.createPolicy(opts.settings.presence) ?? null;
+    this.ambientPolicy =
+      opts.mode.ambient?.createPolicy(opts.settings.presence, {
+        sessionId: opts.sessionId,
+        profileId: opts.profileId,
+        packId: opts.packId,
+        budgetCents: opts.budgetCents,
+        companionPresence: opts.companionPresence,
+      }) ?? null;
   }
 
   get isStopped(): boolean {
@@ -198,6 +208,7 @@ export class EngineSession {
         title: card.title,
         body: card.body,
         contextChunks: card.contextChunks,
+        meta: card.meta,
       });
     } catch (e) {
       log.error('ambient contribution failed', e);

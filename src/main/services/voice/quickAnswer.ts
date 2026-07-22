@@ -31,6 +31,9 @@ export async function* streamQuickAnswer(input: {
   question: string;
   contextChunks: RetrievedChunk[];
   memories: RetrievedMemory[];
+  /** Personality fragment (engine/persona.ts) — Companion summons speak with
+   *  the configured persona; absent leaves the prompt byte-identical. */
+  personaPreamble?: string;
   signal?: AbortSignal;
 }): AsyncGenerator<AnswerEvent> {
   const user = [
@@ -48,7 +51,7 @@ export async function* streamQuickAnswer(input: {
   const chat = providerFor('chat');
   for await (const ev of chat.stream({
     task: 'answer',
-    system: SYSTEM,
+    system: input.personaPreamble ? `${input.personaPreamble}\n\n${SYSTEM}` : SYSTEM,
     user,
     maxOutputTokens: 400,
     signal: input.signal,

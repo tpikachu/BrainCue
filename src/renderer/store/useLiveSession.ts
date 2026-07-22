@@ -39,10 +39,14 @@ interface LiveSessionState {
     jobId: string | null;
     source: AudioSource;
     micDeviceId?: string | null;
-    /** Engine mode (default 'interview'); 'meeting' runs the ambient pipeline. */
+    /** Engine mode (default 'interview'); ambient modes run their pipeline. */
     mode?: string;
     /** Ambient presence for meeting sessions (default: the mode's own). */
     presence?: string;
+    /** Companion posture (off/on_demand/assistive/proactive) — companion only. */
+    companionPresence?: string;
+    /** Hard session budget in cents — companion cost governance. */
+    budgetCents?: number | null;
   }) => Promise<void>;
   resumeExisting: (a: {
     sessionId: string;
@@ -181,7 +185,7 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
     pendingSave: null,
     clearPendingSave: () => set({ pendingSave: null }),
 
-    startNew: async ({ profileId, interviewType, answerFormat, jobId, source, micDeviceId, mode, presence }) => {
+    startNew: async ({ profileId, interviewType, answerFormat, jobId, source, micDeviceId, mode, presence, companionPresence, budgetCents }) => {
       // Acquire audio FIRST: if the user denies the mic or cancels the system-audio
       // picker, we never create a session that displays "live" with nothing flowing.
       let stream: MediaStream;
@@ -198,6 +202,8 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
         answerFormat,
         mode ?? 'interview',
         presence as Presence | undefined,
+        budgetCents,
+        companionPresence,
       )) as Session;
       lineId = 0;
       set({ session: s, transcript: [], interim: '', paused: false, micError: null, sessionError: null });

@@ -55,8 +55,11 @@ AI_Inter/
 │  │  │  ├─ engine/             # v2 conversation engine (see 12-ENGINE-PLAN.md)
 │  │  │  │  ├─ engine.ts  engineSession.ts  modeDefinition.ts  grounding.ts
 │  │  │  │  ├─ meetingReport.ts  contextEvent.ts  sourceAdapter.ts
-│  │  │  │  ├─ modes/           # interview.mode.ts  meeting.mode.ts
+│  │  │  │  ├─ persona.ts       # the ONE companion-personality prompt source
+│  │  │  │  ├─ modes/           # interview.mode.ts  meeting.mode.ts  companion.mode.ts
 │  │  │  │  ├─ trigger/         # reactiveQuestion  summoned  meetingHeuristics  salience  ambientPolicy  presence
+│  │  │  │  │                   # + companion (Prompt 10): interjectionPolicy  companionSalience  companionPresence
+│  │  │  │  ├─ companion/       # costMeter.ts (visible estimate + budget gates)
 │  │  │  │  └─ persistence/enginePersistence.ts
 │  │  │  ├─ memory/             # local memory (Prompt 8): extractor  memoryService  recall  sensitiveFilter
 │  │  │  ├─ voice/              # voice/summon layer (Prompt 9)

@@ -33,7 +33,7 @@ export default function HomePage() {
   const { settings } = useSettingsStore();
   const { session } = useLiveSession();
   const [startOpen, setStartOpen] = useState(false);
-  const [startMode, setStartMode] = useState<'interview' | 'meeting'>('interview');
+  const [startMode, setStartMode] = useState<'interview' | 'meeting' | 'companion'>('interview');
   const [recent, setRecent] = useState<SessionListItem[]>([]);
   const [micState, setMicState] = useState<'granted' | 'prompt' | 'denied' | 'unknown'>('unknown');
   const [activeSpace, setActiveSpace] = useState<string | null>(null);
@@ -238,6 +238,18 @@ export default function HomePage() {
             labs
             onClick={() => {
               setStartMode('meeting');
+              setStartOpen(true);
+            }}
+          />
+        )}
+        {FLAGS.companion && (
+          <ModeCard
+            Icon={SparklesIcon}
+            title="Companion"
+            desc="An ambient presence while you work: remembers what you saved, flags tasks, offers context — only through deterministic gates you control."
+            labs
+            onClick={() => {
+              setStartMode('companion');
               setStartOpen(true);
             }}
           />

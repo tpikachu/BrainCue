@@ -261,6 +261,22 @@ segment, in `seq` order; an empty `last:true` marker ends the reply). An
 in-session summon is a normal engine direct ask (dual-emitted events, v1
 persistence); a no-session quick ask streams GENERIC-only `contribution:*`
 events like ambient cards.
+
+Companion additions (Prompt 10): `session:start` gains `companionPresence`
+(off|on_demand|assistive|proactive — the InterjectionPolicy posture; the
+engine-level `presence` is its coarse projection) and `budgetCents`
+(hard session budget, null = no cap; absent = the companion-prefs default).
+`session:set-presence` (`{ presence }`) changes the live posture from the Cue
+Card — each policy validates its own vocabulary; `off` is the hard mute.
+`jobs:set-companion-prefs` (`{ id, prefs: CompanionSpaceOverrides | null }`)
+stores per-Space overrides (null clears → inherit). `settings:get`/`set` carry
+`companionPrefs` (`CompanionPrefs`: personality, default presence, DND
+windows, default budget). Event `companion:status`
+(`CompanionStatusEvent { sessionId, presence, cost }`) broadcasts on session
+start, every model call (live cost estimate + warned/exhausted flags), and
+every posture change. Ambient companion cards are GENERIC-only, like meeting
+cards; a memory card's patch meta carries `memoryId`/`why` so the overlay can
+correct/forget the memory in place.
 | `session:client-info` | `ClientInfo \| null` | overlay (active interview: company/title/notes + profileName + grounding flags hasResume/hasJd/hasCompany, for the Cue Card header + session bar + ⓘ panel; `null` clears on stop) |
 | `session:answer-prefs` | `AnswerPrefs` (`{ interviewType, format, pronunciation }`) | overlay (seeds the Cue Card answer-control toggles) |
 | `session:audio-level` | `{ level }` (0-1 RMS, ~12/sec) | overlay (drives the Cue Card mic meter; computed in `feedRealtimeAudio` since the stream lives in the dashboard renderer) |

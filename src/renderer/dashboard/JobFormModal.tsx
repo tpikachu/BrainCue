@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import type { Job } from '@shared/types';
-import { Button, Field, Modal, TextArea, TextInput } from '../components/ui';
+import { FLAGS } from '@shared/flags';
+import type { CompanionSpaceOverrides, Job } from '@shared/types';
+import { Button, Field, Modal, Select, TextArea, TextInput } from '../components/ui';
 import { UploadIcon } from '../components/icons';
 
 type Notice = { tone: 'ok' | 'err'; text: string } | null;
@@ -26,6 +27,7 @@ export function JobFormModal({
   const editing = !!job;
   const empty = { title: '', company: '', jdUrl: '', jdText: '', companyUrl: '', notes: '' };
   const [form, setForm] = useState(empty);
+  const [companion, setCompanion] = useState<CompanionSpaceOverrides>({});
   const [saving, setSaving] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [jdNotice, setJdNotice] = useState<Notice>(null);
@@ -42,6 +44,7 @@ export function JobFormModal({
       companyUrl: job?.companyUrl ?? '',
       notes: job?.notes ?? '',
     });
+    setCompanion(job?.companionPrefs ?? {});
     setJdNotice(null);
     setNotice(null);
   }, [open, job?.id]);
@@ -92,7 +95,18 @@ export function JobFormModal({
         companyUrl: form.companyUrl.trim() || null,
         notes: form.notes.trim() || null,
       });
-      onSaved(res.job as Job);
+      // Companion overrides ride separately (setCompanionPrefs — no re-parse).
+      // All-inherit → null so the row reads "no overrides", not "{}".
+      if (FLAGS.companion) {
+        const hasOverrides = Object.values(companion).some((v) => v !== undefined);
+        const saved = await api.jobs.setCompanionPrefs(
+          (res.job as Job).id,
+          hasOverrides ? companion : null,
+        );
+        onSaved(saved as Job);
+      } else {
+        onSaved(res.job as Job);
+      }
       if (res.companyError) {
         setNotice({ tone: 'err', text: `Saved, but company research failed: ${res.companyError}` });
       } else {
@@ -189,6 +203,84 @@ export function JobFormModal({
             placeholder="e.g. Recruiter: Jane. Panel of 3. They care about system design. Remote."
           />
         </Field>
+
+        {FLAGS.companion && (
+          <fieldset className="rounded-xl border border-white/5 bg-neutral-950/40 p-3">
+            <legend className="px-1 text-xs font-medium uppercase tracking-wide text-neutral-500">
+              Companion in this Space
+            </legend>
+            <p className="mb-2 text-xs text-neutral-500">
+              Overrides for companion sessions grounded here — anything left on “Inherit” uses your
+              global companion settings.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Presence">
+                <Select
+                  value={companion.presence ?? ''}
+                  onChange={(e) =>
+                    setCompanion((c) => ({
+                      ...c,
+                      presence: (e.target.value || undefined) as CompanionSpaceOverrides['presence'],
+                    }))
+                  }
+                >
+                  <option value="">Inherit</option>
+                  <option value="off">Off (muted)</option>
+                  <option value="on_demand">On demand</option>
+                  <option value="assistive">Assistive</option>
+                  <option value="proactive">Proactive</option>
+                </Select>
+              </Field>
+              <Field label="Tone">
+                <Select
+                  value={companion.tone ?? ''}
+                  onChange={(e) =>
+                    setCompanion((c) => ({
+                      ...c,
+                      tone: (e.target.value || undefined) as CompanionSpaceOverrides['tone'],
+                    }))
+                  }
+                >
+                  <option value="">Inherit</option>
+                  <option value="warm">Warm</option>
+                  <option value="neutral">Neutral</option>
+                  <option value="direct">Direct</option>
+                </Select>
+              </Field>
+              <Field label="Brevity">
+                <Select
+                  value={companion.brevity ?? ''}
+                  onChange={(e) =>
+                    setCompanion((c) => ({
+                      ...c,
+                      brevity: (e.target.value || undefined) as CompanionSpaceOverrides['brevity'],
+                    }))
+                  }
+                >
+                  <option value="">Inherit</option>
+                  <option value="terse">Terse</option>
+                  <option value="normal">Normal</option>
+                  <option value="chatty">Chatty</option>
+                </Select>
+              </Field>
+              <Field label="Humor">
+                <Select
+                  value={companion.humor === undefined ? '' : companion.humor ? '1' : '0'}
+                  onChange={(e) =>
+                    setCompanion((c) => ({
+                      ...c,
+                      humor: e.target.value === '' ? undefined : e.target.value === '1',
+                    }))
+                  }
+                >
+                  <option value="">Inherit</option>
+                  <option value="1">Allowed</option>
+                  <option value="0">Off</option>
+                </Select>
+              </Field>
+            </div>
+          </fieldset>
+        )}
 
         {notice && (
           <p className={`text-sm ${notice.tone === 'err' ? 'text-amber-400' : 'text-green-400'}`}>

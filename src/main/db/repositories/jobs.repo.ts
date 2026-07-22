@@ -28,6 +28,7 @@ function toPack(r: Row): ContextPack {
     parsedCompany: r.parsedCompany ? JSON.parse(r.parsedCompany) : null,
     notes: r.notes,
     memoryEnabled: r.memoryEnabled === 1,
+    companionPrefs: r.companionPrefs ? JSON.parse(r.companionPrefs) : null,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
@@ -59,6 +60,16 @@ export const contextPacksRepo = {
       .set({ memoryEnabled: enabled ? 1 : 0, updatedAt: Date.now() })
       .where(eq(schema.contextPacks.id, id))
       .run();
+  },
+
+  /** Per-Space companion behavior overrides (null clears → inherit global). */
+  setCompanionPrefs(id: string, prefs: ContextPack['companionPrefs']): ContextPack {
+    db()
+      .update(schema.contextPacks)
+      .set({ companionPrefs: prefs ? JSON.stringify(prefs) : null, updatedAt: Date.now() })
+      .where(eq(schema.contextPacks.id, id))
+      .run();
+    return this.get(id)!;
   },
 
   /** Total interviews (job packs) across all profiles — for the sidebar stats.

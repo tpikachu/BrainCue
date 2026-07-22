@@ -7,6 +7,7 @@ import { apiKeyStore } from '../services/security/apiKey';
 import { listModels, testApiKey } from '../services/openai/client';
 import { defaultEfforts, modelPreset, presetModels } from '../services/openai/models';
 import { SETTINGS_KEYS, settingsRepo } from '../db/repositories/settings.repo';
+import { readCompanionPrefs } from '../services/engine/modes/companion.mode';
 import {
   getShortcuts,
   registerGlobalShortcuts,
@@ -40,6 +41,7 @@ function readSettings(): AppSettings {
     hideTaskbarIcon: settingsRepo.get(SETTINGS_KEYS.hideTaskbarIcon) === '1',
     dataConsentAck: settingsRepo.get(SETTINGS_KEYS.dataConsentAck) === '1',
     memoryEnabled: settingsRepo.get(SETTINGS_KEYS.memoryEnabled) === '1', // consent: OFF until enabled
+    companionPrefs: readCompanionPrefs(),
     tourDone: settingsRepo.get(SETTINGS_KEYS.tourDone) === '1',
     shortcuts: getShortcuts(),
     shortcutDefaults: { ...SHORTCUT_DEFAULTS },
@@ -66,6 +68,27 @@ const settingsPatch = z.object({
   codingLanguage: z.string().min(1).max(40).optional(),
   dataConsentAck: z.boolean().optional(),
   memoryEnabled: z.boolean().optional(),
+  companionPrefs: z
+    .object({
+      personality: z.object({
+        name: z.string().min(1).max(40),
+        voice: z.string().nullable(),
+        tone: z.enum(['warm', 'neutral', 'direct']),
+        brevity: z.enum(['terse', 'normal', 'chatty']),
+        humor: z.boolean(),
+      }),
+      presence: z.enum(['off', 'on_demand', 'assistive', 'proactive']),
+      dnd: z
+        .array(
+          z.object({
+            startMin: z.number().int().min(0).max(1439),
+            endMin: z.number().int().min(0).max(1439),
+          }),
+        )
+        .max(4),
+      budgetCents: z.number().int().positive().nullable(),
+    })
+    .optional(),
   tourDone: z.boolean().optional(),
   hideTaskbarIcon: z.boolean().optional(),
 });
@@ -98,6 +121,8 @@ export function registerSettingsIpc(): void {
       settingsRepo.set(SETTINGS_KEYS.dataConsentAck, patch.dataConsentAck ? '1' : '0');
     if (patch.memoryEnabled !== undefined)
       settingsRepo.set(SETTINGS_KEYS.memoryEnabled, patch.memoryEnabled ? '1' : '0');
+    if (patch.companionPrefs)
+      settingsRepo.setJson(SETTINGS_KEYS.companionPrefs, patch.companionPrefs);
     if (patch.tourDone !== undefined)
       settingsRepo.set(SETTINGS_KEYS.tourDone, patch.tourDone ? '1' : '0');
     return readSettings();

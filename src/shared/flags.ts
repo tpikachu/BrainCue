@@ -12,8 +12,12 @@ export const FLAGS = {
   meeting: true,
   /** Tutor mode (voice dialogue + drills over your material). */
   tutor: false,
-  /** Companion mode (ambient presence with memory). */
-  companion: false,
+  /** Companion mode (ambient presence with memory) — Prompt 10. Shipped
+   *  behind its scripted evaluation harness (companion.eval.test.ts: zero
+   *  low-confidence interruptions, dedupe-in-cooldown, provenance-correct
+   *  recall, hard mute, teardown); surfaces with a Labs badge while it
+   *  collects real-world hours. */
+  companion: true,
   /** Long-term memory (Library tab + status chip + engine recall). Shipped
    *  with the review-first substrate (Prompt 8): consent is still OFF by
    *  default per user — this flag only surfaces the UI. */

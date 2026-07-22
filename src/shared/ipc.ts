@@ -54,6 +54,7 @@ export const IPC = {
     get: 'jobs:get',
     save: 'jobs:save', // create or update + parse + index
     setNotes: 'jobs:set-notes', // update just the client notes (no re-parse)
+    setCompanionPrefs: 'jobs:set-companion-prefs', // per-Space companion overrides (no re-parse)
     brief: 'jobs:brief', // generate a grounded pre-interview prep brief
     delete: 'jobs:delete',
   },
@@ -97,6 +98,7 @@ export const IPC = {
     setInterviewType: 'session:set-interview-type',
     setAnswerPrefs: 'session:set-answer-prefs',
     setAnswering: 'session:set-answering', // coding: toggle auto-answering the interviewer
+    setPresence: 'session:set-presence', // live posture change (companion: off/on_demand/assistive/proactive)
     regenerate: 'session:regenerate',
     clearAnswer: 'session:clear-answer',
     meetingReport: 'session:meeting-report', // get-or-generate the structured meeting report
@@ -223,6 +225,7 @@ export const EVENTS = {
   confirmRequest: 'ui:confirm-request', // main asks a protected window to show a confirm modal (reply via IPC.ui.confirmResponse)
   voiceState: 'voice:state', // dialogue controller transitions (VoiceStateEvent)
   voiceAudio: 'voice:audio-segment', // synthesized speech segments (VoiceAudioEvent)
+  companionStatus: 'companion:status', // live companion posture + cost snapshot (CompanionStatusEvent)
 } as const;
 
 /** Pushed to the dashboard when a session stops, to prompt save-or-discard. */

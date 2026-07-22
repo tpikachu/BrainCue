@@ -17,9 +17,15 @@ export function ContributionCard(props: {
   onCopy: () => void;
   onRegenerate: () => void;
   onRemove: () => void;
+  /** Memory cards (capability `memory` + meta.memoryId): correct/forget the
+   *  underlying memory from the card. Wired by the shell. */
+  onCorrectMemory?: () => void;
+  onForgetMemory?: () => void;
 }) {
   const { card, isCurrent } = props;
   const def = cardDefinition(card.kind);
+  const memoryId = (card.meta as Record<string, unknown> | null)?.memoryId;
+  const memoryActions = !!def.capabilities.memory && typeof memoryId === 'string';
   const chip = def.chip ?? (isKnownKind(card.kind) ? null : card.kind);
   const View = def.View;
   return (
@@ -62,6 +68,24 @@ export function ContributionCard(props: {
           >
             <RefreshIcon className="h-3 w-3" />
           </button>
+        )}
+        {memoryActions && (
+          <>
+            <button
+              onClick={props.onCorrectMemory}
+              title="Correct this memory"
+              className="shrink-0 rounded p-0.5 text-neutral-600 hover:text-violet-300"
+            >
+              <span className="text-[11px] leading-none">✎</span>
+            </button>
+            <button
+              onClick={props.onForgetMemory}
+              title="Forget this memory (deletes it)"
+              className="shrink-0 rounded p-0.5 text-neutral-600 hover:text-red-300"
+            >
+              <span className="text-[11px] leading-none">⌫</span>
+            </button>
+          </>
         )}
         <button
           onClick={props.onRemove}

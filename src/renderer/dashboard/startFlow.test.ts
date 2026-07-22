@@ -14,7 +14,12 @@ describe('mode catalog', () => {
 
   it('flag-gated modes are hidden, not rendered dead — only shipped modes are enabled', () => {
     // Meeting shipped with Prompt 7 (FLAGS.meeting); the rest stay gated.
-    expect(enabledModes().map((m) => m.id)).toEqual(['interview', 'practice', 'meeting']);
+    expect(enabledModes().map((m) => m.id)).toEqual([
+      'interview',
+      'practice',
+      'meeting',
+      'companion',
+    ]);
   });
 });
 
@@ -54,5 +59,16 @@ describe('captureSummary — the transparency contract', () => {
     expect(neverSent.join(' ')).toMatch(/API key/);
     expect(neverSent.join(' ')).toMatch(/résumé|documents/);
     expect(neverSent.join(' ')).toMatch(/screen/i);
+  });
+
+  it('companion: mic-only capture bounded to the session, and the no-model-call promise', () => {
+    const s = captureSummary({ source: 'system', spaceTitle: null, mode: 'companion' });
+    // Whatever source was toggled, companion always captures the microphone,
+    // and only while the session runs (explicit consent boundary).
+    expect(s.captured[0]).toMatch(/microphone/i);
+    expect(s.captured[0]).toMatch(/ONLY while this session runs/);
+    // Cost honesty: silence/mute/DND/cooldowns never spend a model call.
+    expect(s.sent.join(' ')).toMatch(/never spend a model call/);
+    expect(s.sent.join(' ')).toMatch(/APPROVED memories/);
   });
 });

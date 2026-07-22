@@ -1,4 +1,4 @@
-import type { Presence } from '@shared/types';
+import type { ContributionKind, Presence } from '@shared/types';
 import {
   answersQuestion,
   evaluateTurnHeuristics,
@@ -17,7 +17,9 @@ import { PRESENCE_LEVELS, WARNING_FLOOR, type AmbientKind } from './presence';
 
 export interface AmbientDecision {
   act: boolean;
-  kind: AmbientKind | null;
+  /** The card kind to build (meeting emits AmbientKind values; companion adds
+   *  memory_suggestion/suggested_question — buildCard owns the mapping). */
+  kind: ContributionKind | null;
   title: string;
   confidence: number;
   owner: string | null;

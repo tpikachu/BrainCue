@@ -318,6 +318,8 @@ export interface ContextPack {
   notes: string | null; // free-form client notes (user-facing, shown in setup + Cue Card)
   /** Per-Space memory opt-out (matters only while global memory consent is on). */
   memoryEnabled: boolean;
+  /** Per-Space companion behavior overrides (null = inherit global config). */
+  companionPrefs: CompanionSpaceOverrides | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -500,6 +502,9 @@ export interface AppSettings {
   /** Global memory consent — OFF by default: no extraction, no recall until
    *  the user explicitly enables it (Library › Memory). */
   memoryEnabled: boolean;
+  /** Global companion configuration (personality, default presence, DND,
+   *  default budget). */
+  companionPrefs: CompanionPrefs;
   tourDone: boolean; // first-run guided tour completed/skipped
   shortcuts: Record<string, string>; // effective global-shortcut accelerators per action
   shortcutDefaults: Record<string, string>; // built-in default accelerator per action
@@ -557,7 +562,10 @@ export interface ContributionDeltaEvent {
  *  carried, so cards render identically; only the fields present are patched. */
 export interface ContributionPatchEvent {
   contributionId: string;
-  meta?: AnswerMetaEvent;
+  /** The legacy answerMeta payload — ambient cards ride kind-specific
+   *  annotations (e.g. a memory card's memoryId/why) on it as extra fields,
+   *  with riskWarning null. */
+  meta?: AnswerMetaEvent & Record<string, unknown>;
   context?: ContextSentEvent;
   followup?: string;
 }
@@ -611,6 +619,85 @@ export interface VoiceAudioEvent {
   audioBase64: string;
   mime: string;
   last: boolean;
+}
+
+// --- Companion (v2, Prompt 10) ----------------------------------------------
+// Companion is an EXPLICITLY started session (no background listening before
+// consent). Its posture is a CompanionPresence — richer than the engine's
+// Presence dial because "off" (hard mute) and "on demand" (summon-only) are
+// distinct user promises. The InterjectionPolicy engine maps these to
+// explicit deterministic gates; the LLM only ever scores salience.
+
+export type CompanionPresence = 'off' | 'on_demand' | 'assistive' | 'proactive';
+
+/** Coarse projection of the companion posture onto the engine's Presence dial
+ *  (session:start speaks Presence). Off and on-demand both disable ambient at
+ *  the engine level; the InterjectionPolicy separately treats off as the hard
+ *  mute. Shared so the start flow and the engine agree by construction. */
+export const COMPANION_TO_ENGINE_PRESENCE: Record<CompanionPresence, Presence> = {
+  off: 'summoned',
+  on_demand: 'summoned',
+  assistive: 'balanced',
+  proactive: 'active',
+};
+
+/** Global companion personality (settings key `companion_prefs`). ONE source
+ *  of truth rendered by `engine/persona.ts` — never duplicated per mode. */
+export interface CompanionPersonality {
+  /** What the companion calls itself. */
+  name: string;
+  /** TTS voice override for companion sessions (null = voice-layer default). */
+  voice: string | null;
+  tone: 'warm' | 'neutral' | 'direct';
+  brevity: 'terse' | 'normal' | 'chatty';
+  humor: boolean;
+}
+
+/** A do-not-disturb window in minutes-of-day (local). start > end spans
+ *  midnight (e.g. 1320–420 = 22:00–07:00). */
+export interface DndWindow {
+  startMin: number;
+  endMin: number;
+}
+
+export interface CompanionPrefs {
+  personality: CompanionPersonality;
+  /** Default posture for new companion sessions. */
+  presence: CompanionPresence;
+  dnd: DndWindow[];
+  /** Default hard session budget in cents (null = no cap). */
+  budgetCents: number | null;
+}
+
+/** Per-Space behavior overrides (jobs.companion_prefs json) — every field
+ *  optional; absent = inherit the global config. */
+export interface CompanionSpaceOverrides {
+  tone?: CompanionPersonality['tone'];
+  brevity?: CompanionPersonality['brevity'];
+  humor?: boolean;
+  presence?: CompanionPresence;
+}
+
+/** Cost-governance snapshot: model calls + token usage where reported, and a
+ *  deterministic cents ESTIMATE (documented flat rates — visibility, not
+ *  billing). */
+export interface CompanionCost {
+  calls: number;
+  promptTokens: number;
+  completionTokens: number;
+  estCents: number;
+  budgetCents: number | null;
+  /** Crossed the warning threshold (once). */
+  warned: boolean;
+  /** Hard budget reached — automatic contributions stop. */
+  exhausted: boolean;
+}
+
+/** Pushed on EVENTS.companionStatus while a companion session runs. */
+export interface CompanionStatusEvent {
+  sessionId: string;
+  presence: CompanionPresence;
+  cost: CompanionCost;
 }
 
 /** Voice preferences (settings key `voice_prefs`). */

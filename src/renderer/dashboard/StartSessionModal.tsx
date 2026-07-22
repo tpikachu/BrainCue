@@ -4,9 +4,12 @@ import { api } from '../lib/api';
 import { useProfileStore } from '../store/useProfileStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useLiveSession } from '../store/useLiveSession';
-import type { Job, Presence } from '@shared/types';
+import type { CompanionPresence, Job, Presence } from '@shared/types';
+import { COMPANION_TO_ENGINE_PRESENCE } from '@shared/types';
 import { Badge, Button, Field, Modal, Select } from '../components/ui';
 import {
+  BUDGET_OPTIONS,
+  COMPANION_PRESENCE_OPTIONS,
   PRESENCE_OPTIONS,
   captureSummary,
   enabledModes,
@@ -40,6 +43,8 @@ export function StartSessionModal(props: {
   const [spaces, setSpaces] = useState<Job[]>([]);
   const [source, setSource] = useState<'system' | 'mic'>('system');
   const [presence, setPresence] = useState<Presence>('quiet'); // meetings: quiet by default
+  const [companionPresence, setCompanionPresence] = useState<CompanionPresence>('assistive');
+  const [budgetCents, setBudgetCents] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,9 +66,14 @@ export function StartSessionModal(props: {
     loadSettings,
   ]);
 
-  // Default the source to the persisted audio preference.
+  // Default the source to the persisted audio preference; companion defaults
+  // (posture + budget) come from the global companion config.
   useEffect(() => {
     if (settings?.audio) setSource(settings.audio.source);
+    if (settings?.companionPrefs) {
+      setCompanionPresence(settings.companionPrefs.presence);
+      setBudgetCents(settings.companionPrefs.budgetCents);
+    }
   }, [settings]);
 
   // Spaces are per-profile (they ground the answers in that profile's world).
@@ -102,15 +112,24 @@ export function StartSessionModal(props: {
         profileId,
         jobId: spaceId || null,
         interviewType: 'general',
-        answerFormat: 'key_points',
-        source,
+        // Companion replies are spoken persona prose, not glanceable cues.
+        answerFormat: mode === 'companion' ? 'explanation' : 'key_points',
+        // Companion listens to YOU — always the microphone.
+        source: mode === 'companion' ? 'mic' : source,
         micDeviceId: settings?.audio?.micDeviceId ?? null,
         mode,
-        presence: mode === 'meeting' ? presence : undefined,
+        presence:
+          mode === 'meeting'
+            ? presence
+            : mode === 'companion'
+              ? COMPANION_TO_ENGINE_PRESENCE[companionPresence]
+              : undefined,
+        companionPresence: mode === 'companion' ? companionPresence : undefined,
+        budgetCents: mode === 'companion' ? budgetCents : undefined,
       });
       props.onClose();
-      // Interviews continue in their workspace; meetings live in the Cue Card.
-      navigate(mode === 'meeting' ? '/home' : '/interview');
+      // Interviews continue in their workspace; ambient modes live in the Cue Card.
+      navigate(mode === 'meeting' || mode === 'companion' ? '/home' : '/interview');
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -146,7 +165,7 @@ export function StartSessionModal(props: {
               >
                 <span className="flex items-center gap-1.5 font-medium text-neutral-100">
                   {m.label}
-                  {m.id === 'meeting' && <Badge tone="amber">Labs</Badge>}
+                  {(m.id === 'meeting' || m.id === 'companion') && <Badge tone="amber">Labs</Badge>}
                 </span>
                 <span className="mt-0.5 block text-xs leading-snug text-neutral-400">{m.desc}</span>
               </button>
@@ -200,7 +219,9 @@ export function StartSessionModal(props: {
               </Field>
             </div>
 
-            {/* 3 · Input sources */}
+            {/* 3 · Input sources. Companion always listens to YOUR mic — the
+                whole point is an ambient presence while you work. */}
+            {mode !== 'companion' && (
             <fieldset>
               <legend className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
                 Listen to
@@ -230,6 +251,7 @@ export function StartSessionModal(props: {
                 ))}
               </div>
             </fieldset>
+            )}
 
             {/* 3b · Presence — meetings only: explicit thresholds, not a vibe. */}
             {mode === 'meeting' && (
@@ -242,6 +264,39 @@ export function StartSessionModal(props: {
                   ))}
                 </Select>
               </Field>
+            )}
+
+            {/* 3c · Companion posture + hard budget — the InterjectionPolicy's
+                explicit dials, chosen before anything starts. */}
+            {mode === 'companion' && (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Presence">
+                  <Select
+                    value={companionPresence}
+                    onChange={(e) => setCompanionPresence(e.target.value as CompanionPresence)}
+                  >
+                    {COMPANION_PRESENCE_OPTIONS.map((p) => (
+                      <option key={p.value} value={p.value}>
+                        {p.label} — {p.desc}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Session budget">
+                  <Select
+                    value={budgetCents === null ? '' : String(budgetCents)}
+                    onChange={(e) =>
+                      setBudgetCents(e.target.value === '' ? null : Number(e.target.value))
+                    }
+                  >
+                    {BUDGET_OPTIONS.map((b) => (
+                      <option key={b.label} value={b.value === null ? '' : String(b.value)}>
+                        {b.label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
             )}
 
             {/* 4 · Exactly what is captured and sent — before anything starts. */}

@@ -101,6 +101,23 @@ export function registerJobsIpc(): void {
     ({ id, notes }) => jobsRepo.update(id, { notes }),
   );
 
+  // Per-Space companion behavior overrides (null = inherit the global config).
+  handle(
+    IPC.jobs.setCompanionPrefs,
+    z.object({
+      id: z.string().min(1),
+      prefs: z
+        .object({
+          tone: z.enum(['warm', 'neutral', 'direct']).optional(),
+          brevity: z.enum(['terse', 'normal', 'chatty']).optional(),
+          humor: z.boolean().optional(),
+          presence: z.enum(['off', 'on_demand', 'assistive', 'proactive']).optional(),
+        })
+        .nullable(),
+    }),
+    ({ id, prefs }) => jobsRepo.setCompanionPrefs(id, prefs ?? null),
+  );
+
   // Generate a grounded pre-interview brief from the profile's résumé × the job's
   // JD × any company research. Reuses the parsed structures (no re-parse); returns
   // the brief to the renderer (not persisted — it's regenerated on demand).

@@ -3,10 +3,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useTourStore } from '../../store/useTourStore';
 import { api } from '../../lib/api';
-import type { AppSettings } from '@shared/types';
+import type { AppSettings, CompanionPrefs } from '@shared/types';
+import { FLAGS } from '@shared/flags';
 import { SHORTCUT_DEFS } from '@shared/shortcuts';
 import type { UpdateStatus } from '@shared/ipc';
-import { Badge, Button, Card, Field, Page, Switch, TextInput } from '../../components/ui';
+import { Badge, Button, Card, Field, Page, Select, Switch, TextInput } from '../../components/ui';
+import { BUDGET_OPTIONS, COMPANION_PRESENCE_OPTIONS } from '../startFlow';
 import {
   ChevronRightIcon,
   EyeIcon,
@@ -231,6 +233,8 @@ export default function SettingsPage() {
 
       {settings && <ModelsCard settings={settings} onSaved={load} />}
 
+      {FLAGS.companion && settings && <CompanionCard settings={settings} onSaved={load} />}
+
       <Card className="mt-5">
         <div className="flex items-center justify-between gap-4">
           <div>
@@ -247,6 +251,163 @@ export default function SettingsPage() {
 
       <DangerZoneCard onChanged={load} />
     </Page>
+  );
+}
+
+const minToTime = (min: number) =>
+  `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+const timeToMin = (t: string) => {
+  const [h, m] = t.split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+};
+
+/** Global companion configuration: personality (the ONE persona source —
+ *  engine/persona.ts renders it), default posture, a do-not-disturb window,
+ *  and the default hard session budget. Per-Space overrides live on each
+ *  Space in the Library. */
+function CompanionCard({ settings, onSaved }: { settings: AppSettings; onSaved: () => Promise<void> }) {
+  const [prefs, setPrefs] = useState<CompanionPrefs>(settings.companionPrefs);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => setPrefs(settings.companionPrefs), [settings.companionPrefs]);
+
+  const dnd = prefs.dnd[0] ?? null;
+  const patch = (p: Partial<CompanionPrefs>) => {
+    setSaved(false);
+    setPrefs((v) => ({ ...v, ...p }));
+  };
+  const patchPersonality = (p: Partial<CompanionPrefs['personality']>) =>
+    patch({ personality: { ...prefs.personality, ...p } });
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.settings.set({ companionPrefs: prefs });
+      await onSaved();
+      setSaved(true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card className="mt-5">
+      <div className="mb-1 flex items-center gap-2">
+        <h3 className="font-medium">Companion</h3>
+        <Badge tone="amber">Labs</Badge>
+      </div>
+      <p className="mb-4 text-sm text-neutral-400">
+        How the companion behaves in every session. A Space can override tone, brevity, humor, and
+        posture for sessions grounded in it (Library › Spaces).
+      </p>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Name">
+          <TextInput
+            value={prefs.personality.name}
+            onChange={(e) => patchPersonality({ name: e.target.value })}
+            placeholder="BrainCue"
+          />
+        </Field>
+        <Field label="Tone">
+          <Select
+            value={prefs.personality.tone}
+            onChange={(e) => patchPersonality({ tone: e.target.value as CompanionPrefs['personality']['tone'] })}
+          >
+            <option value="warm">Warm</option>
+            <option value="neutral">Neutral</option>
+            <option value="direct">Direct</option>
+          </Select>
+        </Field>
+        <Field label="Brevity">
+          <Select
+            value={prefs.personality.brevity}
+            onChange={(e) => patchPersonality({ brevity: e.target.value as CompanionPrefs['personality']['brevity'] })}
+          >
+            <option value="terse">Terse</option>
+            <option value="normal">Normal</option>
+            <option value="chatty">Chatty</option>
+          </Select>
+        </Field>
+        <Field label="Default presence">
+          <Select
+            value={prefs.presence}
+            onChange={(e) => patch({ presence: e.target.value as CompanionPrefs['presence'] })}
+          >
+            {COMPANION_PRESENCE_OPTIONS.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label} — {p.desc}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Default session budget">
+          <Select
+            value={prefs.budgetCents === null ? '' : String(prefs.budgetCents)}
+            onChange={(e) =>
+              patch({ budgetCents: e.target.value === '' ? null : Number(e.target.value) })
+            }
+          >
+            {BUDGET_OPTIONS.map((b) => (
+              <option key={b.label} value={b.value === null ? '' : String(b.value)}>
+                {b.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </div>
+
+      <div className="mt-4 flex items-center justify-between gap-4 border-t border-white/5 pt-4">
+        <div>
+          <h4 className="text-sm font-medium">Light humor</h4>
+          <p className="mt-0.5 text-xs text-neutral-500">Allow the occasional aside when it fits.</p>
+        </div>
+        <Switch
+          checked={prefs.personality.humor}
+          onChange={(v) => patchPersonality({ humor: v })}
+        />
+      </div>
+
+      <div className="mt-4 flex items-center justify-between gap-4 border-t border-white/5 pt-4">
+        <div>
+          <h4 className="text-sm font-medium">Do not disturb</h4>
+          <p className="mt-0.5 text-xs text-neutral-500">
+            No automatic contributions in this window (summons still answer). Spans midnight if the
+            end is earlier than the start.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {dnd && (
+            <>
+              <input
+                type="time"
+                value={minToTime(dnd.startMin)}
+                onChange={(e) => patch({ dnd: [{ ...dnd, startMin: timeToMin(e.target.value) }] })}
+                className="rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm text-neutral-100"
+              />
+              <span className="text-xs text-neutral-500">to</span>
+              <input
+                type="time"
+                value={minToTime(dnd.endMin)}
+                onChange={(e) => patch({ dnd: [{ ...dnd, endMin: timeToMin(e.target.value) }] })}
+                className="rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm text-neutral-100"
+              />
+            </>
+          )}
+          <Switch
+            checked={!!dnd}
+            onChange={(v) => patch({ dnd: v ? [{ startMin: 1320, endMin: 420 }] : [] })}
+          />
+        </div>
+      </div>
+
+      <div className="mt-4 flex items-center justify-end gap-3 border-t border-white/5 pt-4">
+        {saved && <span className="text-xs text-green-400">Saved ✓</span>}
+        <Button variant="primary" onClick={() => void save()} loading={saving}>
+          Save companion settings
+        </Button>
+      </div>
+    </Card>
   );
 }
 

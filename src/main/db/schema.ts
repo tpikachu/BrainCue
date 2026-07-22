@@ -75,6 +75,9 @@ export const contextPacks = sqliteTable(
     // consent is on): sessions in a disabled Space neither extract nor
     // recall memories.
     memoryEnabled: integer('memory_enabled').notNull().default(1),
+    // Per-Space companion behavior overrides (json CompanionSpaceOverrides:
+    // tone/brevity/humor/presence — null = inherit the global config).
+    companionPrefs: text('companion_prefs'),
     createdAt: integer('created_at').notNull().default(now),
     updatedAt: integer('updated_at').notNull().default(now),
   },
