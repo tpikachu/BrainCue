@@ -457,3 +457,36 @@ export interface ContextSentEvent {
   question: string;
   chunks: RetrievedChunk[];
 }
+
+// --- Generic contribution events (EVENTS.contribution*) ---------------------
+// The overlay's v2 card feed. Main dual-emits these alongside the legacy
+// answer* events above, which stay as a one-release compatibility adapter
+// (the dashboard still consumes them) — see src/main/ipc/contributionBridge.ts.
+
+/** A new contribution began (a detected question's answer, a coding solve, …). */
+export interface ContributionOpenEvent {
+  contributionId: string;
+  kind: ContributionKind;
+  title: string;
+}
+/** One streamed token of the contribution body. */
+export interface ContributionDeltaEvent {
+  contributionId: string;
+  token: string;
+}
+/** Named post-open annotations. Exactly the payloads the legacy answer events
+ *  carried, so cards render identically; only the fields present are patched. */
+export interface ContributionPatchEvent {
+  contributionId: string;
+  meta?: AnswerMetaEvent;
+  context?: ContextSentEvent;
+  followup?: string;
+}
+/** The contribution's stream finished (completed OR aborted — mirrors answerDone). */
+export interface ContributionDoneEvent {
+  contributionId: string;
+}
+/** The contribution is being re-generated: clear its body, keep the card. */
+export interface ContributionResetEvent {
+  contributionId: string;
+}

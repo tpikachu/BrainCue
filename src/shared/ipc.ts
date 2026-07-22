@@ -168,6 +168,14 @@ export const EVENTS = {
   answerReset: 'session:answer-reset', // regenerate: clear the Cue Card answer, keep the transcript
   answerFollowup: 'session:answer-followup', // post-stream predicted interviewer follow-up
   contextSent: 'session:context',
+  // v2 generic contribution surface (the overlay's card feed). The answer*
+  // events above are dual-emitted as a compatibility adapter for one more
+  // release — see src/main/ipc/contributionBridge.ts.
+  contributionOpen: 'contribution:open',
+  contributionDelta: 'contribution:delta',
+  contributionPatch: 'contribution:patch',
+  contributionDone: 'contribution:done',
+  contributionReset: 'contribution:reset',
   sessionError: 'session:error',
   overlayApplySettings: 'overlay:apply-settings',
   shortcutFired: 'shortcut:fired',

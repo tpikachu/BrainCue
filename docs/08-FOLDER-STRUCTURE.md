@@ -98,7 +98,13 @@ AI_Inter/
 │     │  ├─ App.tsx             # router + shell (hosts the guided tour)
 │     │  ├─ Tour.tsx            # first-run guided tour (spotlight + steps)
 │     │  └─ pages/  (Profiles, ProfileEditor, Session, Mock, Reports, Settings)
-│     ├─ overlay/Overlay.tsx    # always-on-top answer overlay
+│     ├─ overlay/               # always-on-top Cue Card (contribution feed)
+│     │  ├─ Overlay.tsx          # shell: window state, IPC subscriptions, composition
+│     │  ├─ store/useOverlayStore.ts   # zustand card feed (reducers in cards/model.ts)
+│     │  ├─ cards/               # ContributionCard frame + registry.ts + per-kind views + UnknownCardView
+│     │  ├─ controls/            # HeaderBar  SessionBar  AnswerControls  AskBar  Btn  EqualizerBars
+│     │  ├─ panels/              # ClientNotes  Captures  ErrorBanner  AudioMeter  Transcript  DataSent  SettingsModal
+│     │  └─ lib/                 # streamBuffer.ts (rAF token coalescer)  style.ts
 │     └─ selection/RegionSelector.tsx  # region-capture window
 │
 └─ (userData at runtime: app.db, documents/, vectors/ — see 04-DATABASE.md)

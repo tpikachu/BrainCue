@@ -224,6 +224,11 @@ Channel constants live in `EVENTS` (`src/shared/ipc.ts`); payload types are in
 | `session:answer-meta` | `{ questionId, talkingPoints, resumeMatch, star, clarifyingQuestion, riskWarning, followupQuestion }` | overlay |
 | `session:answer-done` | `{ questionId }` | overlay |
 | `session:answer-reset` | `{ questionId }` | overlay (regenerate: clear the Cue Card answer but keep the transcript — no new question row/line) |
+| `contribution:open` | `ContributionOpenEvent` (`{ contributionId, kind, title }`) | overlay — the v2 generic card feed. Every engine/solver output dual-emits a generic contribution event AND its legacy `session:answer-*`/`question-detected` twin with the exact v1 payload (compat adapter for one release; see `src/main/ipc/contributionBridge.ts`). The overlay consumes ONLY these; the dashboard still uses the legacy events |
+| `contribution:delta` | `{ contributionId, token }` | overlay (streamed body token, routed by contribution id) |
+| `contribution:patch` | `{ contributionId, meta?, context?, followup? }` | overlay (named annotations — the same payloads the legacy answer-meta / context / answer-followup events carry) |
+| `contribution:done` | `{ contributionId }` | overlay (stream finished — completed or aborted) |
+| `contribution:reset` | `{ contributionId }` | overlay (regenerate: clear that card's body, keep the card) |
 | `session:client-info` | `ClientInfo \| null` | overlay (active interview: company/title/notes + profileName + grounding flags hasResume/hasJd/hasCompany, for the Cue Card header + session bar + ⓘ panel; `null` clears on stop) |
 | `session:answer-prefs` | `AnswerPrefs` (`{ interviewType, format, pronunciation }`) | overlay (seeds the Cue Card answer-control toggles) |
 | `session:audio-level` | `{ level }` (0-1 RMS, ~12/sec) | overlay (drives the Cue Card mic meter; computed in `feedRealtimeAudio` since the stream lives in the dashboard renderer) |

@@ -4,6 +4,11 @@ import type { AnswerPrefs, ClientInfo, ConfirmRequest, SavePrompt, UpdateStatus 
 import type {
   Application,
   ApplicationListItem,
+  ContributionDeltaEvent,
+  ContributionDoneEvent,
+  ContributionOpenEvent,
+  ContributionPatchEvent,
+  ContributionResetEvent,
   InterviewBrief,
   SparringFeedback,
   Story,
@@ -304,6 +309,18 @@ const api = {
     onAnswerReset: (cb: (p: unknown) => void) => on(EVENTS.answerReset, cb),
     onAnswerFollowup: (cb: (p: unknown) => void) => on(EVENTS.answerFollowup, cb),
     onContextSent: (cb: (p: unknown) => void) => on(EVENTS.contextSent, cb),
+    // v2 generic contribution feed (the overlay's card surface). The legacy
+    // answer* events above are dual-emitted for one more release.
+    onContributionOpen: (cb: (p: ContributionOpenEvent) => void) =>
+      on(EVENTS.contributionOpen, cb),
+    onContributionDelta: (cb: (p: ContributionDeltaEvent) => void) =>
+      on(EVENTS.contributionDelta, cb),
+    onContributionPatch: (cb: (p: ContributionPatchEvent) => void) =>
+      on(EVENTS.contributionPatch, cb),
+    onContributionDone: (cb: (p: ContributionDoneEvent) => void) =>
+      on(EVENTS.contributionDone, cb),
+    onContributionReset: (cb: (p: ContributionResetEvent) => void) =>
+      on(EVENTS.contributionReset, cb),
     onSessionError: (cb: (p: unknown) => void) => on(EVENTS.sessionError, cb),
     onOverlayApplySettings: (cb: (p: unknown) => void) => on(EVENTS.overlayApplySettings, cb),
     onShortcutFired: (cb: (p: unknown) => void) => on(EVENTS.shortcutFired, cb),

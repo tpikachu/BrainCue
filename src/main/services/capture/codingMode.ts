@@ -1,6 +1,12 @@
 import { clipboard } from 'electron';
 import { EVENTS } from '@shared/ipc';
 import { broadcast } from '../../ipc/broadcast';
+import {
+  emitContributionDelta,
+  emitContributionDone,
+  emitContributionMeta,
+  emitContributionOpen,
+} from '../../ipc/contributionBridge';
 import { solveFromOcr } from '../openai/coding';
 import { solveFromImages } from '../openai/vision';
 import { normalizeOpenAIError } from '../openai/client';
@@ -76,13 +82,16 @@ async function streamToOverlay(
 
   const questionId = crypto.randomUUID();
   showOverlay();
-  broadcast(EVENTS.questionDetected, { id: questionId, text: label, type: 'coding' }, ['overlay']);
+  emitContributionOpen(
+    { contributionId: questionId, kind: 'code', title: label, legacyExtra: { type: 'coding' } },
+    ['overlay'],
+  );
   try {
     for await (const ev of makeGen(abort.signal)) {
       if (ev.type === 'delta') {
-        broadcast(EVENTS.answerDelta, { questionId, token: ev.token }, ['overlay']);
+        emitContributionDelta(questionId, ev.token, ['overlay']);
       } else if (ev.type === 'meta') {
-        broadcast(EVENTS.answerMeta, { questionId, ...ev }, ['overlay']);
+        emitContributionMeta(questionId, { questionId, ...ev }, ['overlay']);
       }
     }
   } catch (e) {
@@ -92,7 +101,7 @@ async function streamToOverlay(
     }
   } finally {
     if (activeSolve === abort) activeSolve = null;
-    broadcast(EVENTS.answerDone, { questionId }, ['overlay']);
+    emitContributionDone(questionId, ['overlay']);
   }
 }
 
@@ -120,13 +129,14 @@ export function resolveLast(): Promise<void> {
   if (!lastSolve) {
     const questionId = crypto.randomUUID();
     showOverlay();
-    broadcast(EVENTS.questionDetected, { id: questionId, text: 'Re-solve', type: 'coding' }, [
-      'overlay',
-    ]);
+    emitContributionOpen(
+      { contributionId: questionId, kind: 'code', title: 'Re-solve', legacyExtra: { type: 'coding' } },
+      ['overlay'],
+    );
     broadcast(EVENTS.sessionError, { message: 'Nothing to re-solve yet — solve a problem first.' }, [
       'overlay',
     ]);
-    broadcast(EVENTS.answerDone, { questionId }, ['overlay']);
+    emitContributionDone(questionId, ['overlay']);
     return Promise.resolve();
   }
   const last = lastSolve;
@@ -148,15 +158,21 @@ export async function quickSolveFromClipboard(): Promise<void> {
   if (!text) {
     const questionId = crypto.randomUUID();
     showOverlay();
-    broadcast(EVENTS.questionDetected, { id: questionId, text: 'Coding help', type: 'coding' }, [
-      'overlay',
-    ]);
+    emitContributionOpen(
+      {
+        contributionId: questionId,
+        kind: 'code',
+        title: 'Coding help',
+        legacyExtra: { type: 'coding' },
+      },
+      ['overlay'],
+    );
     broadcast(
       EVENTS.sessionError,
       { message: 'Clipboard is empty. Copy the problem text first, then press the hotkey.' },
       ['overlay'],
     );
-    broadcast(EVENTS.answerDone, { questionId }, ['overlay']);
+    emitContributionDone(questionId, ['overlay']);
     return;
   }
   await runCodingSolve(text);

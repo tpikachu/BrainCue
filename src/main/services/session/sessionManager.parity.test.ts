@@ -393,6 +393,48 @@ describe('engine behaviors surfaced by the extraction (v2)', () => {
     sessionManager.stop(session.id);
   });
 
+  it('every legacy answer event has a generic contribution twin (dual-emit)', async () => {
+    const { session } = startSession();
+    h.classify = async () => ({ isQuestion: true, type: 'behavioral', confidence: 0.9, strategy: 'star' });
+    h.retrieve = async () => [{ id: 'c1', sourceType: 'resume', content: 'Led a migration', score: 0.8 }];
+
+    const q = 'Tell me about the migration?';
+    await sessionManager.processFinalTranscript(session.id, q);
+
+    const qId = (evts(EVENTS.questionDetected).at(0)?.payload as { id: string }).id;
+    expect(evts(EVENTS.contributionOpen).at(0)?.payload).toEqual({
+      contributionId: qId,
+      kind: 'answer',
+      title: q,
+    });
+    // Streamed tokens mirror exactly, routed by the same id.
+    expect(
+      evts(EVENTS.contributionDelta).map((e) => (e.payload as { token: string }).token),
+    ).toEqual(evts(EVENTS.answerDelta).map((e) => (e.payload as { token: string }).token));
+    // Context + meta arrive as named patch fields with the v1 payloads verbatim.
+    const patches = evts(EVENTS.contributionPatch).map(
+      (e) => e.payload as { contributionId: string; context?: unknown; meta?: unknown },
+    );
+    expect(patches.every((p) => p.contributionId === qId)).toBe(true);
+    expect(patches.find((p) => p.context)?.context).toEqual(
+      evts(EVENTS.contextSent).at(0)?.payload,
+    );
+    expect(patches.find((p) => p.meta)?.meta).toEqual(evts(EVENTS.answerMeta).at(0)?.payload);
+    expect(evts(EVENTS.contributionDone).at(-1)?.payload).toEqual({ contributionId: qId });
+    sessionManager.stop(session.id);
+  });
+
+  it('regenerate dual-emits contributionReset alongside answerReset', async () => {
+    const { session } = startSession();
+    await sessionManager.answerQuestion(session.id, 'Tricky?');
+    await sessionManager.regenerate();
+    const legacy = evts(EVENTS.answerReset).at(0)?.payload as { questionId: string };
+    expect(evts(EVENTS.contributionReset).at(0)?.payload).toEqual({
+      contributionId: legacy.questionId,
+    });
+    sessionManager.stop(session.id);
+  });
+
   it('a completed answer dual-writes one contribution row with provenance', async () => {
     const { session } = startSession();
     h.classify = async () => ({ isQuestion: true, type: 'behavioral', confidence: 0.9, strategy: 'star' });

@@ -16,6 +16,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    // .tsx tests = component smoke tests rendered via react-dom/server (no jsdom).
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
   },
 });

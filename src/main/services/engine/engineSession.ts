@@ -1,5 +1,14 @@
 import { EVENTS } from '@shared/ipc';
 import { broadcast } from '../../ipc/broadcast';
+import {
+  emitContributionContext,
+  emitContributionDelta,
+  emitContributionDone,
+  emitContributionFollowup,
+  emitContributionMeta,
+  emitContributionOpen,
+  emitContributionReset,
+} from '../../ipc/contributionBridge';
 import { normalizeOpenAIError } from '../openai/client';
 import { profilesRepo } from '../../db/repositories/profiles.repo';
 import { log } from '../security/logger';
@@ -174,14 +183,17 @@ export class EngineSession {
       strategy: q.strategy,
       transcriptChunkId,
     });
-    broadcast(EVENTS.questionDetected, {
-      id: questionId,
-      sessionId: this.sessionId,
-      text: questionText,
-      type: q.type,
-      confidence: q.confidence,
-      strategy: q.strategy,
-      createdAt: Date.now(),
+    emitContributionOpen({
+      contributionId: questionId,
+      kind: q.type === 'coding' ? 'code' : 'answer',
+      title: questionText,
+      legacyExtra: {
+        sessionId: this.sessionId,
+        type: q.type,
+        confidence: q.confidence,
+        strategy: q.strategy,
+        createdAt: Date.now(),
+      },
     });
     // Remember this question so the Cue Card can re-generate it (length/format/
     // pronunciation toggles) by reusing THIS question row — no duplicate line.
@@ -218,7 +230,7 @@ export class EngineSession {
       // surfaced + un-wedges the card too — not just generate failures.
       context = await ground(profile.id, questionText, session.packId);
       // Transparency: tell the UI exactly what was sent to the provider.
-      broadcast(EVENTS.contextSent, { questionId, question: questionText, chunks: context });
+      emitContributionContext(questionId, { questionId, question: questionText, chunks: context });
       for await (const ev of this.mode.generate({
         question: questionText,
         contextChunks: context,
@@ -228,12 +240,12 @@ export class EngineSession {
       })) {
         if (ev.type === 'delta') {
           answer += ev.token;
-          broadcast(EVENTS.answerDelta, { questionId, token: ev.token });
+          emitContributionDelta(questionId, ev.token);
         } else if (ev.type === 'usage') {
           tokens = { prompt: ev.prompt, completion: ev.completion };
         } else if (ev.type === 'meta') {
           meta = ev;
-          broadcast(EVENTS.answerMeta, { questionId, ...ev });
+          emitContributionMeta(questionId, { questionId, ...ev });
         }
       }
     } catch (e) {
@@ -242,14 +254,14 @@ export class EngineSession {
       // cursor. (With per-card regenerate + history, the aborted card may be a
       // DIFFERENT, still-visible one than the card being regenerated.)
       if (abort.signal.aborted) {
-        broadcast(EVENTS.answerDone, { questionId });
+        emitContributionDone(questionId);
         return { questionId };
       }
       // A real failure (auth, quota, network drop, model-not-found): surface it and
       // clear the Cue Card's streaming state, instead of leaving the card spinning
       // forever with no error (the most common live failure — e.g. an expired key).
       broadcast(EVENTS.sessionError, { message: normalizeOpenAIError(e) });
-      broadcast(EVENTS.answerDone, { questionId });
+      emitContributionDone(questionId);
       throw e;
     } finally {
       // Only the stream that still OWNS the slot may release it. An aborted stream
@@ -282,7 +294,7 @@ export class EngineSession {
       ],
     });
 
-    broadcast(EVENTS.answerDone, { questionId });
+    emitContributionDone(questionId);
 
     // Predict the likely follow-up AFTER the answer is done — a cheap
     // classify-tier call that can never touch first-token latency.
@@ -299,7 +311,7 @@ export class EngineSession {
           if (this.followupGeneration.get(questionId) !== followupGen) return;
           if (this.stopped) return;
           persist.setFollowup(questionId, followup);
-          broadcast(EVENTS.answerFollowup, { questionId, followup }, ['overlay']);
+          emitContributionFollowup(questionId, followup, ['overlay']);
         })
         .catch((e) => log.warn('followup prediction failed', e));
     }
@@ -330,7 +342,7 @@ export class EngineSession {
     // the aborted stream can't land in the cleared answer.
     this.answerAbort?.abort();
     // Clear that question's answer in the Cue Card (without touching the transcript).
-    broadcast(EVENTS.answerReset, { questionId: qid });
+    emitContributionReset(qid);
     await this.generateContribution(qid, text);
     return { regenerated: true };
   }

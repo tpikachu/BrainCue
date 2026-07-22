@@ -1,76 +1,67 @@
 import { describe, it, expect } from 'vitest';
 import {
   makeCard,
-  patchLast,
   patchById,
   appendById,
   addCard,
   removeCard,
   toggleCollapsed,
-  type AnswerCard,
-} from './answerCards';
+  type CardModel,
+} from './model';
 
-const card = (id: number, over: Partial<AnswerCard> = {}): AnswerCard => ({
-  ...makeCard(id, `q${id}`, `q${id}`),
+const card = (id: number, over: Partial<CardModel> = {}): CardModel => ({
+  ...makeCard(id, `c${id}`, 'answer', `q${id}`),
   ...over,
 });
 
 describe('makeCard', () => {
-  it('starts expanded + streaming with an empty answer', () => {
-    expect(makeCard(1, 'qid-1', 'why hashmap?')).toEqual({
+  it('starts expanded + streaming with an empty body', () => {
+    expect(makeCard(1, 'cid-1', 'answer', 'why hashmap?')).toEqual({
       id: 1,
-      questionId: 'qid-1',
-      question: 'why hashmap?',
-      answer: '',
+      contributionId: 'cid-1',
+      kind: 'answer',
+      title: 'why hashmap?',
+      body: '',
       meta: null,
       context: null,
       followup: null,
       streaming: true,
       collapsed: false,
-      isCoding: false,
     });
   });
-  it('flags coding-solve cards', () => {
-    expect(makeCard(2, 'qid-2', 'Coding problem', true).isCoding).toBe(true);
+  it('keeps the kind — including one this build does not know', () => {
+    expect(makeCard(2, 'cid-2', 'code', 'Coding problem').kind).toBe('code');
+    expect(makeCard(3, 'cid-3', 'galactic_forecast', 'From the future').kind).toBe(
+      'galactic_forecast',
+    );
   });
 });
 
-describe('patchLast', () => {
-  it('patches only the newest card', () => {
-    const out = patchLast([card(1), card(2)], { answer: 'done', streaming: false });
-    expect(out[0]).toEqual(card(1)); // untouched
-    expect(out[1]).toMatchObject({ id: 2, answer: 'done', streaming: false });
-  });
-  it('is a no-op on an empty list', () => {
-    expect(patchLast([], { answer: 'x' })).toEqual([]);
-  });
-  it('does not mutate the input array', () => {
-    const input = [card(1)];
-    patchLast(input, { answer: 'x' });
-    expect(input[0].answer).toBe('');
-  });
-});
-
-describe('patchById / appendById (route by backend questionId)', () => {
-  it('patchById patches the card matching the questionId, not the last', () => {
-    const out = patchById([card(1), card(2)], 'q1', { streaming: false });
+describe('patchById / appendById (route by backend contributionId)', () => {
+  it('patchById patches the card matching the contributionId, not the last', () => {
+    const out = patchById([card(1), card(2)], 'c1', { streaming: false });
     expect(out[0]).toMatchObject({ id: 1, streaming: false });
     expect(out[1]).toMatchObject({ id: 2, streaming: true }); // untouched
   });
   it('patchById is a no-op when no card matches', () => {
     const input = [card(1)];
-    expect(patchById(input, 'nope', { answer: 'x' })).toEqual(input);
+    expect(patchById(input, 'nope', { body: 'x' })).toEqual(input);
   });
   it('appendById appends a chunk to the matching card only', () => {
-    const out = appendById([card(1, { answer: 'A' }), card(2, { answer: 'B' })], 'q2', 'C');
-    expect(out[0].answer).toBe('A');
-    expect(out[1].answer).toBe('BC');
+    const out = appendById([card(1, { body: 'A' }), card(2, { body: 'B' })], 'c2', 'C');
+    expect(out[0].body).toBe('A');
+    expect(out[1].body).toBe('BC');
+  });
+  it('does not mutate the input array', () => {
+    const input = [card(1)];
+    appendById(input, 'c1', 'x');
+    expect(input[0].body).toBe('');
   });
 });
 
 describe('addCard — history OFF (replace)', () => {
   it('drops prior cards, keeping only the new one', () => {
-    const out = addCard([card(1), card(2)], makeCard(3, 'q3', 'q3'), false);
+    const out = addCard([card(1), card(2)], makeCard(3, 'c3', 'answer', 'q3'), false);
     expect(out).toHaveLength(1);
     expect(out[0].id).toBe(3);
   });
@@ -79,15 +70,15 @@ describe('addCard — history OFF (replace)', () => {
 describe('addCard — history ON (keep + collapse)', () => {
   it('collapses prior cards, stops their streaming, and appends the new one expanded', () => {
     const prior = [card(1, { streaming: true, collapsed: false }), card(2, { streaming: true })];
-    const out = addCard(prior, makeCard(3, 'q3', 'q3'), true);
+    const out = addCard(prior, makeCard(3, 'c3', 'answer', 'q3'), true);
     expect(out.map((c) => c.id)).toEqual([1, 2, 3]);
     expect(out[0]).toMatchObject({ collapsed: true, streaming: false });
     expect(out[1]).toMatchObject({ collapsed: true, streaming: false });
     expect(out[2]).toMatchObject({ id: 3, collapsed: false, streaming: true });
   });
-  it('preserves prior answers (history is not lost)', () => {
-    const out = addCard([card(1, { answer: 'kept' })], makeCard(2, 'q2', 'q2'), true);
-    expect(out[0].answer).toBe('kept');
+  it('preserves prior bodies (history is not lost)', () => {
+    const out = addCard([card(1, { body: 'kept' })], makeCard(2, 'c2', 'answer', 'q2'), true);
+    expect(out[0].body).toBe('kept');
   });
 });
 
