@@ -31,6 +31,16 @@ vi.mock('./models', () => ({
   model: () => (h.reasoning ? 'gpt-5-mini' : 'gpt-4.1-mini'),
   isReasoningModel: () => h.reasoning,
   reasoningEffort: () => null,
+  EMBEDDING_DIM: 1536, // imported by the provider layer
+}));
+// The provider layer also loads the realtime module, whose apiKey → env chain
+// needs electron — stub it out.
+vi.mock('./realtime', () => ({
+  RealtimeTranscriber: class {
+    start() {}
+    appendAudio() {}
+    stop() {}
+  },
 }));
 
 import { streamAnswer } from './answer';

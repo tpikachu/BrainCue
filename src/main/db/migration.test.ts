@@ -78,6 +78,10 @@ describe('migration 0008 on a v1.5.x database', () => {
 
     const c2 = db.select().from(schema.chunks).where(eq(schema.chunks.id, 'c2')).all()[0];
     expect(c2.packId).toBe('j1');
+    // 0010: every pre-existing embedding is stamped with the reference provider.
+    for (const e of db.select().from(schema.embeddings).all()) {
+      expect(e.provider).toBe('openai');
+    }
     const app = db.select().from(schema.applications).all()[0];
     expect(app.packId).toBe('j3');
     const an1 = db.select().from(schema.aiAnswers).all()[0];

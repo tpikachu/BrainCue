@@ -1,5 +1,4 @@
-import { openai } from './client';
-import { isReasoningModel, model, reasoningEffort } from './models';
+import { providerFor } from '../../providers/registry';
 import type { AnswerFormat, InterviewType, Profile, RetrievedChunk } from '@shared/types';
 
 export interface AnswerInput {
@@ -133,54 +132,34 @@ export async function* streamAnswer(input: AnswerInput): AsyncGenerator<AnswerEv
     .filter(Boolean)
     .join('\n');
 
-  // The user can override the answer task to ANY model (Settings → OpenAI Models),
-  // including gpt-5/o-series. Reasoning models burn hidden reasoning tokens against
-  // max_output_tokens FIRST, so without headroom + an explicit low effort the tight
-  // per-format ceiling would be consumed before any visible text is emitted.
-  const answerModel = model('answer');
-  const reasoning = isReasoningModel(answerModel);
-
-  const stream = await openai().responses.stream(
-    {
-      model: answerModel,
-      ...(reasoning ? { reasoning: { effort: reasoningEffort('answer') ?? 'low' } } : {}),
-      // Hard ceiling per format so "key points" can never run long. Pronunciation adds
-      // a short trailing guide, so give it headroom (the guide must not eat the answer).
-      max_output_tokens:
-        FORMAT_MAX_TOKENS[input.format] +
-        (input.pronunciation ? 160 : 0) +
-        (reasoning ? 1024 : 0), // reasoning-token headroom; the prompt still binds length
-      input: [
-        { role: 'system', content: SYSTEM },
-        { role: 'user', content: userPrompt },
-      ],
-    },
-    { signal: input.signal },
-  );
-
+  // Transport goes through the chat capability provider (PRD §6.7). The user
+  // can still override the answer task to ANY model (Settings → Models) —
+  // task→model resolution and reasoning-model quirks (effort param + token
+  // headroom) live in the provider.
+  const chat = providerFor('chat');
   let emitted = false;
-  for await (const event of stream) {
-    if (event.type === 'response.output_text.delta') {
+  for await (const ev of chat.stream({
+    task: 'answer',
+    system: SYSTEM,
+    user: userPrompt,
+    // Hard ceiling per format so "key points" can never run long. Pronunciation adds
+    // a short trailing guide, so give it headroom (the guide must not eat the answer).
+    maxOutputTokens: FORMAT_MAX_TOKENS[input.format] + (input.pronunciation ? 160 : 0),
+    signal: input.signal,
+  })) {
+    if (ev.type === 'delta') {
       emitted = true;
-      yield { type: 'delta', token: event.delta };
+      yield ev;
+    } else if (ev.type === 'usage') {
+      yield ev;
     }
   }
-  // No visible text at all (e.g. the ceiling was still consumed by reasoning): surface
-  // a real error instead of leaving a silently blank card.
+  // No visible text at all (e.g. a reasoning model's ceiling was consumed by
+  // reasoning): surface a real error instead of leaving a silently blank card.
   if (!emitted)
     throw new Error(
       'The answer model returned no text. If you overrode the answer model, try a faster non-reasoning one.',
     );
-
-  const final = await stream.finalResponse();
-  const usage = final.usage;
-  if (usage) {
-    yield {
-      type: 'usage',
-      prompt: usage.input_tokens ?? 0,
-      completion: usage.output_tokens ?? 0,
-    };
-  }
 
   yield {
     type: 'meta',

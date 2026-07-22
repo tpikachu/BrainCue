@@ -1,4 +1,4 @@
-import { embedOne } from '../openai/embeddings';
+import { providerFor } from '../../providers/registry';
 import { sqliteVectorStore } from './vectorStore';
 import { STORY_CUE_MIN_SCORE, type RetrievedChunk } from '@shared/types';
 
@@ -14,7 +14,7 @@ export async function retrieve(
   k = 5,
   jobId: string | null = null,
 ): Promise<RetrievedChunk[]> {
-  const vector = await embedOne(query);
+  const vector = await providerFor('embedding').embedOne(query);
   const chunks = sqliteVectorStore.search({ profileId, query: vector, k, jobId });
   const story = sqliteVectorStore.topStory({ profileId, query: vector });
   if (story && story.score >= STORY_CUE_MIN_SCORE && !chunks.some((c) => c.id === story.id)) {

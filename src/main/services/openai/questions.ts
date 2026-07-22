@@ -1,5 +1,4 @@
-import { openai } from './client';
-import { model } from './models';
+import { providerFor } from '../../providers/registry';
 import type { QuestionType } from '@shared/types';
 
 export interface ClassifiedQuestion {
@@ -17,15 +16,11 @@ const PROMPT = `Classify the interviewer utterance. Return JSON:
 If it is not actually a question, set isQuestion=false.`;
 
 export async function classifyQuestion(text: string): Promise<ClassifiedQuestion> {
-  const res = await openai().responses.create({
-    model: model('classify'),
-    input: [
-      { role: 'system', content: PROMPT },
-      { role: 'user', content: text },
-    ],
-    text: { format: { type: 'json_object' } },
+  const raw = await providerFor('chat').json<Partial<ClassifiedQuestion>>({
+    task: 'classify',
+    system: PROMPT,
+    user: text,
   });
-  const raw = JSON.parse(res.output_text) as Partial<ClassifiedQuestion>;
   return {
     isQuestion: raw.isQuestion ?? false,
     text,

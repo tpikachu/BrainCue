@@ -1,10 +1,10 @@
 import { and, eq, isNull, ne } from 'drizzle-orm';
 import { db, schema } from '../../db';
 import { chunkText } from './chunker';
-import { embed } from '../openai/embeddings';
+import { providerFor } from '../../providers/registry';
+import { assertEmbeddingCompatibility } from './embeddingIdentity';
 import { sqliteVectorStore } from './vectorStore';
 import { vectorToBuffer } from './vectorMath';
-import { model } from '../openai/models';
 import { profilesRepo } from '../../db/repositories/profiles.repo';
 import { storiesRepo, storyInsertValues } from '../../db/repositories/stories.repo';
 import { applicationsRepo } from '../../db/repositories/applications.repo';
@@ -12,13 +12,21 @@ import { apiKeyStore } from '../security/apiKey';
 import type { Story, StoryDraft, StoryInput } from '@shared/types';
 
 async function embedChunks(rows: { id: string; content: string }[]): Promise<number> {
+  const embedder = providerFor('embedding');
+  const identity = embedder.identity();
+  if (rows.length) assertEmbeddingCompatibility(identity);
   let embedded = 0;
   const BATCH = 64;
   for (let i = 0; i < rows.length; i += BATCH) {
     const batch = rows.slice(i, i + BATCH);
-    const vectors = await embed(batch.map((b) => b.content));
+    const vectors = await embedder.embed(batch.map((b) => b.content));
     batch.forEach((b, j) =>
-      sqliteVectorStore.upsert({ chunkId: b.id, model: model('embedding'), vector: vectors[j] }),
+      sqliteVectorStore.upsert({
+        chunkId: b.id,
+        provider: identity.provider,
+        model: identity.model,
+        vector: vectors[j],
+      }),
     );
     embedded += batch.length;
   }
@@ -154,10 +162,12 @@ function storyChunkValues(profileId: string, ord: number, content: string) {
   };
 }
 function embeddingValues(chunkId: string, vector: Float32Array) {
+  const identity = providerFor('embedding').identity();
   return {
     id: crypto.randomUUID(),
     chunkId,
-    model: model('embedding'),
+    provider: identity.provider,
+    model: identity.model,
     dim: vector.length,
     vector: vectorToBuffer(vector),
   };
@@ -179,8 +189,9 @@ export async function indexStories(
 
   const stories = storiesRepo.list(profileId);
   const contents = stories.map((s) => storyToText(s));
+  if (contents.length) assertEmbeddingCompatibility(providerFor('embedding').identity());
   // Network FIRST: if this throws, no DB mutation happens below.
-  const vectors = contents.length ? await embed(contents) : [];
+  const vectors = contents.length ? await providerFor('embedding').embed(contents) : [];
 
   db().transaction((tx) => {
     tx.delete(schema.chunks).where(storyChunksOf(profileId)).run();
@@ -199,8 +210,13 @@ export async function indexStories(
  *  bank fully intact. Used by the regenerate path. */
 export async function replaceStories(profileId: string, drafts: StoryDraft[]): Promise<Story[]> {
   const contents = drafts.map((d) => storyToText(d));
+  if (apiKeyStore.isPresent() && contents.length)
+    assertEmbeddingCompatibility(providerFor('embedding').identity());
   // Network FIRST. A rejection here means nothing is deleted or inserted.
-  const vectors = apiKeyStore.isPresent() && contents.length ? await embed(contents) : [];
+  const vectors =
+    apiKeyStore.isPresent() && contents.length
+      ? await providerFor('embedding').embed(contents)
+      : [];
 
   db().transaction((tx) => {
     tx.delete(schema.stories).where(eq(schema.stories.profileId, profileId)).run();

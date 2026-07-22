@@ -5,7 +5,7 @@ import { broadcast } from '../../ipc/broadcast';
 import { profilesRepo } from '../../db/repositories/profiles.repo';
 import { contextPacksRepo } from '../../db/repositories/jobs.repo';
 import { sessionsRepo } from '../../db/repositories/sessions.repo';
-import { transcribeChunk } from '../openai/transcription';
+import { providerFor } from '../../providers/registry';
 import { getOverlayWindow, showOverlay } from '../../windows/overlayWindow';
 import { getMainWindow } from '../../windows/mainWindow';
 import { log } from '../security/logger';
@@ -89,8 +89,7 @@ class Engine {
         },
         opts.language || 'en',
       );
-      transcriber.start();
-      session.transcriber = transcriber;
+      session.transcriber = transcriber; // opened already-started by the provider
     }
 
     broadcast(EVENTS.sessionState, { status: 'live', paused: false });
@@ -211,7 +210,7 @@ class Engine {
     if (!s || s.sessionId !== sessionId || s.paused || s.busy) return;
     s.busy = true;
     try {
-      const text = (await transcribeChunk(audio, mime)).trim();
+      const text = (await providerFor('batchStt').transcribe(audio, mime)).trim();
       if (text) await this.processFinalTranscript(sessionId, text);
     } catch (e) {
       log.error('ingestAudio failed', e);

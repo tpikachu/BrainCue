@@ -14,7 +14,21 @@ vi.mock('./client', () => ({
     },
   }),
 }));
-vi.mock('./models', () => ({ model: (k: string) => `model:${k}` }));
+// The provider layer imports more of models.ts than followup itself uses —
+// stub the full surface so loading providers/openai never touches the DB.
+vi.mock('./models', () => ({
+  model: (k: string) => `model:${k}`,
+  isReasoningModel: () => false,
+  reasoningEffort: () => null,
+  EMBEDDING_DIM: 1536,
+}));
+vi.mock('./realtime', () => ({
+  RealtimeTranscriber: class {
+    start() {}
+    appendAudio() {}
+    stop() {}
+  },
+}));
 
 import { predictFollowup } from './followup';
 

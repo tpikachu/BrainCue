@@ -159,6 +159,10 @@ export const embeddings = sqliteTable(
       .notNull()
       .unique()
       .references(() => chunks.id, { onDelete: 'cascade' }),
+    // provider + model + dim identify the embedding SPACE. Vectors from
+    // different identities are not comparable — the write path refuses to mix
+    // them (rag/embeddingIdentity.ts); switching requires a re-index.
+    provider: text('provider').notNull().default('openai'),
     model: text('model').notNull(),
     dim: integer('dim').notNull(),
     vector: blob('vector', { mode: 'buffer' }).notNull(), // Float32Array bytes

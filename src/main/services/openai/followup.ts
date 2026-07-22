@@ -1,5 +1,4 @@
-import { openai } from './client';
-import { model } from './models';
+import { providerFor } from '../../providers/registry';
 
 const SYSTEM = `You anticipate interviewers. Given an interview QUESTION and the candidate's
 ANSWER, predict the ONE follow-up the interviewer is most likely to ask next — the thing the
@@ -20,26 +19,23 @@ export async function predictFollowup(input: {
   answer: string;
   interviewType: string;
 }): Promise<string | null> {
-  const res = await openai().responses.create({
-    model: model('classify'),
-    input: [
-      { role: 'system', content: SYSTEM },
-      {
-        role: 'user',
-        content:
-          `Interview type: ${input.interviewType}\n\n` +
-          `QUESTION: ${input.question}\n\n` +
-          `CANDIDATE'S ANSWER:\n${input.answer.slice(0, 4_000)}`,
-      },
-    ],
-    text: { format: { type: 'json_object' } },
-    max_output_tokens: 100,
-  });
+  let raw: { followup?: unknown };
   try {
-    const raw = JSON.parse(res.output_text) as { followup?: unknown };
-    const f = typeof raw.followup === 'string' ? raw.followup.trim() : '';
-    return f.length > 0 ? f : null;
-  } catch {
-    return null; // a malformed prediction is never worth surfacing an error for
+    raw = await providerFor('chat').json<{ followup?: unknown }>({
+      task: 'classify',
+      system: SYSTEM,
+      user:
+        `Interview type: ${input.interviewType}\n\n` +
+        `QUESTION: ${input.question}\n\n` +
+        `CANDIDATE'S ANSWER:\n${input.answer.slice(0, 4_000)}`,
+      maxOutputTokens: 100,
+    });
+  } catch (e) {
+    // A malformed prediction is never worth surfacing an error for; real API
+    // errors still propagate to the caller's fire-and-forget catch (v1 split).
+    if (e instanceof SyntaxError) return null;
+    throw e;
   }
+  const f = typeof raw.followup === 'string' ? raw.followup.trim() : '';
+  return f.length > 0 ? f : null;
 }

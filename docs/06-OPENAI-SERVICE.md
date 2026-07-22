@@ -3,6 +3,31 @@
 Lives entirely in the **main process** under `src/main/services/openai/`.
 The renderer never imports the SDK and never sees the key.
 
+## Provider capability layer (v2, `src/main/providers/`)
+
+OpenAI is now the **reference provider** behind capability interfaces
+(PRD §6.7): `chat` / `embedding` / `realtimeStt` / `batchStt` / `speech` /
+`vision`, resolved per capability by `providers/registry.ts`. Interfaces carry
+**transport only** — prompt building, format ceilings, and domain events stay
+in the service modules below, so a second provider is a transport swap, not a
+rewrite. OpenAI-specific quirks (reasoning-effort param + reasoning-token
+headroom) live in `providers/openai/`, which wraps these modules unchanged.
+
+- Engine-facing call sites go through the registry: `answer.ts`,
+  `questions.ts`, `followup.ts` (chat), `rag/retriever.ts` + `indexProfile.ts`
+  (embedding), `engine/sourceAdapter.ts` (realtimeStt), `engine.ingestAudio`
+  (batchStt). The remaining modules (parsing/brief/stories/tailor/interviewer/
+  feedback/coding/vision call sites) still call the SDK directly and migrate
+  opportunistically.
+- A capability the selected provider lacks throws `CapabilityUnavailableError`
+  with a user-safe message (surfaces in the session-error banner).
+- **Embedding identity**: `embeddings` rows store `provider` + `model` + `dim`;
+  the write path refuses to mix identities (`rag/embeddingIdentity.ts`) —
+  switching embedding provider/model requires a re-index (UI for that lands
+  later).
+- Per-capability provider selection defaults to OpenAI everywhere; the
+  Settings → Providers UI arrives with the second provider.
+
 ## Model configuration (`models.ts`)
 
 Resolution order: **per-task user override (`settings.models[key]`) → active preset's

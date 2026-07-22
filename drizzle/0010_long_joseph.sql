@@ -1,0 +1,1 @@
+ALTER TABLE `embeddings` ADD `provider` text DEFAULT 'openai' NOT NULL;

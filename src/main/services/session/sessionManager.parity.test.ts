@@ -62,7 +62,14 @@ vi.mock('../../windows/mainWindow', () => ({ getMainWindow: () => null }));
 vi.mock('../security/logger', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
-vi.mock('../openai/client', () => ({ normalizeOpenAIError: (e: unknown) => String(e) }));
+vi.mock('../openai/client', () => ({
+  normalizeOpenAIError: (e: unknown) => String(e),
+  // The provider layer imports the client factory; nothing may reach the
+  // network from a unit test.
+  openai: () => {
+    throw new Error('network disabled in tests');
+  },
+}));
 vi.mock('../openai/transcription', () => ({ transcribeChunk: vi.fn() }));
 vi.mock('../openai/followup', () => ({ predictFollowup: vi.fn(async () => null) }));
 vi.mock('../openai/questions', () => ({ classifyQuestion: (t: string) => h.classify(t) }));

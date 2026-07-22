@@ -1,5 +1,13 @@
 # API Key Security Plan
 
+> v2 provider layer: `src/main/providers/*` never reads or stores keys — every
+> OpenAI adapter delegates to the existing service modules, so the key still
+> flows exclusively through `services/openai/client.ts` (and `realtime.ts` for
+> the socket header). Additional providers must follow the same shape: keys
+> live in the main process behind safeStorage, resolved per provider at call
+> time, never over IPC. The architecture test pins that no key-store or API
+> host markers enter the renderer bundle.
+
 ## Principles
 1. The OpenAI API key is **only** ever present in the **main process** memory.
 2. It is **never** sent over IPC to the renderer.
