@@ -43,6 +43,62 @@ Two tiers:
   hardware + a display; not automatable headlessly. Their pure logic is unit-tested;
   the answer pipeline is exercised here via the no-audio sample/RAG path.
 
+## Capturing marketing media
+
+The root README and the landing page (`docs/index.html`) share one set of
+assets: animated clips in `docs/media/`, stills in `docs/images/`. Both are
+regenerated **from the real app** — nothing is mocked up in a design tool.
+
+Capture is opt-in: `playwright.config.ts` ignores `*.capture.spec.ts` unless
+`E2E_CAPTURE` is set, because these specs need a real key and write into the
+repo. They also need a **display** (the app is driven visibly) — they will not
+run on a headless CI box.
+
+### Stills
+
+```bash
+E2E_CAPTURE=1 npx playwright test e2e/screenshots.capture.spec.ts   # bash / Git Bash
+```
+```powershell
+$env:E2E_CAPTURE=1; npx playwright test e2e/screenshots.capture.spec.ts
+```
+
+Writes `docs/images/`: `home.png`, `library.png`, `sessions.png`,
+`insights.png`, `settings.png`, `start-flow.png`, `cue-card.png`.
+
+### Animated clips (GIF + MP4)
+
+Two steps — burst frames from the running app, then assemble them:
+
+```bash
+E2E_CAPTURE=1 npx playwright test e2e/media.capture.spec.ts
+node scripts/build-media.mjs cue-card-stream --fps 12 --width 760
+```
+
+The spec writes numbered PNGs to `docs/media/frames/<clip>/` (scratch —
+gitignored); the script turns them into `docs/media/<clip>.gif` and
+`<clip>.mp4`. Only the built `.gif`/`.mp4` are committed.
+
+`build-media.mjs` needs **ffmpeg** on PATH (`winget install Gyan.FFmpeg` ·
+`brew install ffmpeg` · `apt install ffmpeg`). It builds the GIF with a two-pass
+global palette, which keeps flat UI colour and thin text sharp where ffmpeg's
+default quantisation smears them.
+
+### Why frames, not Playwright video
+
+The harness attaches to an already-running Electron over CDP (see below), and
+`recordVideo` is a **context-creation** option — it can't be enabled on a
+context we merely connected to. Bursting screenshots works over CDP, is
+deterministic, and lets ffmpeg choose the frame rate after the fact.
+
+### Keeping captures from rotting
+
+Navigation uses the sidebar's `data-tour="nav-*"` anchors rather than visible
+link text. Those anchors are load-bearing for the onboarding tour, so they
+don't drift silently — whereas the previous version of the screenshot spec
+still clicked "Interview" / "Mock" / "Reports" nav items that the mode-first
+redesign had already removed, which is how the assets went stale.
+
 ## How the harness works (and why)
 
 Playwright's built-in `_electron.launch()` is **broken on Electron 30+** — it passes

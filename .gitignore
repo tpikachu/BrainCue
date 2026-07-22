@@ -22,3 +22,7 @@ Thumbs.db
 
 # privacy affinity harness output (contains logs + an isolated userData dir)
 scripts/privacy-affinity/.out/
+
+# Raw capture frames — scratch for scripts/build-media.mjs. Only the assembled
+# .gif/.mp4 in docs/media/ are committed. See e2e/README.md.
+docs/media/frames/
