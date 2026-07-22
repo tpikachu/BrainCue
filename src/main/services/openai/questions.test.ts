@@ -6,7 +6,22 @@ const h = vi.hoisted(() => ({ output: '{}' }));
 vi.mock('./client', () => ({
   openai: () => ({ responses: { create: async () => ({ output_text: h.output }) } }),
 }));
-vi.mock('./models', () => ({ model: () => 'gpt-4.1-nano' }));
+// The provider layer imports the full models surface + the realtime module
+// (whose apiKey → env chain needs electron) — stub both so loading
+// providers/openai stays hermetic.
+vi.mock('./models', () => ({
+  model: () => 'gpt-4.1-nano',
+  isReasoningModel: () => false,
+  reasoningEffort: () => null,
+  EMBEDDING_DIM: 1536,
+}));
+vi.mock('./realtime', () => ({
+  RealtimeTranscriber: class {
+    start() {}
+    appendAudio() {}
+    stop() {}
+  },
+}));
 
 import { classifyQuestion } from './questions';
 

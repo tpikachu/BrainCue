@@ -11,6 +11,7 @@ import type { ChunkSource, RetrievedChunk } from '@shared/types';
 export interface VectorStore {
   upsert(args: {
     chunkId: string;
+    provider: string;
     model: string;
     vector: Float32Array;
   }): void;
@@ -26,19 +27,20 @@ export interface VectorStore {
 }
 
 export const sqliteVectorStore: VectorStore = {
-  upsert({ chunkId, model, vector }) {
+  upsert({ chunkId, provider, model, vector }) {
     db()
       .insert(schema.embeddings)
       .values({
         id: crypto.randomUUID(),
         chunkId,
+        provider,
         model,
         dim: vector.length,
         vector: vectorToBuffer(vector),
       })
       .onConflictDoUpdate({
         target: schema.embeddings.chunkId,
-        set: { model, dim: vector.length, vector: vectorToBuffer(vector) },
+        set: { provider, model, dim: vector.length, vector: vectorToBuffer(vector) },
       })
       .run();
   },

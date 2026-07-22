@@ -6,7 +6,7 @@ import { log } from '../security/logger';
 import { ground } from './grounding';
 import { enginePersistence as persist } from './persistence/enginePersistence';
 import { summonedPolicy } from './trigger/summonedPolicy';
-import type { RealtimeTranscriber } from '../openai/realtime';
+import type { RealtimeSttSession } from '../../providers/types';
 import type { ContextEvent } from './contextEvent';
 import type { ModeDefinition, RuntimeSettings } from './modeDefinition';
 
@@ -45,7 +45,7 @@ export class EngineSession {
   // remember the last utterance so toggling answering on can answer it.
   suppressAnswers = false;
   pendingQuestionText: string | null = null;
-  transcriber: RealtimeTranscriber | null = null;
+  transcriber: RealtimeSttSession | null = null;
 
   /** Set on teardown/replacement: an in-flight classify/stream/prediction that
    *  wakes up afterwards must act as if the old module-level `live` changed. */

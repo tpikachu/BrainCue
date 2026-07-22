@@ -1,26 +1,22 @@
-import { RealtimeTranscriber } from '../openai/realtime';
+import { providerFor } from '../../providers/registry';
+import type { RealtimeSttCallbacks, RealtimeSttSession } from '../../providers/types';
 
 /**
  * Source adapters normalize inputs into the engine. Today there is one live
  * audio source (the renderer streams PCM16 24 kHz mono over one-way IPC) and
- * it feeds the Realtime transcriber; screen/clipboard remain in
+ * it feeds the selected realtime-STT provider; screen/clipboard remain in
  * services/capture until the contribution-cards PR routes them through
  * ContextEvents. Dual-source (mic + system simultaneously) arrives with
  * Meeting mode — adapters keep source identity so that lands here, not in the
  * engine core.
  */
-export interface TranscriberCallbacks {
-  onDelta: (text: string) => void;
-  onFinal: (text: string) => void;
-  onError: (message: string) => void;
-  onStatus?: (status: 'reconnecting' | 'connected' | 'disconnected') => void;
-}
+export type TranscriberCallbacks = RealtimeSttCallbacks;
 
 export function createRealtimeSource(
   cb: TranscriberCallbacks,
   language: string,
-): RealtimeTranscriber {
-  return new RealtimeTranscriber(cb, language);
+): RealtimeSttSession {
+  return providerFor('realtimeStt').open(cb, { language });
 }
 
 /** RMS level of one PCM16 frame (0–1) — drives the Cue Card audio meter.
