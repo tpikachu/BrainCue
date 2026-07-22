@@ -39,11 +39,12 @@ CREATE TABLE sessions_new (
   \`created_at\` integer DEFAULT (unixepoch() * 1000) NOT NULL,
   \`job_id\` text,
   \`kind\` text DEFAULT 'live' NOT NULL,
+  \`mode\` text DEFAULT 'interview' NOT NULL,
   FOREIGN KEY (\`profile_id\`) REFERENCES \`profiles\`(\`id\`) ON UPDATE no action ON DELETE cascade,
   FOREIGN KEY (\`job_id\`) REFERENCES \`jobs\`(\`id\`) ON UPDATE no action ON DELETE set null
 );
-INSERT INTO sessions_new (id, profile_id, interview_type, status, started_at, ended_at, created_at, job_id, kind)
-  SELECT id, profile_id, interview_type, status, started_at, ended_at, created_at, job_id, kind FROM sessions;
+INSERT INTO sessions_new (id, profile_id, interview_type, status, started_at, ended_at, created_at, job_id, kind, mode)
+  SELECT id, profile_id, interview_type, status, started_at, ended_at, created_at, job_id, kind, mode FROM sessions;
 DROP TABLE sessions;
 ALTER TABLE sessions_new RENAME TO sessions;
 CREATE INDEX \`sessions_profile_idx\` ON \`sessions\` (\`profile_id\`);
@@ -61,8 +62,14 @@ CREATE INDEX \`sessions_profile_idx\` ON \`sessions\` (\`profile_id\`);
  * create-copy-drop-rename inside one transaction, then `foreign_key_check`.
  *
  * Idempotent: keyed off the live PRAGMA state, it runs at most once per DB.
- * Runs AFTER migrations (the rebuilt `sessions` includes the v1.5 `kind`
- * column). Returns true when a rebuild was performed.
+ * Returns true when a rebuild was performed.
+ *
+ * ⚠️ This runs AFTER migrations, so the DDL above must list EVERY column the
+ * migrated table has — a create-copy-drop-rename silently discards any column
+ * it doesn't name. Adding a column to `sessions`/`chunks` in a migration means
+ * adding it here too. `fkRebuild.test.ts` enforces exactly that: it diffs these
+ * DDLs against the real post-migration schema, so the omission that dropped
+ * `sessions.mode` (added in 0008, missed here) cannot recur.
  */
 export function fixLegacyFkActions(sqlite: Database.Database, log: FkRebuildLog = console): boolean {
   const jobFkAction = (table: string): string | null => {
