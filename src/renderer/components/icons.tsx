@@ -272,6 +272,65 @@ export function WinRestoreIcon(p: IconProps) {
   );
 }
 
+export function HomeIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="m3 9.5 9-6.5 9 6.5" />
+      <path d="M5 8.5V19a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5" />
+      <path d="M10 21v-6h4v6" />
+    </Svg>
+  );
+}
+
+export function LibraryIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2z" />
+      <path d="M22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z" />
+    </Svg>
+  );
+}
+
+export function UsersIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </Svg>
+  );
+}
+
+export function ClipboardCheckIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="8" y="2" width="8" height="4" rx="1" />
+      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+      <path d="m9 13.5 2 2 4-4.5" />
+    </Svg>
+  );
+}
+
+export function GraduationCapIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M22 9 12 4 2 9l10 5z" />
+      <path d="M6 11.5V16c0 1.2 2.7 2.5 6 2.5s6-1.3 6-2.5v-4.5" />
+      <path d="M22 9v6" />
+    </Svg>
+  );
+}
+
+export function SparklesIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
+      <path d="m19 15 .9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z" />
+    </Svg>
+  );
+}
+
 export function DatabaseIcon(p: IconProps) {
   return (
     <Svg {...p}>

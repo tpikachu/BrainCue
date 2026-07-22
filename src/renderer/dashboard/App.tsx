@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useTourStore } from '../store/useTourStore';
 import { Tour, TOUR_STEPS } from './Tour';
+import HomePage from './pages/HomePage';
 import ProfilesPage from './pages/ProfilesPage';
 import ProfileEditorPage from './pages/ProfileEditorPage';
 import InterviewPage from './pages/InterviewPage';
@@ -19,26 +20,24 @@ import { SidebarStatus } from './SidebarStatus';
 import { UpdateBanner } from './UpdateBanner';
 import { SavePromptModal } from './SavePromptModal';
 import {
-  BoltIcon,
   DatabaseIcon,
-  MockIcon,
+  HomeIcon,
+  LibraryIcon,
   ReportIcon,
   SettingsIcon,
-  MicIcon,
-  UploadIcon,
-  UserIcon,
 } from '../components/icons';
 import { Logo } from '../components/Logo';
 
 // Dev-only DB explorer — shown/routed only in unpackaged builds.
 const DEV = import.meta.env.DEV;
 
+// Mode-first layout (docs/11-UX-NAVIGATION.md): the sidebar holds the four
+// durable sections; modes live as launcher cards on Home, so adding a mode
+// never adds a nav item. Old routes stay registered below — Home cards, the
+// tray, and hotkeys deep-link into them.
 const navItems = [
-  { to: '/profiles', label: 'Profiles', Icon: UserIcon, tour: 'nav-profiles' },
-  { to: '/interview', label: 'Interview', Icon: MicIcon, tour: 'nav-session' },
-  { to: '/mock', label: 'Mock Interview', Icon: MockIcon, tour: 'nav-mock' },
-  { to: '/sparring', label: 'Sparring', Icon: BoltIcon, tour: 'nav-sparring' },
-  { to: '/tailor', label: 'Tailor Resume', Icon: UploadIcon, tour: 'nav-tailor' },
+  { to: '/home', label: 'Home', Icon: HomeIcon, tour: 'nav-home' },
+  { to: '/profiles', label: 'Library', Icon: LibraryIcon, tour: 'nav-library' },
   { to: '/reports', label: 'Reports', Icon: ReportIcon, tour: 'nav-reports' },
   { to: '/settings', label: 'Settings', Icon: SettingsIcon, tour: 'nav-settings' },
   ...(DEV ? [{ to: '/dev', label: 'DB Explorer', Icon: DatabaseIcon, tour: 'nav-dev' }] : []),
@@ -92,7 +91,6 @@ export default function App() {
           <div className="leading-tight">
             <h1 className="brand-gradient text-sm font-semibold tracking-tight">BrainCue</h1>
             <div className="mt-0.5 flex items-center gap-1.5">
-              <span className="text-xs text-neutral-500">Copilot</span>
               {version && (
                 <span className="version-pill rounded-full border border-white/10 bg-white/5 px-1.5 py-px text-[10px] font-medium tabular-nums text-neutral-400">
                   v{version}
@@ -135,7 +133,8 @@ export default function App() {
 
       <main className="flex-1 overflow-hidden">
         <Routes>
-          <Route path="/" element={<Navigate to="/profiles" replace />} />
+          <Route path="/" element={<Navigate to="/home" replace />} />
+          <Route path="/home" element={<HomePage />} />
           <Route path="/profiles" element={<ProfilesPage />} />
           <Route path="/profiles/:id" element={<ProfileEditorPage />} />
           <Route path="/interview" element={<InterviewPage />} />
