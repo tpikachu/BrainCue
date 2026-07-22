@@ -1,7 +1,7 @@
 import { test, disablePrivacyMode, hasKey, setApiKey } from './fixtures';
 import type { Page } from '@playwright/test';
 import { resolve } from 'node:path';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 
 // Opt-in capture utility — records the ANIMATED clips (the GIFs / demo video)
 // used by the README and the landing page, as numbered PNG frames:
@@ -139,4 +139,143 @@ test('@capture cue-card streaming clip', async ({ dashboard }) => {
     const r = await api.session.list();
     if (r[0]) await api.mock.end(r[0].id);
   });
+});
+
+/**
+ * Dashboard walkthrough — the frames behind TWO assets:
+ *
+ * - `braincue-demo.mp4` — a captioned scene-by-scene walkthrough of the app.
+ *   Frames land in frames/demo/<scene>/ plus a manifest.json with the caption
+ *   and pacing for each scene; assemble with
+ *   `node scripts/build-media.mjs --manifest docs/media/frames/demo/manifest.json --out braincue-demo`
+ *
+ * - `interview-grounded.gif` — the dashboard grounding story (Home → Library →
+ *   the interview workspace with a profile picked and its Spaces listed).
+ *   Frames land in frames/interview-grounded/; assemble with
+ *   `node scripts/build-media.mjs interview-grounded --fps 1.2 --hold 2 --width 640`
+ *
+ * Exists because the old assets showed the pre-mode-first dashboard (flat
+ * interview-only sidebar) — any layout change makes them stale, and this spec
+ * is how they get refreshed from the real app instead of by hand.
+ */
+test('@capture dashboard walkthrough (demo scenes + grounded gif)', async ({ dashboard }) => {
+  test.skip(!hasKey, 'needs OPENAI_API_KEY to seed parsed sample data + stream an answer');
+  test.setTimeout(300_000);
+
+  await setApiKey(dashboard);
+  await disablePrivacyMode(dashboard);
+
+  const { profileId } = await dashboard.evaluate(async () =>
+    (window as any).api.data.loadSamples(),
+  );
+
+  // Fresh frame dirs (a stale run's frames must never leak into the assembly).
+  const DEMO = resolve(FRAMES, 'demo');
+  const IG = resolve(FRAMES, 'interview-grounded');
+  rmSync(DEMO, { recursive: true, force: true });
+  rmSync(IG, { recursive: true, force: true });
+  mkdirSync(IG, { recursive: true });
+
+  const counters = new Map<string, number>();
+  const snap = async (page: Page, dir: string): Promise<void> => {
+    const n = counters.get(dir) ?? 0;
+    counters.set(dir, n + 1);
+    const abs = resolve(FRAMES, dir);
+    mkdirSync(abs, { recursive: true });
+    await page.screenshot({ path: resolve(abs, `frame-${String(n).padStart(4, '0')}.png`) });
+  };
+  // HashRouter: navigation is just the hash.
+  const go = async (route: string): Promise<void> => {
+    await dashboard.evaluate((r) => {
+      window.location.hash = r;
+    }, route);
+    await dashboard.waitForTimeout(900);
+  };
+
+  // ── Scene 1 · Home, the launcher ──────────────────────────────────────────
+  await go('#/home');
+  await dashboard.getByRole('heading', { name: /how can braincue help/i }).waitFor();
+  await snap(dashboard, 'demo/01-home');
+  await snap(dashboard, 'interview-grounded');
+
+  // ── Scene 2 · The start flow (modes + the transparency panel) ─────────────
+  await dashboard.getByRole('button', { name: /start listening/i }).first().click();
+  await dashboard.getByRole('dialog').waitFor();
+  await dashboard.waitForTimeout(500);
+  await snap(dashboard, 'demo/02-start');
+  await dashboard.keyboard.press('Escape');
+
+  // ── Scene 3 · Library: Spaces + documents (what grounds the answers) ──────
+  await go('#/library?tab=spaces');
+  await snap(dashboard, 'interview-grounded');
+  await go('#/library?tab=documents');
+  await snap(dashboard, 'interview-grounded');
+
+  // ── Scene 4 · The interview workspace: profile picked, Spaces listed ──────
+  await go('#/interview');
+  // The profile picker is the in-window Dropdown (never a native <select>).
+  // Target its VISIBLE TEXT, not a role+name pair: the Field wraps the
+  // dropdown's <button> in a <label>, so the button's accessible name is the
+  // label ("Profile"), not its own contents — a name lookup never matches.
+  await dashboard.getByText('Select a profile…').click();
+  await dashboard.getByRole('listbox').waitFor();
+  await dashboard.getByRole('option').nth(1).click(); // 0 = the placeholder
+  await dashboard.getByText(/Google|Amazon|Stripe/).first().waitFor();
+  await dashboard.waitForTimeout(600);
+  await snap(dashboard, 'demo/03-grounded');
+  await snap(dashboard, 'interview-grounded');
+  await snap(dashboard, 'interview-grounded'); // hold the payoff view a beat longer
+
+  // ── Scene 5 · The Cue Card: a real answer streaming in ────────────────────
+  await dashboard.evaluate(async () => {
+    await (window as any).api.overlay.setMode('expanded');
+  });
+  const overlay = dashboard
+    .context()
+    .pages()
+    .find((p) => p.url().includes('view=overlay'));
+  if (!overlay) throw new Error('overlay window not found — is the Cue Card open?');
+  const running = dashboard
+    .evaluate(
+      async (pid) => (window as any).api.mock.start(pid, 'alloy', null, 'behavioral'),
+      profileId,
+    )
+    .catch(() => {});
+  const frames = await captureStream(overlay, 'demo/04-cuecard', {
+    intervalMs: 100,
+    settleMs: 700,
+    minGrowth: 250,
+    maxFrames: 300,
+    startTimeoutMs: 90_000,
+  });
+  console.log(`demo/04-cuecard: captured ${frames} frames`);
+  await running;
+  await dashboard.evaluate(async () => {
+    const api = (window as any).api;
+    const r = await api.session.list();
+    if (r[0]) await api.mock.end(r[0].id);
+  });
+
+  // The demo ends on the Cue Card payoff (a mock session never persists —
+  // mock.end tears down and deletes — so a Sessions scene would show an
+  // empty table and read as broken).
+
+  // The manifest is the assembly contract for build-media.mjs --manifest.
+  writeFileSync(
+    resolve(DEMO, 'manifest.json'),
+    JSON.stringify(
+      {
+        width: 1280,
+        height: 800,
+        scenes: [
+          { dir: '01-home', holdSec: 3, caption: 'BrainCue - the AI that is in the room with you' },
+          { dir: '02-start', holdSec: 4, caption: 'One start flow for every mode - see exactly what leaves your machine, before anything starts' },
+          { dir: '03-grounded', holdSec: 3.5, caption: 'Grounded in your documents - resume, job description, company research' },
+          { dir: '04-cuecard', fps: 10, tailHoldSec: 2.5, caption: 'A question is heard - a cited answer streams into the screen-share-invisible Cue Card' },
+        ],
+      },
+      null,
+      2,
+    ),
+  );
 });

@@ -53,7 +53,7 @@ The vision and full plan live in [docs/00-VISION.md](docs/00-VISION.md) and
 </p>
 
 <p align="center">
-  <a href="docs/media/braincue-demo.mp4"><b>▶ Watch the full demo</b></a> — 74s, narrated with on-screen captions.
+  <a href="docs/media/braincue-demo.mp4"><b>▶ Watch the demo</b></a> — a captioned walkthrough, captured from the real app.
 </p>
 
 <table>

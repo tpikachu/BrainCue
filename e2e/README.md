@@ -71,13 +71,23 @@ Writes `docs/images/`: `home.png`, `library.png`, `sessions.png`,
 Two steps — burst frames from the running app, then assemble them:
 
 ```bash
-E2E_CAPTURE=1 npx playwright test e2e/media.capture.spec.ts
+E2E_CAPTURE=1 npx playwright test e2e/media.capture.spec.ts   # both capture tests
 node scripts/build-media.mjs cuecard-stream --fps 8 --width 760 --hold 4
+node scripts/build-media.mjs interview-grounded --fps 1.2 --hold 2 --width 640 --gif-only
+node scripts/build-media.mjs --manifest docs/media/frames/demo/manifest.json --out braincue-demo
 ```
 
-The clip name matches the committed asset, so a re-capture refreshes
-`docs/media/cuecard-stream.gif` in place — the README and landing page pick it
-up with no reference changes.
+Clip names match the committed assets, so a re-capture refreshes
+`docs/media/cuecard-stream.gif`, `interview-grounded.gif`, and
+`braincue-demo.mp4` in place — the README and landing page pick them up with
+no reference changes.
+
+The demo is assembled from the walkthrough's per-scene frame dirs via the
+manifest the spec writes (`frames/demo/manifest.json`): each scene is scaled
+and padded onto one canvas with its caption burned in (drawtext), then the
+segments are concatenated. Still scenes hold a single frame for `holdSec`;
+the streaming scene plays at `fps` and freezes its last frame for
+`tailHoldSec` so the payoff stays readable.
 
 The spec writes numbered PNGs to `docs/media/frames/<clip>/` (scratch —
 gitignored); the script turns them into `docs/media/<clip>.gif` and

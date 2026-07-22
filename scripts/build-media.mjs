@@ -1,12 +1,21 @@
 #!/usr/bin/env node
 /**
- * Assemble a frame directory captured by e2e/media.capture.spec.ts into the
- * GIF + MP4 that the README and the landing page (docs/index.html) reference.
+ * Assemble frames captured by e2e/media.capture.spec.ts into the media that
+ * the README and the landing page (docs/index.html) reference.
  *
- *   node scripts/build-media.mjs <clip> [--fps 12] [--width 760] [--gif-only]
+ * Single clip (GIF + MP4):
+ *   node scripts/build-media.mjs <clip> [--fps 12] [--width 760] [--hold 4] [--gif-only]
+ *   Reads  docs/media/frames/<clip>/frame-%04d.png
+ *   Writes docs/media/<clip>.gif  and  docs/media/<clip>.mp4
  *
- * Reads  docs/media/frames/<clip>/frame-%04d.png
- * Writes docs/media/<clip>.gif  and  docs/media/<clip>.mp4
+ * Captioned multi-scene video (the demo):
+ *   node scripts/build-media.mjs --manifest docs/media/frames/demo/manifest.json --out braincue-demo
+ *   The manifest lists scenes `{dir, caption, holdSec?|fps?, tailHoldSec?}`;
+ *   each scene becomes a segment with its caption burned in (drawtext), scaled
+ *   and padded onto one canvas, then all segments concat into
+ *   docs/media/<out>.mp4. Still scenes use `holdSec` (single frame held);
+ *   streamed scenes use `fps` (+ optional `tailHoldSec` freeze on the last
+ *   frame so the payoff is readable before the cut).
  *
  * Requires ffmpeg on PATH (https://ffmpeg.org/download.html — on Windows:
  * `winget install Gyan.FFmpeg`, macOS: `brew install ffmpeg`).
@@ -17,8 +26,16 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, readdirSync, readFileSync, mkdirSync, rmSync } from 'node:fs';
-import { resolve } from 'node:path';
+import {
+  copyFileSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const MEDIA = resolve(ROOT, 'docs/media');
@@ -35,23 +52,7 @@ const gifOnly = argv.includes('--gif-only');
 // Max frames kept from any run of identical frames (the idle head / finished tail).
 const holdFrames = Number(flag('hold', 4));
 
-if (!clip) {
-  console.error('usage: node scripts/build-media.mjs <clip> [--fps 12] [--width 760] [--gif-only]');
-  process.exit(2);
-}
-
-const frameDir = resolve(MEDIA, 'frames', clip);
-if (!existsSync(frameDir)) {
-  console.error(`No frames at ${frameDir}\nCapture them first:\n  E2E_CAPTURE=1 npx playwright test e2e/media.capture.spec.ts`);
-  process.exit(1);
-}
-// `_`-prefixed files are our own artefacts (staging dir, palette), not frames.
-const isFrame = (f) => f.endsWith('.png') && !f.startsWith('_');
-const frameCount = readdirSync(frameDir).filter(isFrame).length;
-if (!frameCount) {
-  console.error(`${frameDir} has no PNG frames.`);
-  process.exit(1);
-}
+const manifestPath = flag('manifest', null);
 
 const ff = (args) => {
   const r = spawnSync('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'], encoding: 'utf8' });
@@ -69,6 +70,47 @@ const ff = (args) => {
     process.exit(1);
   }
 };
+
+// `_`-prefixed files are our own artefacts (staging dirs, palette), not frames.
+const isFrame = (f) => f.endsWith('.png') && !f.startsWith('_');
+
+/** Escape a value for use inside an ffmpeg filter option ('quoted', : escaped). */
+const fesc = (s) => `'${s.replace(/\\/g, '/').replace(/:/g, '\\:')}'`;
+
+/** First present system font usable for drawtext captions. */
+function captionFont() {
+  const candidates = [
+    'C:/Windows/Fonts/segoeui.ttf',
+    'C:/Windows/Fonts/arial.ttf',
+    '/System/Library/Fonts/Helvetica.ttc',
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+  ];
+  return candidates.find((f) => existsSync(f)) ?? null;
+}
+
+if (manifestPath) {
+  buildFromManifest(resolve(manifestPath), flag('out', 'braincue-demo'));
+  process.exit(0);
+}
+
+if (!clip) {
+  console.error(
+    'usage: node scripts/build-media.mjs <clip> [--fps 12] [--width 760] [--gif-only]\n' +
+      '   or: node scripts/build-media.mjs --manifest <manifest.json> --out <name>',
+  );
+  process.exit(2);
+}
+
+const frameDir = resolve(MEDIA, 'frames', clip);
+if (!existsSync(frameDir)) {
+  console.error(`No frames at ${frameDir}\nCapture them first:\n  E2E_CAPTURE=1 npx playwright test e2e/media.capture.spec.ts`);
+  process.exit(1);
+}
+const frameCount = readdirSync(frameDir).filter(isFrame).length;
+if (!frameCount) {
+  console.error(`${frameDir} has no PNG frames.`);
+  process.exit(1);
+}
 
 /**
  * Collapse runs of byte-identical frames.
@@ -132,4 +174,90 @@ if (!gifOnly) {
     resolve(MEDIA, `${clip}.mp4`),
   ]);
   console.log(`  ✓ docs/media/${clip}.mp4`);
+}
+
+/**
+ * Manifest mode: per-scene segments (scale+pad to one canvas, caption burned
+ * in at the bottom) concatenated into docs/media/<out>.mp4.
+ */
+function buildFromManifest(path, outName) {
+  const manifest = JSON.parse(readFileSync(path, 'utf8'));
+  const base = dirname(path);
+  const W = manifest.width ?? 1280;
+  const H = manifest.height ?? 800;
+  const font = captionFont();
+  if (!font) console.warn('  ! no caption font found — building without captions');
+
+  const segDir = resolve(base, '_segments');
+  rmSync(segDir, { recursive: true, force: true });
+  mkdirSync(segDir, { recursive: true });
+
+  const canvas =
+    `scale=w=${W}:h=${H}:force_original_aspect_ratio=decrease:flags=lanczos,` +
+    `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=#0a0a0b`;
+
+  const segments = [];
+  manifest.scenes.forEach((scene, idx) => {
+    const dir = resolve(base, scene.dir);
+    const files = readdirSync(dir).filter(isFrame).sort();
+    if (!files.length) {
+      console.error(`scene ${scene.dir}: no frames`);
+      process.exit(1);
+    }
+
+    // Caption via textfile= so no caption text ever needs filter escaping.
+    let caption = '';
+    if (scene.caption && font) {
+      const txt = resolve(dir, '_caption.txt');
+      writeFileSync(txt, scene.caption, 'utf8');
+      caption =
+        `,drawtext=textfile=${fesc(txt)}:fontfile=${fesc(font)}` +
+        ':fontsize=26:fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=12' +
+        ':x=(w-text_w)/2:y=h-52';
+    }
+    // Freeze the last frame so a streamed scene's payoff stays readable.
+    const tail = scene.tailHoldSec ? `,tpad=stop_mode=clone:stop_duration=${scene.tailHoldSec}` : '';
+
+    const out = resolve(segDir, `${String(idx).padStart(2, '0')}.mp4`);
+    if (scene.fps) {
+      // Streamed scene: real frame sequence (trim idle runs first).
+      const kept = dedupeRuns(dir, files, holdFrames);
+      const stageDir = resolve(dir, '_staged');
+      rmSync(stageDir, { recursive: true, force: true });
+      mkdirSync(stageDir, { recursive: true });
+      kept.forEach((f, i) =>
+        copyFileSync(resolve(dir, f), resolve(stageDir, `frame-${String(i).padStart(4, '0')}.png`)),
+      );
+      ff([
+        '-y', '-framerate', String(scene.fps), '-i', resolve(stageDir, 'frame-%04d.png'),
+        '-vf', `${canvas}${tail}${caption},fps=24`,
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '20', '-r', '24',
+        out,
+      ]);
+    } else {
+      // Still scene: hold one frame (the last — it's the settled state).
+      ff([
+        '-y', '-loop', '1', '-framerate', '24', '-t', String(scene.holdSec ?? 3),
+        '-i', resolve(dir, files[files.length - 1]),
+        '-vf', `${canvas}${caption},fps=24`,
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '20', '-r', '24',
+        out,
+      ]);
+    }
+    segments.push(out);
+    console.log(`  segment ${scene.dir} ✓`);
+  });
+
+  const list = resolve(segDir, 'list.txt');
+  writeFileSync(list, segments.map((s) => `file '${s.replace(/\\/g, '/')}'`).join('\n'), 'utf8');
+  const outPath = resolve(MEDIA, `${outName}.mp4`);
+  // Re-encode on concat: byte-identical params across segments aren't worth
+  // betting the final artifact on when the re-encode is this cheap.
+  ff([
+    '-y', '-f', 'concat', '-safe', '0', '-i', list,
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '20',
+    '-movflags', '+faststart', '-an',
+    outPath,
+  ]);
+  console.log(`  ✓ docs/media/${outName}.mp4`);
 }
