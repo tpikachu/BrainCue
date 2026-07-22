@@ -16,9 +16,13 @@ headroom) live in `providers/openai/`, which wraps these modules unchanged.
 - Engine-facing call sites go through the registry: `answer.ts`,
   `questions.ts`, `followup.ts` (chat), `rag/retriever.ts` + `indexProfile.ts`
   (embedding), `engine/sourceAdapter.ts` (realtimeStt), `engine.ingestAudio`
-  (batchStt). The remaining modules (parsing/brief/stories/tailor/interviewer/
-  feedback/coding/vision call sites) still call the SDK directly and migrate
-  opportunistically.
+  (batchStt) — plus the newer consumers: the meeting/companion salience
+  classifiers (`engine/trigger/salience.ts`, `companionSalience.ts` — chat
+  `json`), the memory extractor + approved-only recall (`services/memory/` —
+  chat + embedding), and the voice layer (`services/voice/quickAnswer.ts`
+  chat streaming, `voiceService` speech). The remaining modules
+  (parsing/brief/stories/tailor/interviewer/feedback/coding/vision call sites)
+  still call the SDK directly and migrate opportunistically.
 - A capability the selected provider lacks throws `CapabilityUnavailableError`
   with a user-safe message (surfaces in the session-error banner).
 - **Embedding identity**: `embeddings` rows store `provider` + `model` + `dim`;
@@ -169,6 +173,19 @@ followupQuestion }`. **Status:** the prose answer + token usage are live; the me
 is currently a stub (empty `talkingPoints`, `star: null`, only a `riskWarning` when no
 context matched) — the M2 structured second pass is not yet implemented. The handler
 relays deltas to the overlay and persists the final answer to `ai_answers`.
+
+**Memory grounding** — `buildMemoryBlock(memories)` (exported from answer.ts)
+renders APPROVED memories recalled for the question into a clearly-delimited
+prompt block; both `streamAnswer` and the voice quick-answer use it. Only
+user-approved memories ever reach a prompt (see `services/memory/recall.ts`).
+
+### Voice quick answers — `services/voice/quickAnswer.ts` (cross-reference)
+The summon path ("Talk to BrainCue") streams a short spoken-style answer via
+the `chat` capability, grounded the same way (RAG + approved memories). It
+accepts an optional `personaPreamble` (built deterministically by
+`engine/persona.ts` from companion personality prefs) prepended to its system
+prompt — byte-identical prompts when absent. Sentence-level TTS chunking for
+playback lives in `services/voice/sentenceStream.ts`.
 
 ### transcription.ts — `transcribeChunk(audio, mime) => string`
 Sends an audio chunk to the transcription model; returns text (used for the

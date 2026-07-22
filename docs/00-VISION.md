@@ -38,10 +38,16 @@ A **mode** is a preset over one shared engine (§4) — never a forked pipeline.
 | --- | --- | --- | --- |
 | **Interview Copilot** | the candidate | detects questions, streams grounded answer cues | ✅ shipped (v1) |
 | **Practice** (mock + sparring) | rehearsing | plays interviewer with a TTS voice, coaches each answer | ✅ shipped (v1) |
-| **Interviewer Assist** | the one asking | suggests questions and follow-ups, tracks coverage, drafts the evaluation | Phase 2 |
-| **Meeting Copilot** | a participant | quietly surfaces context, unanswered questions, action items | Phase 2 |
-| **Tutor** | learning something | voice dialogue + drills grounded in any material you give it | Phase 3 |
-| **Companion** | working / gaming / thinking | ambient presence with long-term memory; speaks when it should, stays silent when it shouldn't | Phase 4 |
+| **Interviewer Assist** | the one asking | suggests questions and follow-ups, tracks coverage, drafts the evaluation | 🔜 planned |
+| **Meeting Copilot** | a participant | quietly surfaces context, unanswered questions, action items | 🧪 shipped (Labs) |
+| **Tutor** | learning something | voice dialogue + drills grounded in any material you give it | 🔜 planned |
+| **Companion** | working / gaming / thinking | ambient presence with long-term memory; speaks when it should, stays silent when it shouldn't | 🧪 shipped (Labs) |
+
+The voice/summon layer (push-to-talk, spoken replies with barge-in) and the
+review-first memory substrate shipped alongside — they are output/grounding
+surfaces over the one engine, not modes. Unbuilt modes stay visible as
+"Coming soon" in the pickers rather than hidden — the catalog itself markets
+the widening.
 
 ## 4. One engine, many modes (the core bet)
 
@@ -75,7 +81,9 @@ the rule that keeps six modes maintainable instead of six forked products.
 4. **Silence is a feature** — an ambient agent is judged by when it *doesn't*
    speak; sensitivity is user-tunable and quiet is the default posture.
 5. **One engine, many modes** — modes are presets, not forks.
-6. **Memory belongs to the user** — visible, editable, deletable (Phase 4).
+6. **Memory belongs to the user** — visible, editable, deletable. Shipped
+   review-first: nothing is remembered silently; only memories the user
+   APPROVES in the Library are ever recalled.
 7. **Assist where allowed** — unchanged v1 ethics posture: no anti-proctoring,
    no evasion, persistent "use only where AI assistance is permitted" reminder.
 
@@ -92,3 +100,5 @@ for any conversation). Retire the "interview copilot" descriptor.
 
 Open brand decisions (owner: maintainer): final tagline wording; whether the
 electron-builder `productName` changes now or at v2.0 release; README hero copy.
+The npm package `name` became `braincue` (2026-07-22) with the userData
+directory pinned to the legacy id so existing installs keep their data.

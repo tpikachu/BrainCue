@@ -1,9 +1,13 @@
 # Engine Extraction Plan — v2 execution contract
 
-> Status: audit done + plan approved 2026-07-21 (Prompt 0 of the external
-> implementation-prompts doc). This is the condensed execution contract for
-> Prompts 1–5; vision [00](./00-VISION.md) · spec [01](./01-PRD.md) · roadmap
-> [10](./10-ROADMAP.md) · UX [11](./11-UX-NAVIGATION.md).
+> Status: audit done + plan approved 2026-07-21; **execution complete
+> 2026-07-22** — the extraction and everything sequenced on it shipped (engine,
+> providers seam, contribution cards, Spaces UX, meeting, memory, voice,
+> companion; the final hardening/second-provider pass remains). Kept as the
+> execution contract of record; the "Known doc drift" list at the bottom was
+> addressed in the per-subsystem doc updates. Vision [00](./00-VISION.md) ·
+> spec [01](./01-PRD.md) · roadmap [10](./10-ROADMAP.md) (see its "Where we
+> are" table) · UX [11](./11-UX-NAVIGATION.md).
 
 ## Verdict
 
@@ -86,17 +90,17 @@ entry point.
 
 ## PR sequence
 
-1. `feat/v2-baseline` — Prompt 1: lockfile metadata repair + the guardrail
-   tests above. Zero runtime changes. ✅ this PR
-2. `feat/v2-schema-packs` — Prompt 2: 0008 + backup-before-migrate + shared
+1. ✅ `feat/v2-baseline` — lockfile metadata repair + the guardrail
+   tests above. Zero runtime changes.
+2. ✅ `feat/v2-schema-packs` — 0008 + backup-before-migrate + shared
    zod enums + repo aliases + fixture test; docs 04/05 regenerated.
-3. `feat/v2-engine` — Prompt 3: engine extraction + 0009; golden
+3. ✅ `feat/v2-engine` — engine extraction + 0009; golden
    event-sequence parity; docs 02/05/06.
-4. `feat/v2-providers-seam` — Prompt 4: capability interfaces, OpenAI as
+4. ✅ `feat/v2-providers-seam` — capability interfaces, OpenAI as
    reference impl, 0010; engine-on-fakes suite.
-5. `feat/v2-contribution-cards` — Prompt 5: overlay decomposition.
-6. Prompts 6–11 per the external doc (Spaces UX → Meeting → Memory → Voice →
-   Companion → hardening).
+5. ✅ `feat/v2-contribution-cards` — overlay decomposition.
+6. ✅ Spaces UX → ✅ Meeting → ✅ Memory → ✅ Voice → ✅ Companion →
+   ⬜ final hardening + second provider.
 
 ## Known doc drift (fix in the PR that touches each subsystem)
 

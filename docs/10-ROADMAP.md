@@ -5,6 +5,26 @@
 > [01-PRD.md](./01-PRD.md). Phases ship as release trains (v2.0, v2.1, …);
 > milestones within a phase are independently landable PRs.
 
+## Where we are (2026-07-22)
+
+Delivery ran ahead of the phase ordering below — the voice, memory, and
+companion milestones landed before Interviewer Assist / Tutor / the second
+provider. Per milestone: ✅ shipped · 🧪 shipped behind a Labs badge · ⬜ open.
+
+| Milestone | Status |
+| --- | --- |
+| 1.1–1.4 One engine (schema, extraction, mode-first layout, rebrand) | ✅ |
+| 2.1 Meeting Copilot | 🧪 Labs (`meeting.acceptance.test.ts` gate) |
+| 2.2 Interviewer Assist | ⬜ |
+| 2.3 Multi-provider v1 | ⬜ — seam ✅ shipped; Settings → Providers signposts the layer ("Coming soon"); no second provider registered |
+| 3.1 Voice output | ✅ as streamed sentence-level TTS + barge-in (not the Realtime speech-to-speech API) |
+| 3.2 Tutor | ⬜ |
+| 3.3 Summon anywhere | ✅ push-to-talk (Ctrl+Shift+T) + no-session quick ask |
+| 4.1 Memory subsystem | ✅ review-first (approved-only recall) |
+| 4.2 Interjection policy engine | ✅ (`companion.eval.test.ts` gate) |
+| 4.3 Companion | 🧪 Labs — game-buddy vision integration still ⬜ |
+| 4.4 Cost governance v2 | ✅ session budgets + live meter; local-STT spike ⬜ |
+
 ## How we build (the development way)
 
 Carried from v1: docs drive development; one session-log file per day; branch →

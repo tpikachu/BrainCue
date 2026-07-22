@@ -144,7 +144,10 @@ the dev server. All roots share `src/renderer/lib`, `components`, and Tailwind.
 
 ## Event push (main → overlay/dashboard)
 
-Main broadcasts to windows via `webContents.send`. Overlay subscribes:
+Main broadcasts to windows via `webContents.send`. A few representative
+overlay subscriptions (the COMPLETE authoritative list — contribution events,
+voice state/audio, companion status, capture, privacy, confirms — lives in
+[05-IPC-MAP.md](./05-IPC-MAP.md)):
 
 | Event | Payload |
 |---|---|

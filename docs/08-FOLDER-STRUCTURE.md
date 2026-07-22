@@ -2,7 +2,8 @@
 
 ```
 AI_Inter/
-├─ docs/                        # this design set
+├─ docs/                        # this design set + the GitHub Pages site
+│                               #   (index.html landing, _config.yml, media/, images/)
 ├─ electron.vite.config.ts      # main + preload + renderer build config
 ├─ electron-builder.yml         # packaging (win/mac/linux, icons)
 ├─ drizzle.config.ts            # drizzle-kit (schema -> migrations)
@@ -14,10 +15,20 @@ AI_Inter/
 ├─ .gitignore
 ├─ index.html                   # single renderer entry (dashboard/overlay/selection roots chosen at runtime)
 │
+├─ CONTRIBUTING.md              # setup, gate, IPC contract, invariants
+├─ .github/workflows/           # ci.yml · release.yml · pages.yml (docs site deploy)
+│
 ├─ scripts/
 │  ├─ run-electron-vite.mjs     # dev/preview launcher
 │  ├─ clean-release.mjs         # kill running app + wipe release/ (pre-package)
-│  └─ generate-icon.mjs         # icon.svg -> icon.png + icon.ico
+│  ├─ generate-icon.mjs         # icon.svg -> icon.png + icon.ico
+│  ├─ build-media.mjs           # capture frames -> docs/media gif+mp4 (ffmpeg)
+│  └─ privacy-affinity/         # the privacy hard test (hardtest.js)
+│
+├─ e2e/                         # Playwright vs the BUILT app over CDP (see e2e/README.md)
+│  ├─ fixtures.ts               # spawn + connect harness, disablePrivacyMode
+│  ├─ *.spec.ts                 # smoke / data-integrity / live tiers
+│  └─ *.capture.spec.ts         # opt-in (E2E_CAPTURE=1) marketing stills + clips
 │
 ├─ resources/                   # build resources (not packed into app)
 │  ├─ icon.svg                  # icon source

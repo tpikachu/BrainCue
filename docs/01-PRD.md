@@ -2,22 +2,24 @@
 
 > Status: v2 scope. Supersedes the v1 interview-copilot PRD (2026-06-22; see git
 > history and [09-MVP-PLAN.md](./09-MVP-PLAN.md) for what v1 shipped). Last
-> updated 2026-07-21. Vision: [00-VISION.md](./00-VISION.md) · Delivery:
-> [10-ROADMAP.md](./10-ROADMAP.md).
+> updated 2026-07-22 — engine, meeting (Labs), memory, voice/summon, and
+> companion (Labs) are now SHIPPED; per-mode status is inline below. Vision:
+> [00-VISION.md](./00-VISION.md) · Delivery: [10-ROADMAP.md](./10-ROADMAP.md).
 
 ## 1. Summary
 
 A cross-platform **desktop ambient AI companion** (Electron + React +
 TypeScript). It captures live audio (microphone / system loopback), transcribes
 in real time, decides **when to contribute** via a per-mode trigger policy,
-grounds each contribution in the user's local documents (and, later, memory),
-and delivers it through an unobtrusive, capture-invisible overlay or its own
-voice. Interviews (either side), meetings, tutoring, and ambient companionship
+grounds each contribution in the user's local documents (and approved
+memories), and delivers it through an unobtrusive, capture-invisible overlay
+or its own voice. Interviews (either side), meetings, tutoring, and ambient companionship
 are **modes** of one engine.
 
 **This is not an offline app.** User data is stored **locally**, but AI features
 call an **AI provider's API** using a key the user provides in Settings — OpenAI
-today, with a provider abstraction and multi-provider support planned (§6.7).
+today, through a shipped per-capability provider abstraction (§6.7); additional
+providers are planned.
 
 ## 2. Goals
 
@@ -34,7 +36,7 @@ today, with a provider abstraction and multi-provider support planned (§6.7).
 - ❌ Process hiding, task-manager spoofing, anti-proctoring / evasion
 - ❌ Competing with ChatGPT/Gemini on **generic** voice chat (no corpus, no
   presence) — we only do voice grounded in the user's context and activities
-- ❌ Cloud memory — memory (Phase 4) is local, visible, editable, deletable
+- ❌ Cloud memory — memory is local, visible, editable, deletable
 - ❌ Always-on listening without an explicit session start (Companion mode still
   begins with a user action)
 
@@ -56,7 +58,7 @@ today, with a provider abstraction and multi-provider support planned (§6.7).
 | **Context Pack** | Job | **what this is about** — a bundle of documents parsed/embedded as a unit; `kind: job \| subject \| project \| custom`. A job application, a course, a game, a meeting series |
 | **Session** | live interview / mock / sparring | one run of a **mode**: `mode` + profile + optional context pack + per-mode settings; transcript, contributions, and report persist to it |
 | **Mode** | implicit (interview only) | a code-defined preset over the engine: sources + trigger policy + persona + grounding scope + surfaces + overlay layout |
-| **Memory** | — | (Phase 4) durable facts BrainCue has learned, stored locally, injected into grounding, fully user-editable |
+| **Memory** | — | durable facts BrainCue has learned, stored locally, fully user-editable. **Shipped review-first**: proposals require explicit approval, and only APPROVED memories ever join grounding |
 
 **Migration requirements (lossless, automatic):** `jobs` generalizes to context
 packs of `kind='job'`; sessions gain a `mode` column (existing rows map from
@@ -90,7 +92,7 @@ Requirements: per-mode **sensitivity** control, interjection cooldowns, and a
 hard mute (pause AI) that always wins. Quiet is the default posture.
 
 ### 6.4 Grounding
-Retrieval over profile + the session's context pack (+ memory in Phase 4),
+Retrieval over profile + the session's context pack + approved memories,
 exactly as v1's RAG path. The "data sent to OpenAI" transparency panel remains a
 hard requirement in every mode.
 
@@ -102,8 +104,11 @@ carry over from v1 §7.3 unchanged.
 - **Cue Card overlay** — always-on-top, capture-excluded, movable, compact /
   expanded; card *types* vary per mode (answer cue, suggested question,
   context card, action item, tutor prompt).
-- **Voice** — turn-based TTS today (Practice); Phase 3 upgrades to Realtime
-  speech-to-speech with barge-in and output-device selection.
+- **Voice** — SHIPPED as the voice/summon layer: global push-to-talk
+  (Ctrl+Shift+T), streamed sentence-level TTS with barge-in (speaking over it
+  stops playback and listens), output-device selection, and a no-session quick
+  ask. Practice keeps its turn-based interviewer voice. (Full Realtime
+  speech-to-speech remains a possible upgrade, not the current implementation.)
 - **Reports** — per-session artifacts (coaching report, meeting summary,
   interview evaluation, study progress) in the existing Reports page.
 
@@ -124,8 +129,10 @@ and `vision`, and each concrete provider declares which it implements.
   local vector store; the app must offer (and cost-estimate) a re-index rather
   than mixing incompatible vectors.
 
-OpenAI remains the reference implementation and default; the seam is cut during
-the Phase 1 engine extraction, and a second provider ships per the roadmap.
+OpenAI remains the reference implementation and default. The seam is CUT and
+shipped (`src/main/providers/registry.ts` resolves per capability); no second
+provider is registered yet — Settings → Providers surfaces the layer with the
+planned providers marked "Coming soon" rather than offering a dead choice.
 
 ## 7. Mode requirements
 
@@ -134,33 +141,43 @@ Everything in the v1 PRD §7 (profiles, jobs→context packs, documents, RAG, li
 session, overlay, coding/screenshot mode, privacy, tour) remains in force
 verbatim. This mode is the regression gate: no v2 refactor may degrade it.
 
-### 7.2 Interviewer Assist (new, Phase 2)
+### 7.2 Interviewer Assist — 🔜 planned
 Inputs: your role's JD (context pack) + the candidate's resume (document).
 Live: suggested opening questions, follow-up suggestions generated from the
 candidate's last answer (reuses `interviewer.ts`), and a coverage tracker
 (which competency areas have/haven't been probed). Post-session: a structured
 evaluation draft (reuses `feedback.ts`). Same overlay, opposite chair.
 
-### 7.3 Meeting Copilot (new, Phase 2)
+### 7.3 Meeting Copilot — 🧪 SHIPPED (Labs)
 Quiet by default. Proactive contribution cards: relevant context from the
 pack ("this was decided in the attached doc"), open-question tracker ("Sarah's
 question about billing never got answered"), and action items as they're
 spoken. End of session: meeting summary report (decisions, actions, open
 threads). Sensitivity dial from "only when summoned" to "eager".
+*As built:* deterministic heuristics filter small talk before the salience
+classifier ever runs; the Presence dial (summoned/quiet/balanced/active) maps
+to explicit confidence floors + cooldowns; gated by its acceptance suite
+(`meeting.acceptance.test.ts`) and surfaced with a Labs badge.
 
-### 7.4 Tutor (Phase 3)
+### 7.4 Tutor — 🔜 planned
 Any context pack of kind `subject` (textbook chapter, codebase docs, language
 notes). Teach / quiz / drill loop — a generalization of v1 sparring: agent
 speaks (voice), user answers by voice, per-answer coaching persists to Reports.
 Phase 3's Realtime speech-to-speech makes it a natural conversation rather than
 turn-based MP3 exchanges.
 
-### 7.5 Companion (Phase 4)
+### 7.5 Companion — 🧪 SHIPPED (Labs)
 Explicitly started, memory-backed ambient presence. A **presence dial**
 (silent observer ↔ chatty) controls the interjection policy. Game-buddy is
-Companion + the existing screen-region Vision path pointed at the game. Depends
-on: memory subsystem, interjection policy engine, Realtime voice, and cost
-governance — hence last.
+Companion + the existing screen-region Vision path pointed at the game (still
+open — the one unshipped piece).
+*As built:* CompanionPresence `off/on_demand/assistive/proactive` (off is a
+hard mute), the InterjectionPolicy gate chain in cost order (mute → presence →
+DND windows → budget → heuristics → cooldowns → classifier → confidence/
+relevance floors → rate cap → dedupe — the LLM only scores, code decides),
+approved-only memory recall re-gated on real vector score, per-session hard
+budget with a live cost meter in the Cue Card, and quiet hours. Gated by its
+scripted evaluation harness (`companion.eval.test.ts`).
 
 ### 7.6 Practice
 v1's mock + sparring continue unchanged, re-labelled as the Practice mode
@@ -175,8 +192,10 @@ family; they migrate onto the engine's `dialogue` policy when Tutor is built
   never logged, never committed; all persistence in the userData dir; overlay +
   dialogs capture-excluded; full local deletion of any entity.
 - **Cost governance**: per-session cost estimate visible; VAD gating so silence
-  costs nothing; (Phase 4) session budget warnings; evaluate local STT
-  (whisper.cpp) as a cost/offline option — evaluation, not commitment.
+  costs nothing; SHIPPED for companion — hard per-session budgets with a live
+  meter (warns at 80%, exhausted blocks ambient calls while summons still
+  work); evaluate local STT (whisper.cpp) as a cost/offline option —
+  evaluation, not commitment.
 - **Migration**: v1.5.x → v2.0 automatic and lossless (§5).
 - **Performance**: an idle listening session (no speech) must not exceed a few
   percent CPU; one active session at a time (v1 constraint kept).

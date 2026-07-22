@@ -134,6 +134,17 @@ window, not window/layout work.
 > Step 3 (full SessionView extraction from InterviewPage) is deferred — the
 > interview workspace stays intact partly because the privacy hard test pins
 > its profile-select → "Interviews" flow; revisit when Meeting lands.
+>
+> **Since then:** Meeting Copilot and Companion graduated from the Labs strip
+> to real launcher cards (Labs-badged, opening the start flow); "Talk to
+> BrainCue" joined the primary actions when voice shipped; the Memory tab
+> landed in Library. The start modal now lists gated modes (Interviewer
+> Assist, Tutor) as disabled **"Coming soon"** entries instead of hiding them.
+> Settings gained the **Providers** signpost card (per-capability view, planned
+> providers marked Coming soon) and the Companion prefs card. The first-run
+> Tour was rewritten again for the full current catalog — meeting, companion,
+> voice summon, review-first memory — with `data-tour` anchors on the
+> meeting/companion cards.
 
 Each step lands green on the parity gate:
 

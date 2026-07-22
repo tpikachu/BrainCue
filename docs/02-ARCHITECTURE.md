@@ -14,20 +14,19 @@
 │  │ • window mgmt      │          │  │ Dashboard window (React)│  │  │
 │  │ • global shortcuts │          │  └────────────────────────┘  │  │
 │  │ • screenshot       │          │  ┌────────────────────────┐  │  │
-│  │ • OpenAI calls ◀───┼── only   │  │ Overlay window (React)  │  │  │
+│  │ • AI calls (providers)◀─ only │  │ Overlay window (React)  │  │  │
 │  │ • SQLite/Drizzle   │   here   │  └────────────────────────┘  │  │
 │  │ • API key (safeStorage)       │                              │  │
 │  │ • RAG retrieval    │          │  Zustand stores, Tailwind UI │  │
 │  └────────────────────┘         └──────────────────────────────┘  │
 │            │                                                       │
 │            ▼                                                       │
-│   userData/  ├─ app.db (SQLite)                                    │
-│              ├─ documents/ (original uploads)                      │
-│              └─ vectors/   (LanceDB or in-db vectors)             │
+│   userData/  ├─ app.db (SQLite — embeddings live in-db)            │
+│              └─ documents/ (original uploads)                      │
 └──────────────────────────────────────────────────────────────────┘
-                         │  HTTPS (only from main)
+                         │  HTTPS (only from main, via providers/registry)
                          ▼
-                    OpenAI API
+              AI provider API (OpenAI today)
 ```
 
 **Golden rule:** all network/AI/database/secret access lives in the **main
@@ -63,8 +62,8 @@ only through a typed, allow-listed preload bridge.
 App lifecycle; create/destroy windows; always-on-top & content protection;
 register/unregister global shortcuts; `desktopCapturer` + region crop; coordinate
 audio capture (renderer captures raw audio, main makes the STT call); store &
-read API key via `safeStorage`; own the OpenAI client; own the DB; perform RAG;
-register all IPC handlers.
+read API key via `safeStorage`; own the AI clients (behind the provider
+registry); own the DB; perform RAG; register all IPC handlers.
 
 ### Renderer — Dashboard
 All management UI: profiles, document upload, notes, session setup, live
@@ -94,12 +93,34 @@ services/engine/
   modeDefinition.ts     // what a mode may declare (sources, trigger, persona…)
   grounding.ts          // top-k retrieval over profile + context pack
   sourceAdapter.ts      // realtime transcriber wiring + PCM level
-  trigger/              // TriggerPolicy: reactiveQuestion (classifier + 0.4
-                        //   floor), summoned (direct ask) — deterministic
-                        //   gates around LLM classification
-  modes/interview.mode.ts  // Interview Copilot as configuration
+  persona.ts            // companion personality → deterministic prompt preamble
+  meetingReport.ts      // end-of-meeting structured report
+  trigger/              // TriggerPolicy implementations — deterministic gates
+                        //   around LLM classification (the LLM only scores;
+                        //   code decides):
+                        //   reactiveQuestionPolicy (classifier + 0.4 floor),
+                        //   summonedPolicy (direct ask),
+                        //   ambientPolicy + salience + meetingHeuristics
+                        //     (meeting: heuristics filter small talk before
+                        //     the classifier; presence.ts maps the dial to
+                        //     floors + cooldowns),
+                        //   interjectionPolicy + companionPresence +
+                        //     companionSalience (companion: mute → DND →
+                        //     budget → cooldowns → classifier → floors)
+  companion/costMeter.ts // per-session budget: warn at 80%, exhausted blocks
+                        //   ambient calls (summons always allowed)
+  modes/                // interview.mode.ts · meeting.mode.ts ·
+                        //   companion.mode.ts — modes as configuration
   persistence/enginePersistence.ts  // interview tables (v1 semantics, pinned
                         //   by parity tests) + generic `contributions` dual-write
+
+services/memory/        // review-first long-term memory: extractor (proposes),
+                        //   memoryService (approve/edit/delete), recall
+                        //   (approved-only vector recall), sensitiveFilter
+services/voice/         // the voice/summon layer: voiceService + dialogueController
+                        //   (pure FSM, generation counter kills stale work),
+                        //   quickAnswer (no-session ask), sentenceStream (TTS
+                        //   chunking for streamed playback with barge-in)
 ```
 
 `services/session/sessionManager.ts` remains as a **backward-compatible
@@ -140,9 +161,17 @@ services/openai/
 
 Cross-cutting: central model config, retry/backoff, error normalization,
 token/cost estimation, and a single place that reads the decrypted key.
-The engine reaches these through `modes/interview.mode.ts` and the trigger
-policies — the provider-capability seam (PRD §6.7) cuts exactly at these call
-sites in the next phase.
+
+**The provider-capability seam is CUT and shipped** (`src/main/providers/`):
+`registry.ts` resolves a provider per capability (`chat` / `embedding` /
+`realtimeStt` / `batchStt` / `speech` / `vision`); `openai/` wraps the service
+modules above as the reference implementation. Engine, trigger classifiers,
+memory recall, and the voice layer all call `providerFor(capability)` — a
+second provider is a registration, not a rewrite. `embeddings` rows carry
+`provider`+`model`+`dim` and the write path refuses to mix identities.
+Settings → Providers surfaces the layer (planned providers marked "Coming
+soon"); no second provider is registered yet. Full detail:
+[06-OPENAI-SERVICE.md](./06-OPENAI-SERVICE.md).
 
 ## 6. API key security (summary; full plan in 07)
 
