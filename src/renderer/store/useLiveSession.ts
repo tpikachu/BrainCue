@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { api } from '../lib/api';
 import { floatTo16BitPCM, rms } from '../lib/pcm';
-import type { Session } from '@shared/types';
+import type { Presence, Session } from '@shared/types';
 import type { SavePrompt } from '@shared/ipc';
 
 export type AudioSource = 'mic' | 'system';
@@ -39,6 +39,10 @@ interface LiveSessionState {
     jobId: string | null;
     source: AudioSource;
     micDeviceId?: string | null;
+    /** Engine mode (default 'interview'); 'meeting' runs the ambient pipeline. */
+    mode?: string;
+    /** Ambient presence for meeting sessions (default: the mode's own). */
+    presence?: string;
   }) => Promise<void>;
   resumeExisting: (a: {
     sessionId: string;
@@ -177,7 +181,7 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
     pendingSave: null,
     clearPendingSave: () => set({ pendingSave: null }),
 
-    startNew: async ({ profileId, interviewType, answerFormat, jobId, source, micDeviceId }) => {
+    startNew: async ({ profileId, interviewType, answerFormat, jobId, source, micDeviceId, mode, presence }) => {
       // Acquire audio FIRST: if the user denies the mic or cancels the system-audio
       // picker, we never create a session that displays "live" with nothing flowing.
       let stream: MediaStream;
@@ -192,6 +196,8 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
         interviewType,
         jobId,
         answerFormat,
+        mode ?? 'interview',
+        presence as Presence | undefined,
       )) as Session;
       lineId = 0;
       set({ session: s, transcript: [], interim: '', paused: false, micError: null, sessionError: null });

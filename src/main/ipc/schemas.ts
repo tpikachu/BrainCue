@@ -30,6 +30,8 @@ export const zSessionMode = z.enum([
   'companion',
 ]);
 
+export const zPresence = z.enum(['summoned', 'quiet', 'balanced', 'active']);
+
 export const zContextPackKind = z.enum([
   'job',
   'subject',

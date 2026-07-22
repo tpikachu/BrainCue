@@ -18,6 +18,7 @@ vi.mock('./broadcast', () => ({
 }));
 
 import {
+  emitAmbientContribution,
   emitContributionContext,
   emitContributionDelta,
   emitContributionDone,
@@ -112,5 +113,53 @@ describe('stream + annotation emits', () => {
     expect(h.calls[3].payload).toEqual({ contributionId: 'q1' });
     expect(h.calls[4].payload).toEqual({ questionId: 'q1' });
     expect(h.calls[5].payload).toEqual({ contributionId: 'q1' });
+  });
+});
+
+describe('emitAmbientContribution — generic-only, no legacy twins', () => {
+  it('emits open → delta(body) → done and NEVER a legacy answer event', () => {
+    emitAmbientContribution({
+      contributionId: 'a1',
+      kind: 'action_item',
+      title: 'Send the checklist',
+      body: '> I will send the checklist by Friday.',
+    });
+    expect(h.calls.map((c) => c.ch)).toEqual([
+      EVENTS.contributionOpen,
+      EVENTS.contributionDelta,
+      EVENTS.contributionDone,
+    ]);
+    expect(h.calls[0].payload).toEqual({
+      contributionId: 'a1',
+      kind: 'action_item',
+      title: 'Send the checklist',
+    });
+    expect(h.calls[1].payload).toEqual({
+      contributionId: 'a1',
+      token: '> I will send the checklist by Friday.',
+    });
+    // Ambient cards default to the overlay only.
+    expect(h.calls.every((c) => (c.targets as string[])[0] === 'overlay')).toBe(true);
+  });
+
+  it('context cards patch their retrieved chunks in for "data sent"', () => {
+    const chunks = [{ id: 'cx1', sourceType: 'company', content: 'fact', score: 0.8 }];
+    emitAmbientContribution({
+      contributionId: 'c1',
+      kind: 'context',
+      title: 'Pricing',
+      body: 'The plan is $99 [1].',
+      contextChunks: chunks as never,
+    });
+    expect(h.calls.map((c) => c.ch)).toEqual([
+      EVENTS.contributionOpen,
+      EVENTS.contributionPatch,
+      EVENTS.contributionDelta,
+      EVENTS.contributionDone,
+    ]);
+    expect(h.calls[1].payload).toMatchObject({
+      contributionId: 'c1',
+      context: { questionId: 'c1', question: 'Pricing', chunks },
+    });
   });
 });

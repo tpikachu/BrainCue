@@ -4,6 +4,7 @@ import { ActionItemCardView } from './ActionItemCardView';
 import { AnswerCardView } from './AnswerCardView';
 import { CodeCardView } from './CodeCardView';
 import { ContextCardView } from './ContextCardView';
+import { DecisionCardView } from './DecisionCardView';
 import { OpenQuestionCardView } from './OpenQuestionCardView';
 import { SuggestedQuestionCardView } from './SuggestedQuestionCardView';
 import { SummaryCardView } from './SummaryCardView';
@@ -66,6 +67,7 @@ const DEFINITIONS: Record<string, CardDefinition> = {
   },
   coverage: { capabilities: noActions, chip: 'Coverage', View: SummaryCardView },
   warning: { capabilities: { ...noActions, copy: false }, chip: 'Warning', View: WarningCardView },
+  decision: { capabilities: noActions, chip: 'Decision', View: DecisionCardView },
   tutor_prompt: { capabilities: noActions, chip: 'Tutor', View: SuggestedQuestionCardView },
   memory_suggestion: { capabilities: noActions, chip: 'Memory', View: ContextCardView },
   summary: { capabilities: noActions, chip: 'Summary', View: SummaryCardView },

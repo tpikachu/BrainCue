@@ -7,6 +7,7 @@ import { registerApplicationsIpc } from './applications.ipc';
 import { registerNotesIpc } from './notes.ipc';
 import { registerStoriesIpc } from './stories.ipc';
 import { registerSessionIpc } from './session.ipc';
+import { registerContributionsIpc } from './contributions.ipc';
 import { registerMockIpc } from './mock.ipc';
 import { registerSparringIpc } from './sparring.ipc';
 import { registerCaptureIpc } from './capture.ipc';
@@ -28,6 +29,7 @@ export function registerIpc(): void {
   registerNotesIpc();
   registerStoriesIpc();
   registerSessionIpc();
+  registerContributionsIpc();
   registerMockIpc();
   registerSparringIpc();
   registerCaptureIpc();

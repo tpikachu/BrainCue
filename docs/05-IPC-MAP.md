@@ -229,6 +229,15 @@ Channel constants live in `EVENTS` (`src/shared/ipc.ts`); payload types are in
 | `contribution:patch` | `{ contributionId, meta?, context?, followup? }` | overlay (named annotations — the same payloads the legacy answer-meta / context / answer-followup events carry) |
 | `contribution:done` | `{ contributionId }` | overlay (stream finished — completed or aborted) |
 | `contribution:reset` | `{ contributionId }` | overlay (regenerate: clear that card's body, keep the card) |
+
+Meeting Copilot additions (Prompt 7): `session:start` now accepts `mode`
+(SessionMode, default `interview`) and `presence`
+(summoned|quiet|balanced|active) for ambient modes; `session:meeting-report`
+returns `{ contributionId, report: MeetingReport }` (get-or-generate);
+`contributions:update` edits a persisted contribution's
+title/body/meta/status (the meeting report's action items / open questions
+stay editable). Ambient meeting cards broadcast ONLY the generic
+`contribution:*` events — no legacy `answer-*` twins.
 | `session:client-info` | `ClientInfo \| null` | overlay (active interview: company/title/notes + profileName + grounding flags hasResume/hasJd/hasCompany, for the Cue Card header + session bar + ⓘ panel; `null` clears on stop) |
 | `session:answer-prefs` | `AnswerPrefs` (`{ interviewType, format, pronunciation }`) | overlay (seeds the Cue Card answer-control toggles) |
 | `session:audio-level` | `{ level }` (0-1 RMS, ~12/sec) | overlay (drives the Cue Card mic meter; computed in `feedRealtimeAudio` since the stream lives in the dashboard renderer) |

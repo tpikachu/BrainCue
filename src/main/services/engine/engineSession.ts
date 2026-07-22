@@ -1,6 +1,7 @@
 import { EVENTS } from '@shared/ipc';
 import { broadcast } from '../../ipc/broadcast';
 import {
+  emitAmbientContribution,
   emitContributionContext,
   emitContributionDelta,
   emitContributionDone,
@@ -18,6 +19,7 @@ import { summonedPolicy } from './trigger/summonedPolicy';
 import type { RealtimeSttSession } from '../../providers/types';
 import type { ContextEvent } from './contextEvent';
 import type { ModeDefinition, RuntimeSettings } from './modeDefinition';
+import type { AmbientTriggerPolicy } from './trigger/ambientPolicy';
 
 /** A question we answered, kept so the Cue Card can re-generate it (e.g. after
  *  toggling length/format/pronunciation) by reusing the SAME question row — no
@@ -55,6 +57,9 @@ export class EngineSession {
   suppressAnswers = false;
   pendingQuestionText: string | null = null;
   transcriber: RealtimeSttSession | null = null;
+  /** Ambient trigger state (Meeting) — per-session cooldowns/dedupe/pending
+   *  questions. Null for Q&A modes (interview). */
+  readonly ambientPolicy: AmbientTriggerPolicy | null;
 
   /** Set on teardown/replacement: an in-flight classify/stream/prediction that
    *  wakes up afterwards must act as if the old module-level `live` changed. */
@@ -80,6 +85,7 @@ export class EngineSession {
     this.mode = opts.mode;
     this.settings = opts.settings;
     this.ephemeral = opts.ephemeral;
+    this.ambientPolicy = opts.mode.ambient?.createPolicy(opts.settings.presence) ?? null;
   }
 
   get isStopped(): boolean {
@@ -115,6 +121,14 @@ export class EngineSession {
     if (!text || this.stopped || this.paused) return;
     const tcId = persist.finalTranscript(this.sessionId, this.mode.remoteSpeaker, text);
     broadcast(EVENTS.transcriptDelta, { text, isFinal: true, speaker: this.mode.remoteSpeaker });
+
+    // Ambient modes (Meeting): the turn runs the ambient trigger and may
+    // become a quiet card — never a streamed auto-answer. Direct asks still
+    // reach the Q&A path below via handleEvent('direct_ask').
+    if (this.mode.ambient && this.ambientPolicy) {
+      await this.handleAmbient(text, tcId);
+      return;
+    }
 
     // Coding session with answering suppressed: keep transcribing (so the words
     // still show), but DON'T auto-answer — that would replace the coding answer.
@@ -152,6 +166,40 @@ export class EngineSession {
     } catch (e) {
       if (!this.stopped && !this.answerAbort) this.answering = false;
       log.error('onTranscriptFinal failed', e);
+    }
+  }
+
+  /** Ambient turn (Meeting): evaluate → maybe build a card → persist +
+   *  broadcast (generic contribution events only). Failures are logged
+   *  silence — a broken card must never interrupt a meeting. */
+  private async handleAmbient(text: string, transcriptChunkId: string): Promise<void> {
+    try {
+      const decision = await this.ambientPolicy!.evaluate(text, Date.now());
+      if (this.stopped || !decision.act || !decision.kind) return;
+      const card = await this.mode.ambient!.buildCard(decision, {
+        turnText: text,
+        transcriptChunkId,
+        profileId: this.profileId,
+        packId: this.packId,
+      });
+      if (!card || this.stopped) return;
+      const contributionId = persist.insertContribution({
+        sessionId: this.sessionId,
+        kind: card.kind,
+        title: card.title,
+        body: card.body,
+        meta: card.meta,
+        sourceRefs: card.sourceRefs,
+      });
+      emitAmbientContribution({
+        contributionId,
+        kind: card.kind,
+        title: card.title,
+        body: card.body,
+        contextChunks: card.contextChunks,
+      });
+    } catch (e) {
+      log.error('ambient contribution failed', e);
     }
   }
 

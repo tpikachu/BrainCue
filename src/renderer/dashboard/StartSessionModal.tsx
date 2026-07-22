@@ -4,9 +4,15 @@ import { api } from '../lib/api';
 import { useProfileStore } from '../store/useProfileStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useLiveSession } from '../store/useLiveSession';
-import type { Job } from '@shared/types';
-import { Button, Field, Modal, Select } from '../components/ui';
-import { captureSummary, enabledModes, startBlocker, type StartMode } from './startFlow';
+import type { Job, Presence } from '@shared/types';
+import { Badge, Button, Field, Modal, Select } from '../components/ui';
+import {
+  PRESENCE_OPTIONS,
+  captureSummary,
+  enabledModes,
+  startBlocker,
+  type StartMode,
+} from './startFlow';
 
 /**
  * The universal start flow (docs/11-UX-NAVIGATION.md): one shared surface for
@@ -20,6 +26,7 @@ export function StartSessionModal(props: {
   onClose: () => void;
   initialProfileId?: string;
   initialSpaceId?: string;
+  initialMode?: StartMode['id'];
 }) {
   const navigate = useNavigate();
   const { profiles, load: loadProfiles } = useProfileStore();
@@ -32,6 +39,7 @@ export function StartSessionModal(props: {
   const [spaceId, setSpaceId] = useState(props.initialSpaceId ?? '');
   const [spaces, setSpaces] = useState<Job[]>([]);
   const [source, setSource] = useState<'system' | 'mic'>('system');
+  const [presence, setPresence] = useState<Presence>('quiet'); // meetings: quiet by default
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,11 +47,19 @@ export function StartSessionModal(props: {
     if (!props.open) return;
     void loadProfiles();
     void loadSettings();
-    setMode('interview');
+    setMode(props.initialMode ?? 'interview');
     setProfileId(props.initialProfileId ?? '');
     setSpaceId(props.initialSpaceId ?? '');
+    setPresence('quiet');
     setError(null);
-  }, [props.open, props.initialProfileId, props.initialSpaceId, loadProfiles, loadSettings]);
+  }, [
+    props.open,
+    props.initialProfileId,
+    props.initialSpaceId,
+    props.initialMode,
+    loadProfiles,
+    loadSettings,
+  ]);
 
   // Default the source to the persisted audio preference.
   useEffect(() => {
@@ -71,8 +87,8 @@ export function StartSessionModal(props: {
     sessionLive: !!live.session,
   });
   const summary = useMemo(
-    () => captureSummary({ source, spaceTitle }),
-    [source, spaceTitle],
+    () => captureSummary({ source, spaceTitle, mode }),
+    [source, spaceTitle, mode],
   );
 
   const start = async () => {
@@ -89,9 +105,12 @@ export function StartSessionModal(props: {
         answerFormat: 'key_points',
         source,
         micDeviceId: settings?.audio?.micDeviceId ?? null,
+        mode,
+        presence: mode === 'meeting' ? presence : undefined,
       });
       props.onClose();
-      navigate('/interview');
+      // Interviews continue in their workspace; meetings live in the Cue Card.
+      navigate(mode === 'meeting' ? '/home' : '/interview');
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -125,7 +144,10 @@ export function StartSessionModal(props: {
                     : 'border-white/5 bg-neutral-900/60 hover:bg-neutral-900'
                 }`}
               >
-                <span className="block font-medium text-neutral-100">{m.label}</span>
+                <span className="flex items-center gap-1.5 font-medium text-neutral-100">
+                  {m.label}
+                  {m.id === 'meeting' && <Badge tone="amber">Labs</Badge>}
+                </span>
                 <span className="mt-0.5 block text-xs leading-snug text-neutral-400">{m.desc}</span>
               </button>
             ))}
@@ -208,6 +230,19 @@ export function StartSessionModal(props: {
                 ))}
               </div>
             </fieldset>
+
+            {/* 3b · Presence — meetings only: explicit thresholds, not a vibe. */}
+            {mode === 'meeting' && (
+              <Field label="Presence">
+                <Select value={presence} onChange={(e) => setPresence(e.target.value as Presence)}>
+                  {PRESENCE_OPTIONS.map((p) => (
+                    <option key={p.value} value={p.value}>
+                      {p.label} — {p.desc}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
 
             {/* 4 · Exactly what is captured and sent — before anything starts. */}
             <div className="rounded-xl border border-white/5 bg-neutral-950/60 p-3.5 text-xs leading-relaxed">

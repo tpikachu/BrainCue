@@ -4,12 +4,15 @@ import type { AnswerPrefs, ClientInfo, ConfirmRequest, SavePrompt, UpdateStatus 
 import type {
   Application,
   ApplicationListItem,
+  Contribution,
   ContributionDeltaEvent,
   ContributionDoneEvent,
   ContributionOpenEvent,
   ContributionPatchEvent,
   ContributionResetEvent,
   InterviewBrief,
+  MeetingReport,
+  Presence,
   SparringFeedback,
   Story,
 } from '@shared/types';
@@ -172,7 +175,9 @@ const api = {
       interviewType: string,
       jobId: string | null = null,
       answerFormat = 'key_points',
-    ) => invoke(IPC.session.start, { profileId, interviewType, jobId, answerFormat }),
+      mode = 'interview',
+      presence?: Presence,
+    ) => invoke(IPC.session.start, { profileId, interviewType, jobId, answerFormat, mode, presence }),
     resume: (sessionId: string, answerFormat = 'key_points') =>
       invoke(IPC.session.resume, { sessionId, answerFormat }),
     setAnswerPrefs: (prefs: { interviewType?: string; format?: string; pronunciation?: boolean }) =>
@@ -207,6 +212,21 @@ const api = {
     generateReport: (sessionId: string) => invoke(IPC.session.generateReport, { sessionId }),
     getReport: (sessionId: string) => invoke(IPC.session.getReport, { sessionId }),
     practiceStats: () => invoke(IPC.session.practiceStats),
+    meetingReport: (sessionId: string) =>
+      invoke<{ contributionId: string; report: MeetingReport }>(IPC.session.meetingReport, {
+        sessionId,
+      }),
+  },
+  contributions: {
+    update: (
+      id: string,
+      patch: {
+        title?: string | null;
+        body?: string;
+        meta?: Record<string, unknown> | null;
+        status?: string;
+      },
+    ) => invoke<Contribution>(IPC.contributions.update, { id, ...patch }),
   },
   mock: {
     start: (

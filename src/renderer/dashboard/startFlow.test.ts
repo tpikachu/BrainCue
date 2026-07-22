@@ -13,7 +13,8 @@ describe('mode catalog', () => {
   });
 
   it('flag-gated modes are hidden, not rendered dead — only shipped modes are enabled', () => {
-    expect(enabledModes().map((m) => m.id)).toEqual(['interview', 'practice']);
+    // Meeting shipped with Prompt 7 (FLAGS.meeting); the rest stay gated.
+    expect(enabledModes().map((m) => m.id)).toEqual(['interview', 'practice', 'meeting']);
   });
 });
 

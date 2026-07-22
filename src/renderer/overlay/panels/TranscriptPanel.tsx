@@ -14,7 +14,16 @@ export const MAX_LINES = 300;
 
 /** Live transcript — resizable height (drag the handle below it) with
  *  pin-to-newest scrolling. Lets the dashboard be minimized during the session. */
-export function TranscriptPanel({ lines, interim }: { lines: Line[]; interim: string }) {
+export function TranscriptPanel({
+  lines,
+  interim,
+  interimSpeaker = 'interviewer',
+}: {
+  lines: Line[];
+  interim: string;
+  /** Label for the in-flight partial (mode-dependent: 'interviewer' / 'them'). */
+  interimSpeaker?: string;
+}) {
   const [height, setHeight] = useState(150);
   const [atBottom, setAtBottom] = useState(true);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -83,7 +92,7 @@ export function TranscriptPanel({ lines, interim }: { lines: Line[]; interim: st
               ))}
               {interim && (
                 <p className="italic text-neutral-500">
-                  interviewer: {interim}
+                  {interimSpeaker}: {interim}
                   <span className="ml-0.5 animate-pulse">▋</span>
                 </p>
               )}

@@ -2,10 +2,11 @@ import { z } from 'zod';
 import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc';
 import { handle, zId } from './helpers';
-import { zAnswerFormat, zInterviewType } from './schemas';
+import { zAnswerFormat, zInterviewType, zPresence, zSessionMode } from './schemas';
 import { sessionManager } from '../services/session/sessionManager';
 import { sessionsRepo } from '../db/repositories/sessions.repo';
 import { generateReport } from '../services/session/report';
+import { getOrGenerateMeetingReport } from '../services/engine/meetingReport';
 
 const interviewType = zInterviewType;
 const answerFormat = zAnswerFormat;
@@ -18,9 +19,19 @@ export function registerSessionIpc(): void {
       interviewType,
       jobId: z.string().nullable().default(null),
       answerFormat: answerFormat.default('key_points'),
+      // v2: which engine mode runs the session (default keeps v1 semantics)
+      // and, for ambient modes, how present the companion should be.
+      mode: zSessionMode.default('interview'),
+      presence: zPresence.optional(),
     }),
-    ({ profileId, interviewType: t, jobId, answerFormat: f }) =>
-      sessionManager.start(profileId, t, jobId, f),
+    ({ profileId, interviewType: t, jobId, answerFormat: f, mode, presence }) =>
+      sessionManager.start(profileId, t, jobId, f, { mode, presence }),
+  );
+
+  handle(
+    IPC.session.meetingReport,
+    z.object({ sessionId: z.string().min(1) }),
+    ({ sessionId }) => getOrGenerateMeetingReport(sessionId),
   );
 
   handle(

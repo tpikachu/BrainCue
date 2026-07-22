@@ -33,6 +33,7 @@ export default function HomePage() {
   const { settings } = useSettingsStore();
   const { session } = useLiveSession();
   const [startOpen, setStartOpen] = useState(false);
+  const [startMode, setStartMode] = useState<'interview' | 'meeting'>('interview');
   const [recent, setRecent] = useState<SessionListItem[]>([]);
   const [micState, setMicState] = useState<'granted' | 'prompt' | 'denied' | 'unknown'>('unknown');
   const [activeSpace, setActiveSpace] = useState<string | null>(null);
@@ -120,7 +121,10 @@ export default function HomePage() {
           Icon={MicIcon}
           title="Start listening"
           desc="Live cues for the conversation you're in"
-          onClick={() => setStartOpen(true)}
+          onClick={() => {
+            setStartMode('interview');
+            setStartOpen(true);
+          }}
           tour="action-start"
         />
         <PrimaryAction
@@ -210,6 +214,18 @@ export default function HomePage() {
             <PracticeLink to="/sparring" label="Sparring drill" />
           </div>
         </ModeCard>
+        {FLAGS.meeting && (
+          <ModeCard
+            Icon={UsersIcon}
+            title="Meeting Copilot"
+            desc="Sits in quietly and surfaces context, open questions, action items, and decisions — only when confident."
+            labs
+            onClick={() => {
+              setStartMode('meeting');
+              setStartOpen(true);
+            }}
+          />
+        )}
         <ModeCard
           Icon={BoltIcon}
           title="Solve from screen"
@@ -238,7 +254,11 @@ export default function HomePage() {
         </>
       )}
 
-      <StartSessionModal open={startOpen} onClose={() => setStartOpen(false)} />
+      <StartSessionModal
+        open={startOpen}
+        onClose={() => setStartOpen(false)}
+        initialMode={startMode}
+      />
     </Page>
   );
 }
@@ -293,18 +313,23 @@ function StatusChip({
 
 function ModeCard({
   to,
+  onClick,
   Icon,
   title,
   desc,
   tour,
+  labs = false,
   static: isStatic = false,
   children,
 }: {
   to?: string;
+  onClick?: () => void;
   Icon: IconType;
   title: string;
   desc: string;
   tour?: string;
+  /** Freshly shipped mode still collecting real-world hours. */
+  labs?: boolean;
   /** Informational card — not a link (hotkey-driven feature). */
   static?: boolean;
   children?: React.ReactNode;
@@ -316,6 +341,7 @@ function ModeCard({
           <Icon className="h-5 w-5" />
         </span>
         {isStatic && <Badge tone="neutral">Hotkey</Badge>}
+        {labs && <Badge tone="amber">Labs</Badge>}
       </div>
       <h4 className="mt-3 font-semibold text-neutral-100">{title}</h4>
       <p className="mt-1 text-sm leading-relaxed text-neutral-400">{desc}</p>
@@ -323,16 +349,26 @@ function ModeCard({
     </>
   );
   const base = 'rounded-2xl border border-white/5 bg-neutral-900/70 p-5 shadow-lg shadow-black/20';
+  const interactive =
+    'transition-all duration-150 hover:-translate-y-0.5 hover:border-indigo-400/30 hover:bg-neutral-900';
 
   if (to) {
     return (
-      <Link
-        to={to}
-        data-tour={tour}
-        className={`${base} block transition-all duration-150 hover:-translate-y-0.5 hover:border-indigo-400/30 hover:bg-neutral-900`}
-      >
+      <Link to={to} data-tour={tour} className={`${base} block ${interactive}`}>
         {body}
       </Link>
+    );
+  }
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        data-tour={tour}
+        onClick={onClick}
+        className={`${base} block w-full text-left ${interactive} focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400`}
+      >
+        {body}
+      </button>
     );
   }
   return (

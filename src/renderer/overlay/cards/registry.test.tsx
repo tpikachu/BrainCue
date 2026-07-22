@@ -15,6 +15,7 @@ const ALL_KINDS: ContributionKind[] = [
   'suggested_question',
   'coverage',
   'warning',
+  'decision',
   'tutor_prompt',
   'memory_suggestion',
   'summary',

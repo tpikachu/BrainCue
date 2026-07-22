@@ -5,6 +5,7 @@ import { durationMs, fmtDur, fmtHours } from '../../lib/format';
 import { Badge, Button, Modal, Page, Spinner } from '../../components/ui';
 import { DataTable, type Column } from '../../components/DataTable';
 import { Markdown } from '../../components/Markdown';
+import { MeetingReportModal } from '../MeetingReportModal';
 
 const PER_PAGE = 12;
 
@@ -17,8 +18,9 @@ export default function SessionsPage() {
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  // Report modal.
+  // Report modals (interview coaching vs meeting report, by session mode).
   const [openSession, setOpenSession] = useState<SessionListItem | null>(null);
+  const [meetingSession, setMeetingSession] = useState<SessionListItem | null>(null);
   const [report, setReport] = useState<SessionReport | null>(null);
   const [reportError, setReportError] = useState<string | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
@@ -50,6 +52,11 @@ export default function SessionsPage() {
   const pageRows = filtered.slice(page * PER_PAGE, page * PER_PAGE + PER_PAGE);
 
   const view = async (s: SessionListItem) => {
+    // Meetings have their own structured report (summary/decisions/actions).
+    if (s.mode === 'meeting') {
+      setMeetingSession(s);
+      return;
+    }
     setOpenSession(s);
     setReport(null);
     setReportError(null);
@@ -98,7 +105,11 @@ export default function SessionsPage() {
         return (
           <div className="flex flex-col gap-0.5" title={breakdown}>
             <span className="flex items-center gap-1">
-              <Badge>{s.interviewType.replace(/_/g, ' ')}</Badge>
+              {s.mode === 'meeting' ? (
+                <Badge tone="blue">Meeting</Badge>
+              ) : (
+                <Badge>{s.interviewType.replace(/_/g, ' ')}</Badge>
+              )}
               {s.kind === 'sparring' && <Badge tone="amber">Practice</Badge>}
             </span>
             {total > 0 && <span className="text-[11px] text-neutral-500">{total} questions</span>}
@@ -222,6 +233,9 @@ export default function SessionsPage() {
           <p className="text-sm text-neutral-500">No report available.</p>
         )}
       </Modal>
+
+      {/* Meeting report (structured; action items/open questions editable). */}
+      <MeetingReportModal session={meetingSession} onClose={() => setMeetingSession(null)} />
     </Page>
   );
 }

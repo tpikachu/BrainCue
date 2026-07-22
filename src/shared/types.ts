@@ -61,9 +61,15 @@ export type ContributionKind =
   | 'suggested_question'
   | 'coverage'
   | 'warning'
+  | 'decision'
   | 'tutor_prompt'
   | 'memory_suggestion'
   | 'summary';
+
+/** How present the companion is in an ambient session (Meeting, later
+ *  Companion). Levels map to EXPLICIT thresholds/cooldowns in the engine
+ *  (trigger/presence.ts) — never a vague slider feeding a prompt. */
+export type Presence = 'summoned' | 'quiet' | 'balanced' | 'active';
 
 /** Stable lifecycle every Contribution moves through. */
 export type ContributionStatus =
@@ -372,6 +378,26 @@ export interface SessionReport {
   improvements: string[];
   perQuestion: { question: string; assessment: string }[];
   createdAt: number;
+}
+
+/** End-of-meeting report (Meeting Copilot). Owners/deadlines are null unless
+ *  EXPLICIT in the transcript — the generator post-filters anything the model
+ *  invents (see engine/meetingReport.ts). Persisted as a `summary`
+ *  contribution whose meta carries this structure. */
+export interface MeetingActionItem {
+  text: string;
+  owner: string | null;
+  deadline: string | null;
+}
+export interface MeetingDecision {
+  text: string;
+  owner: string | null;
+}
+export interface MeetingReport {
+  summary: string;
+  decisions: MeetingDecision[];
+  actionItems: MeetingActionItem[];
+  openQuestions: string[];
 }
 
 /** Aggregated Practice Loop stats across all sparring drills (Reports). */

@@ -11,9 +11,18 @@ import { getMainWindow } from '../../windows/mainWindow';
 import { log } from '../security/logger';
 import { EngineSession } from './engineSession';
 import { interviewMode } from './modes/interview.mode';
+import { meetingMode } from './modes/meeting.mode';
+import { getOrGenerateMeetingReport } from './meetingReport';
 import { enginePersistence } from './persistence/enginePersistence';
 import { createRealtimeSource, pcmLevel } from './sourceAdapter';
-import type { AnswerFormat, InterviewType, Session } from '@shared/types';
+import type { AnswerFormat, InterviewType, Presence, Session, SessionMode } from '@shared/types';
+import type { ModeDefinition } from './modeDefinition';
+
+/** Mode registry: SessionMode → definition. Practice/mock rehearse through
+ *  the interview pipeline; the flagged-off modes land with their prompts. */
+function modeFor(mode: SessionMode | undefined): ModeDefinition {
+  return mode === 'meeting' ? meetingMode : interviewMode;
+}
 
 function toSession(r: typeof schema.sessions.$inferSelect): Session {
   return {
@@ -50,17 +59,21 @@ class Engine {
     answerFormat: AnswerFormat;
     language: string;
     ephemeral?: boolean;
+    mode?: SessionMode;
+    presence?: Presence;
   }): void {
     this.current?.teardown(); // cancel any prior in-flight answer; never leak a socket
+    const modeDef = modeFor(opts.mode);
     const session = new EngineSession({
       sessionId: opts.sessionId,
       profileId: opts.profileId,
       packId: opts.packId,
-      mode: interviewMode,
+      mode: modeDef,
       settings: {
         interviewType: opts.interviewType,
         answerFormat: opts.answerFormat,
         pronunciation: true, // ON by default (v1.2); toggled live from the Cue Card
+        presence: opts.presence ?? modeDef.defaultPresence,
       },
       ephemeral: !!opts.ephemeral,
     });
@@ -111,7 +124,7 @@ class Engine {
       EVENTS.clientInfo,
       {
         company: pack?.company ?? null,
-        title: pack?.title ?? 'Interview',
+        title: pack?.title ?? (modeDef.id === 'meeting' ? 'Meeting' : 'Interview'),
         notes: pack?.notes ?? null,
         profileName: profile?.name ?? null,
         hasResume: !!profile?.parsedResume,
@@ -127,6 +140,7 @@ class Engine {
     interviewType: InterviewType,
     packId: string | null = null,
     answerFormat: AnswerFormat = 'key_points',
+    opts: { mode?: SessionMode; presence?: Presence } = {},
   ): Session {
     const profile = profilesRepo.get(profileId);
     if (!profile) throw new Error('Profile not found');
@@ -137,7 +151,7 @@ class Engine {
         id,
         profileId,
         packId,
-        mode: 'interview',
+        mode: opts.mode ?? 'interview',
         kind: 'live',
         interviewType,
         status: 'live',
@@ -151,6 +165,8 @@ class Engine {
       interviewType,
       answerFormat,
       language: profile.language,
+      mode: opts.mode,
+      presence: opts.presence,
     });
     return toSession(db().select().from(schema.sessions).where(eq(schema.sessions.id, id)).get()!);
   }
@@ -176,6 +192,7 @@ class Engine {
       interviewType: row.interviewType as InterviewType,
       answerFormat,
       language: profile.language,
+      mode: row.mode as SessionMode, // a meeting resumes as a meeting
     });
     return toSession(
       db().select().from(schema.sessions).where(eq(schema.sessions.id, sessionId)).get()!,
@@ -239,6 +256,7 @@ class Engine {
     if (s && s.sessionId === sessionId) {
       const interviewType = s.settings.interviewType;
       const wasEphemeral = s.ephemeral;
+      const wasMeeting = s.mode.id === 'meeting';
       const packTitle = s.packId ? (contextPacksRepo.get(s.packId)?.title ?? null) : null;
       s.teardown(); // stop any in-flight answer stream + the transcriber
       this.current = null;
@@ -264,6 +282,14 @@ class Engine {
         if (mainWin) {
           mainWin.show();
           mainWin.focus();
+        }
+        // Meetings get their end-of-session report generated eagerly (fire-and-
+        // forget; the transcript + cards are already persisted). The Sessions
+        // page falls back to get-or-generate if this fails or is still running.
+        if (wasMeeting) {
+          void getOrGenerateMeetingReport(sessionId).catch((e) =>
+            log.warn('meeting report generation failed', e),
+          );
         }
       }
     }

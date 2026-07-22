@@ -85,6 +85,7 @@ export default function Overlay() {
   // Live transcript (the conversation feed), so the dashboard can be minimized.
   const [transcript, setTranscript] = useState<Line[]>([]);
   const [interim, setInterim] = useState('');
+  const [interimSpeaker, setInterimSpeaker] = useState('interviewer'); // 'them' in meetings
   const lineId = useRef(0);
   const prevLive = useRef(false);
 
@@ -125,6 +126,7 @@ export default function Overlay() {
       }),
       api.events.onTranscriptDelta((p) => {
         const d = p as { text: string; speaker: string; isFinal: boolean };
+        if (d.speaker) setInterimSpeaker(d.speaker);
         if (d.isFinal) {
           setTranscript((t) =>
             [...t, { id: lineId.current++, speaker: d.speaker, text: d.text }].slice(-MAX_LINES * 2),
@@ -359,7 +361,7 @@ export default function Overlay() {
       {live && mode === 'expanded' && <AudioMeter level={level} speaking={speaking} />}
 
       {(live || transcript.length > 0 || interim) && (
-        <TranscriptPanel lines={transcript} interim={interim} />
+        <TranscriptPanel lines={transcript} interim={interim} interimSpeaker={interimSpeaker} />
       )}
 
       {/* Contribution cards — the newest streams; older ones are kept (collapsed)

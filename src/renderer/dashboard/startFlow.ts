@@ -1,5 +1,5 @@
 import { FLAGS } from '@shared/flags';
-import type { Profile } from '@shared/types';
+import type { Presence, Profile } from '@shared/types';
 
 /** The universal start flow's mode catalog (StartSessionModal + Home). One
  *  entry per SessionMode; `enabled` is the flag gate — a disabled mode is
@@ -47,6 +47,15 @@ export const START_MODES: StartMode[] = [
 
 export const enabledModes = (): StartMode[] => START_MODES.filter((m) => m.enabled);
 
+/** Presence options for ambient modes (Meeting) — labels for the explicit
+ *  threshold/cooldown levels in the engine's trigger/presence.ts. */
+export const PRESENCE_OPTIONS: { value: Presence; label: string; desc: string }[] = [
+  { value: 'summoned', label: 'Summoned only', desc: 'Never speaks up — answers only when you ask.' },
+  { value: 'quiet', label: 'Quiet', desc: 'Rare, high-confidence cards only. The default.' },
+  { value: 'balanced', label: 'Balanced', desc: 'Speaks up on clear action items, decisions, and gaps.' },
+  { value: 'active', label: 'Active', desc: 'Contributes whenever it plausibly helps.' },
+];
+
 /** Can a session start? Returns the FIRST blocking reason so the UI can say
  *  exactly what to fix (and never half-starts anything). */
 export function startBlocker(a: {
@@ -67,7 +76,11 @@ export function startBlocker(a: {
 export function captureSummary(a: {
   source: 'system' | 'mic';
   spaceTitle: string | null;
+  mode?: StartMode['id'];
 }): { captured: string[]; sent: string[]; neverSent: string[] } {
+  const scope = a.spaceTitle
+    ? `your profile and the “${a.spaceTitle}” Space`
+    : 'your profile';
   return {
     captured: [
       a.source === 'system'
@@ -77,9 +90,12 @@ export function captureSummary(a: {
     ],
     sent: [
       'Audio to OpenAI for transcription (Realtime API, your key).',
-      `Per detected question: the question text + the top-5 matching chunks from ${
-        a.spaceTitle ? `your profile and the “${a.spaceTitle}” Space` : 'your profile'
-      }.`,
+      ...(a.mode === 'meeting'
+        ? [
+            'Ambiguous turns: the turn + a few recent turns, for salience scoring (deterministic rules filter greetings/small talk first).',
+            `When a card is made: the turn + the top-5 matching chunks from ${scope}.`,
+          ]
+        : [`Per detected question: the question text + the top-5 matching chunks from ${scope}.`]),
     ],
     neverSent: [
       'Your API key (main process only).',

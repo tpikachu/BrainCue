@@ -99,6 +99,10 @@ export const IPC = {
     setAnswering: 'session:set-answering', // coding: toggle auto-answering the interviewer
     regenerate: 'session:regenerate',
     clearAnswer: 'session:clear-answer',
+    meetingReport: 'session:meeting-report', // get-or-generate the structured meeting report
+  },
+  contributions: {
+    update: 'contributions:update', // review/edit a persisted contribution (title/body/meta/status)
   },
   mock: {
     start: 'mock:start',

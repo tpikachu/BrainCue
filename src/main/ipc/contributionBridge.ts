@@ -1,5 +1,10 @@
 import { EVENTS } from '@shared/ipc';
-import type { AnswerMetaEvent, ContextSentEvent, ContributionKind } from '@shared/types';
+import type {
+  AnswerMetaEvent,
+  ContextSentEvent,
+  ContributionKind,
+  RetrievedChunk,
+} from '@shared/types';
 import { broadcast } from './broadcast';
 
 /**
@@ -81,4 +86,40 @@ export function emitContributionDone(contributionId: string, targets?: Targets):
 export function emitContributionReset(contributionId: string, targets?: Targets): void {
   broadcast(EVENTS.answerReset, { questionId: contributionId }, targets);
   broadcast(EVENTS.contributionReset, { contributionId }, targets);
+}
+
+/** One-shot GENERIC-ONLY emission for ambient cards (Meeting etc.): open →
+ *  optional context patch → the whole body as one delta → done. No legacy
+ *  answer-event twin — v1 subscribers never knew these kinds, and mirroring
+ *  them as fake "questions" would corrupt the dashboard's Q&A surfaces. */
+export function emitAmbientContribution(
+  p: {
+    contributionId: string;
+    kind: ContributionKind;
+    title: string;
+    body: string;
+    /** Retrieved grounding to surface in "data sent" (context cards). */
+    contextChunks?: RetrievedChunk[];
+  },
+  targets: Targets = ['overlay'],
+): void {
+  broadcast(
+    EVENTS.contributionOpen,
+    { contributionId: p.contributionId, kind: p.kind, title: p.title },
+    targets,
+  );
+  if (p.contextChunks) {
+    const context: ContextSentEvent = {
+      questionId: p.contributionId,
+      question: p.title,
+      chunks: p.contextChunks,
+    };
+    broadcast(EVENTS.contributionPatch, { contributionId: p.contributionId, context }, targets);
+  }
+  broadcast(
+    EVENTS.contributionDelta,
+    { contributionId: p.contributionId, token: p.body },
+    targets,
+  );
+  broadcast(EVENTS.contributionDone, { contributionId: p.contributionId }, targets);
 }

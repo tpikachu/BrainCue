@@ -6,8 +6,10 @@
 export const FLAGS = {
   /** Interviewer Assist mode (question suggestions, coverage tracking). */
   interviewerAssist: false,
-  /** Meeting Copilot mode (quiet ambient contributions in meetings). */
-  meeting: false,
+  /** Meeting Copilot mode (quiet ambient contributions in meetings). Shipped
+   *  behind its deterministic acceptance suite (meeting.acceptance.test.ts);
+   *  surfaces with a Labs badge while it collects real-world hours. */
+  meeting: true,
   /** Tutor mode (voice dialogue + drills over your material). */
   tutor: false,
   /** Companion mode (ambient presence with memory). */

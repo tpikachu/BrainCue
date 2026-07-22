@@ -1,5 +1,5 @@
 import { engine } from '../engine/engine';
-import type { AnswerFormat, InterviewType, Session } from '@shared/types';
+import type { AnswerFormat, InterviewType, Presence, Session, SessionMode } from '@shared/types';
 
 /**
  * Backward-compatible FACADE over the conversation engine.
@@ -41,8 +41,9 @@ export const sessionManager = {
     interviewType: InterviewType,
     jobId: string | null = null,
     answerFormat: AnswerFormat = 'key_points',
+    opts: { mode?: SessionMode; presence?: Presence } = {},
   ): Session {
-    return engine.start(profileId, interviewType, jobId, answerFormat);
+    return engine.start(profileId, interviewType, jobId, answerFormat, opts);
   },
 
   resume(sessionId: string, answerFormat: AnswerFormat = 'key_points'): Session {
