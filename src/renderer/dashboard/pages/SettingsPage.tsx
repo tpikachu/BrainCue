@@ -63,6 +63,27 @@ const PRESET_OPTIONS: { value: string; label: string; hint: string }[] = [
   { value: 'best', label: 'Best', hint: 'Max quality' },
 ];
 
+/** The engine's capability seam, in the user's words. Every one of these is a
+ *  separate provider choice (main/providers/registry.ts) — today they all
+ *  resolve to OpenAI, the reference implementation. */
+const CAPABILITIES: { label: string; hint: string }[] = [
+  { label: 'Answers & cards', hint: 'Generates what appears in the Cue Card' },
+  { label: 'Document search', hint: 'Embeds your documents so answers can be grounded' },
+  { label: 'Live transcription', hint: 'Turns the conversation into text in real time' },
+  { label: 'Voice output', hint: 'Speaks answers aloud' },
+  { label: 'Screen reading', hint: 'Reads a captured region of your screen' },
+];
+
+/** Providers on the roadmap. Deliberately NOT selectable — none of these are
+ *  implemented yet, and offering a dead dropdown would be worse than saying so.
+ *  `covers` stays honest: no single provider does all five capabilities, which
+ *  is exactly why the choice is per-capability. */
+const PLANNED_PROVIDERS: { name: string; covers: string }[] = [
+  { name: 'Anthropic', covers: 'Answers & cards, screen reading' },
+  { name: 'Google Gemini', covers: 'Answers & cards, document search, screen reading' },
+  { name: 'Local (Ollama)', covers: 'Answers & cards, document search — runs on your machine' },
+];
+
 export default function SettingsPage() {
   const { settings, load, saveApiKey, clearApiKey, testApiKey } = useSettingsStore();
   const startTour = useTourStore((s) => s.start);
@@ -177,6 +198,56 @@ export default function SettingsPage() {
           </Button>
         </div>
         {status && <p className="mt-3 text-sm text-neutral-300">{status}</p>}
+      </Card>
+
+      {/* Providers — a signpost, not a control. The capability seam exists in
+          the engine, but OpenAI is the only implementation registered today, so
+          there is genuinely nothing to choose yet. Say that plainly rather than
+          shipping a dropdown with one option. */}
+      <Card className="mb-5">
+        <div className="mb-1 flex items-center gap-2">
+          <h3 className="font-medium">Providers</h3>
+          <Badge tone="neutral">Coming soon</Badge>
+        </div>
+        <p className="mb-4 text-sm text-neutral-400">
+          BrainCue reaches AI through a provider layer with a separate choice per
+          capability — so a cheap model can classify while a stronger one answers. OpenAI is
+          the reference implementation today; support for more providers is on the way.
+        </p>
+
+        <div className="space-y-1.5">
+          {CAPABILITIES.map((c) => (
+            <div
+              key={c.label}
+              title={c.hint}
+              className="flex items-center justify-between gap-3 rounded-lg bg-white/5 px-3 py-2"
+            >
+              <span className="min-w-0 truncate text-sm text-neutral-300">{c.label}</span>
+              <Badge tone="green">OpenAI</Badge>
+            </div>
+          ))}
+        </div>
+
+        <p className="mb-2 mt-4 text-xs font-medium uppercase tracking-wider text-neutral-500">
+          Planned
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {PLANNED_PROVIDERS.map((p) => (
+            <span
+              key={p.name}
+              title={`Would cover: ${p.covers}`}
+              className="inline-flex items-center gap-1.5 rounded-full border border-white/5 bg-neutral-900/60 px-3 py-1.5 text-xs text-neutral-400 opacity-70"
+            >
+              {p.name}
+              <span className="rounded-full bg-neutral-800 px-1.5 py-px text-[10px] font-medium text-neutral-400">
+                Coming soon
+              </span>
+            </span>
+          ))}
+        </div>
+        <p className="mt-3 text-xs text-neutral-500">
+          Your key above stays with OpenAI. Each provider will get its own key when it lands.
+        </p>
       </Card>
 
       <Card>
