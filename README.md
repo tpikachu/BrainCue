@@ -212,6 +212,12 @@ artifacts instead.
   typed `window.api` preload bridge.
 - `.env` is gitignored; the key is never logged (logger redacts `sk-…`).
 
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for setup,
+the pre-push gate (`typecheck` + `test` + `build`), the IPC contract, and the
+privacy/security invariants that must not regress.
+
 ## Project status
 Actively developed. The interview modes shipped end-to-end (v1.5.x): profiles,
 live sessions with grounded answers, the Cue Card, region/clipboard solve,
