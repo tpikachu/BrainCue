@@ -1,158 +1,205 @@
-# Product Requirements Document — BrainCue Copilot
+# Product Requirements Document — BrainCue v2
 
-> Status: MVP scope. Last updated 2026-06-22.
+> Status: v2 scope. Supersedes the v1 interview-copilot PRD (2026-06-22; see git
+> history and [09-MVP-PLAN.md](./09-MVP-PLAN.md) for what v1 shipped). Last
+> updated 2026-07-21. Vision: [00-VISION.md](./00-VISION.md) · Delivery:
+> [10-ROADMAP.md](./10-ROADMAP.md).
 
 ## 1. Summary
 
-A cross-platform **desktop** application that helps a candidate prepare for and
-perform during interviews. It listens to the interview (microphone / audio
-source), transcribes it, detects questions, and surfaces **grounded** answer
-suggestions in a floating always-on-top overlay. Answers are grounded in the
-user's own resume, job description, and notes via local RAG.
+A cross-platform **desktop ambient AI companion** (Electron + React +
+TypeScript). It captures live audio (microphone / system loopback), transcribes
+in real time, decides **when to contribute** via a per-mode trigger policy,
+grounds each contribution in the user's local documents (and, later, memory),
+and delivers it through an unobtrusive, capture-invisible overlay or its own
+voice. Interviews (either side), meetings, tutoring, and ambient companionship
+are **modes** of one engine.
 
 **This is not an offline app.** User data is stored **locally**, but AI features
-call the **OpenAI API** using a key the user provides in Settings.
+call an **AI provider's API** using a key the user provides in Settings — OpenAI
+today, with a provider abstraction and multi-provider support planned (§6.7).
 
 ## 2. Goals
 
-- Help users give better, truthful, profile-grounded interview answers.
-- Keep all user data (resume, JD, transcripts, reports) on the local machine.
-- Make AI assistance fast and unobtrusive via a floating overlay.
-- Ship an MVP quickly using web tech on the desktop (Electron).
+- One conversation engine, many modes — a mode is configuration, never a fork.
+- Preserve the v1 interview experience exactly (it is the revenue-path parity
+  gate for every refactor).
+- Graduate output surfaces: silent overlay cues → full spoken dialogue.
+- Keep the v1 guarantees: local-first data, BYO key, capture-invisible overlay,
+  grounded answers, transparency about what leaves the machine.
 
-## 3. Non-Goals (explicitly out of scope)
+## 3. Non-goals (explicitly out of scope)
 
-- ❌ Authentication, user accounts, login
-- ❌ Subscriptions / Stripe / billing
-- ❌ Cloud backend, sync, or remote storage
-- ❌ Admin dashboard, team dashboard
-- ❌ Process hiding, task-manager spoofing, anti-proctoring / "undetectable" evasion
+- ❌ Authentication, accounts, subscriptions, billing, cloud backend/sync
+- ❌ Process hiding, task-manager spoofing, anti-proctoring / evasion
+- ❌ Competing with ChatGPT/Gemini on **generic** voice chat (no corpus, no
+  presence) — we only do voice grounded in the user's context and activities
+- ❌ Cloud memory — memory (Phase 4) is local, visible, editable, deletable
+- ❌ Always-on listening without an explicit session start (Companion mode still
+  begins with a user action)
 
-## 4. Target user
+## 4. Target users, by mode
 
-A single individual using their own machine, their own OpenAI API key, in a
-context where AI assistance is **permitted** (practice, allowed take-homes,
-sales-call coaching, accessibility support, etc.).
+| Mode | Target user |
+| --- | --- |
+| Interview Copilot | candidate in a context where AI assistance is permitted (practice, allowed take-homes, coaching, accessibility) |
+| Interviewer Assist | hiring manager / engineer running interviews, wanting better coverage and fairer evaluations |
+| Meeting Copilot | anyone in back-to-back calls who wants context, open threads, and action items caught live |
+| Tutor | self-learner with material to master (course, codebase, language, cert) |
+| Companion | someone who wants an ambient presence with memory while working or gaming |
 
-## 5. Key features
+## 5. Domain model (v2 vocabulary)
 
-| # | Feature | MVP |
-|---|---------|-----|
-| 1 | Profile management (candidate: name, role, resume, notes, style) | ✅ |
-| 2 | Per-profile **jobs**: each holds its own JD + optional JD link, parsed/indexed independently; reused across rounds | ✅ |
-| 3 | Document ingestion (PDF/DOCX/TXT/MD/paste) + local text extraction | ✅ |
-| 4 | Best-effort JD fetch from a pasted job-posting URL (download → HTML→text) | ✅ |
-| 5 | Company research from an optional company website URL (scrape site → parse → ground answers in the company) | ✅ |
-| 6 | OpenAI structured parsing of resume, JD & company into JSON | ✅ |
-| 7 | Local embeddings + vector retrieval (RAG) | ✅ |
-| 8 | Live session: mic / system-audio capture → STT → transcript | ✅ |
-| 9 | Question detection + classification | ✅ |
-| 10 | Streaming grounded answer generation in overlay | ✅ |
-| 11 | Floating overlay: always-on-top, compact/expanded, opacity, font size | ✅ |
-| 12 | Global hotkeys (show/hide, pause AI, screenshot, solve) | ✅ |
-| 13 | Screen region / clipboard capture → coding help (Vision for images) | ✅ |
-| 14 | Mock interview mode (AI interviewer asks questions w/ TTS voice, gives feedback) | ✅ |
-| 15 | Session report generation | ✅ |
-| 16 | Secure API key storage (safeStorage / OS keychain) | ✅ |
-| 17 | Privacy Mode (reduce accidental screen-share exposure) | ✅ |
-| 18 | Local data deletion (profiles, jobs, docs, sessions, reports) | ✅ |
-| 19 | OpenAI Realtime transcription (low latency) | ✅ |
-| 20 | OpenAI Vision (solve coding problems from an image) | ✅ |
-| 21 | First-run guided tour (onboarding walkthrough; replayable from Settings) | ✅ |
+| Concept | Was (v1) | v2 meaning |
+| --- | --- | --- |
+| **Profile** | the candidate | **who you are** — background documents (resume et al.), notes, style, language; reused everywhere |
+| **Context Pack** | Job | **what this is about** — a bundle of documents parsed/embedded as a unit; `kind: job \| subject \| project \| custom`. A job application, a course, a game, a meeting series |
+| **Session** | live interview / mock / sparring | one run of a **mode**: `mode` + profile + optional context pack + per-mode settings; transcript, contributions, and report persist to it |
+| **Mode** | implicit (interview only) | a code-defined preset over the engine: sources + trigger policy + persona + grounding scope + surfaces + overlay layout |
+| **Memory** | — | (Phase 4) durable facts BrainCue has learned, stored locally, injected into grounding, fully user-editable |
 
-## 6. User stories
+**Migration requirements (lossless, automatic):** `jobs` generalizes to context
+packs of `kind='job'`; sessions gain a `mode` column (existing rows map from
+`kind`: live→interview, mock/sparring→practice); `InterviewType` becomes
+interview/practice-mode scenario config rather than a session-level universal.
+No user-visible data loss; v1.5.x databases must open clean.
 
-- *As a user*, I paste my OpenAI key in Settings and it's stored securely so I
-  never have to re-enter it and it never appears in the renderer.
-- *As a user*, I create a profile with my resume + a job description so answers
-  are tailored to that role.
-- *As a user*, I start a live session and see the interviewer's questions
-  transcribed and a suggested answer appear in a small overlay within ~2s.
-- *As a user*, when asked something I have no experience with, the assistant
-  warns me and offers a safe transferable-skills framing instead of inventing.
-- *As a user*, I press a hotkey, select a screen region with a coding problem,
-  and get an approach + complexity + solution outline.
-- *As a user*, I turn on Privacy Mode before sharing my screen so the overlay
-  won't be captured / is hidden.
-- *As a user*, I review a session report afterward and can delete any data.
+## 6. The conversation engine (functional requirements)
 
-## 7. Functional requirements
+### 6.1 Sources
+Microphone, system loopback (unchanged from v1), screen region + clipboard
+capture (unchanged), and a **summon** input: global push-to-talk / typed ask
+addressed directly to BrainCue from any mode.
 
-### 7.1 Profiles
-A profile is the **candidate**. Fields: name, target role, resume (file/text),
-additional notes, answer style {concise, detailed, STAR, technical,
-conversational}, language preference. CRUD + duplicate + delete. The JD lives on
-jobs (7.1b), so one profile is reused across every job the candidate applies to.
+### 6.2 Transcription
+OpenAI **Realtime GA** streaming STT with server VAD (unchanged); chunked STT
+fallback. Speaker attribution stays best-effort (`interviewer`/`user` labels
+generalize to `them`/`you`).
 
-### 7.1b Jobs
-Each profile can have many **jobs** (the role being interviewed for). Fields:
-title, company, optional **JD link** (job-posting URL — best-effort fetched into
-text), JD text (file/paste/fetched), and an optional **company website URL**.
-Each job's JD is parsed to JSON and embedded independently of the resume and
-other jobs. The JD link is stored for reference only (clickable) — only the JD
-text is parsed/grounded.
+### 6.3 Trigger policy — *the* key generalization
+A mode declares when the agent contributes:
 
-**Company research:** when a company website URL is provided, on save the app
-best-effort scrapes the site (homepage + common pages like /about, /careers),
-parses it into structured research (overview, products, values, culture,
-interview angles), and indexes it as `company` chunks scoped to that job — so
-live answers can speak precisely to the company. Failures are surfaced and
-non-fatal. When a JD link can't be reached, the user is asked to paste the JD
-manually so it can still be parsed precisely. CRUD + delete.
+| Policy | Fires when | Used by |
+| --- | --- | --- |
+| **reactive** | a question/request directed at the user is detected (v1's classifier) | Interview Copilot |
+| **proactive** | salience detected: unanswered question, action item, claim needing context, coverage gap | Meeting Copilot, Interviewer Assist |
+| **dialogue** | it is the agent's turn in a two-way conversation | Practice, Tutor, Companion |
+| **summoned** | the user explicitly asks (hotkey / push-to-talk / Ask box) | every mode |
 
-### 7.2 Documents
-Accept PDF, DOCX, TXT, MD, pasted text. Extract raw text **locally**. Send text
-to OpenAI for structured parsing. Persist parsed JSON + chunks + embeddings.
+Requirements: per-mode **sensitivity** control, interjection cooldowns, and a
+hard mute (pause AI) that always wins. Quiet is the default posture.
 
-### 7.3 RAG
-On detected question: embed query → vector search local store → take top-k
-resume/JD/notes chunks → send only those + question to OpenAI → grounded answer.
-Never invent experience; if no match, produce a transferable-skills answer and a
-risk warning.
+### 6.4 Grounding
+Retrieval over profile + the session's context pack (+ memory in Phase 4),
+exactly as v1's RAG path. The "data sent to OpenAI" transparency panel remains a
+hard requirement in every mode.
 
-### 7.4 Live session
-Select profile → select a job (its JD) → choose this round's interview type &
-answer style → verify API key → choose audio source (system audio for online
-calls / mic for in-person) → start. Show transcript, detected questions, streamed
-answers. Persist everything. On stop, generate a report.
+### 6.5 Generation
+Per-mode persona prompt; streaming; the never-invent rule and risk warnings
+carry over from v1 §7.3 unchanged.
 
-### 7.5 Overlay
-Frameless, transparent, always-on-top, movable. Compact & expanded modes,
-opacity slider, font-size control, pause/resume AI, show/hide via hotkey. Shows
-live transcript, suggested answer (streaming), relevant resume/project points.
+### 6.6 Surfaces
+- **Cue Card overlay** — always-on-top, capture-excluded, movable, compact /
+  expanded; card *types* vary per mode (answer cue, suggested question,
+  context card, action item, tutor prompt).
+- **Voice** — turn-based TTS today (Practice); Phase 3 upgrades to Realtime
+  speech-to-speech with barge-in and output-device selection.
+- **Reports** — per-session artifacts (coaching report, meeting summary,
+  interview evaluation, study progress) in the existing Reports page.
 
-### 7.6 Screenshot / coding mode
-Solve from clipboard text (hotkey/button), or hotkey → region select → capture
-an image. OpenAI returns approach, edge cases, complexity, and a solution
-outline; images are read via the Vision model.
+### 6.7 Provider layer (multi-AI)
+The engine talks to capabilities, not to OpenAI: a `Provider` interface exposes
+`chat` (streaming), `embeddings`, `stt` (realtime + chunked), `tts`/`speech`,
+and `vision`, and each concrete provider declares which it implements.
 
-### 7.7 Privacy & compliance
-Privacy Mode hides/excludes overlay from capture. Persistent reminder banner:
-"Use only where AI assistance is allowed." Show exactly what is sent to OpenAI.
-Full local deletion of any entity.
+- **BYO key per provider**, all stored with the same safeStorage rules; the
+  renderer still only ever learns booleans.
+- **Mix-and-match by capability** — e.g. a cheaper provider for meeting
+  salience classification, a stronger one for answer generation; per-capability
+  provider/model selection lives in Settings.
+- **Graceful degradation** — a mode that needs a capability the selected
+  provider lacks (e.g. realtime STT is OpenAI-only at first) says so and falls
+  back or disables, never silently breaks.
+- **Embeddings caveat** — switching the embedding provider invalidates the
+  local vector store; the app must offer (and cost-estimate) a re-index rather
+  than mixing incompatible vectors.
 
-### 7.8 Onboarding tour
-A first-run guided tour walks new users through the core flow (add key → create
-profile → set up the interview → live overlay → reports) by spotlighting the
-sidebar. Completing or skipping it persists a `tourDone` flag so it shows only
-once; it can be replayed anytime from Settings → Getting started.
+OpenAI remains the reference implementation and default; the seam is cut during
+the Phase 1 engine extraction, and a second provider ships per the roadmap.
+
+## 7. Mode requirements
+
+### 7.1 Interview Copilot — parity
+Everything in the v1 PRD §7 (profiles, jobs→context packs, documents, RAG, live
+session, overlay, coding/screenshot mode, privacy, tour) remains in force
+verbatim. This mode is the regression gate: no v2 refactor may degrade it.
+
+### 7.2 Interviewer Assist (new, Phase 2)
+Inputs: your role's JD (context pack) + the candidate's resume (document).
+Live: suggested opening questions, follow-up suggestions generated from the
+candidate's last answer (reuses `interviewer.ts`), and a coverage tracker
+(which competency areas have/haven't been probed). Post-session: a structured
+evaluation draft (reuses `feedback.ts`). Same overlay, opposite chair.
+
+### 7.3 Meeting Copilot (new, Phase 2)
+Quiet by default. Proactive contribution cards: relevant context from the
+pack ("this was decided in the attached doc"), open-question tracker ("Sarah's
+question about billing never got answered"), and action items as they're
+spoken. End of session: meeting summary report (decisions, actions, open
+threads). Sensitivity dial from "only when summoned" to "eager".
+
+### 7.4 Tutor (Phase 3)
+Any context pack of kind `subject` (textbook chapter, codebase docs, language
+notes). Teach / quiz / drill loop — a generalization of v1 sparring: agent
+speaks (voice), user answers by voice, per-answer coaching persists to Reports.
+Phase 3's Realtime speech-to-speech makes it a natural conversation rather than
+turn-based MP3 exchanges.
+
+### 7.5 Companion (Phase 4)
+Explicitly started, memory-backed ambient presence. A **presence dial**
+(silent observer ↔ chatty) controls the interjection policy. Game-buddy is
+Companion + the existing screen-region Vision path pointed at the game. Depends
+on: memory subsystem, interjection policy engine, Realtime voice, and cost
+governance — hence last.
+
+### 7.6 Practice
+v1's mock + sparring continue unchanged, re-labelled as the Practice mode
+family; they migrate onto the engine's `dialogue` policy when Tutor is built
+(shared loop), not before.
 
 ## 8. Non-functional requirements
 
-- **Latency**: first answer token in overlay < 2.5s after question finalized.
-- **Privacy**: API key never crosses IPC to renderer; never logged; never committed.
-- **Storage**: all persistent data in app userData dir (SQLite + files).
-- **Portability**: Windows + macOS (Linux best-effort) via electron-builder.
-- **Resilience**: graceful handling of missing/invalid API key and offline state.
+- **Latency**: first contribution token < 2.5s after trigger (unchanged);
+  voice round-trip target < 1.5s once on Realtime speech (Phase 3).
+- **Privacy invariants (unchanged, non-negotiable)**: key never crosses IPC,
+  never logged, never committed; all persistence in the userData dir; overlay +
+  dialogs capture-excluded; full local deletion of any entity.
+- **Cost governance**: per-session cost estimate visible; VAD gating so silence
+  costs nothing; (Phase 4) session budget warnings; evaluate local STT
+  (whisper.cpp) as a cost/offline option — evaluation, not commitment.
+- **Migration**: v1.5.x → v2.0 automatic and lossless (§5).
+- **Performance**: an idle listening session (no speech) must not exceed a few
+  percent CPU; one active session at a time (v1 constraint kept).
 
-## 9. Success metrics (qualitative for MVP)
+## 9. Success metrics (qualitative, per phase)
 
-- Time-to-first-answer, transcription accuracy (subjective), groundedness (no
-  fabricated experience), and overlay usability during a real call.
+- **P1**: zero interview-mode regressions (unit tests + privacy hard test);
+  clean migration of a real v1 database.
+- **P2**: in a real meeting, ≥1 genuinely useful contribution with zero
+  annoying interjections at default sensitivity; interviewer-assist produces a
+  usable evaluation draft.
+- **P3**: a tutor session feels like conversation (no dead air > 2s); a user
+  can drill arbitrary material end-to-end.
+- **P4**: companion recalls a fact from a prior session unprompted and
+  correctly; user reports it "knows when to shut up".
 
 ## 10. Risks
 
-- STT latency/cost with chunked transcription → mitigated by the Realtime path.
-- Hallucinated experience → strict grounding prompt + risk warnings.
-- Overlay capture during screen share → Privacy Mode + content protection.
-- API cost surprises → show token/cost estimates; user-owned key.
+| Risk | Mitigation |
+| --- | --- |
+| Interjection annoyance kills trust in ambient modes | silence-first defaults, sensitivity dial, cooldowns, hard mute |
+| Always-on API cost surprises | VAD gating, visible cost estimates, budgets; local STT evaluation |
+| Mode sprawl forks the codebase | engine-first rule enforced in review; modes are config |
+| Refactor breaks the shipped interview product | parity gate: full test suite + privacy hard test at every phase boundary |
+| Rebrand confuses existing users | flows unchanged; tour + changelog explain the widening, not a pivot away |
+| Provider lock-in / API drift (Realtime GA is OpenAI-shaped) | provider layer (§6.7): capability interfaces, per-capability fallbacks, OpenAI as reference impl |

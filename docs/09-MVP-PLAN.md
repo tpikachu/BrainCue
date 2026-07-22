@@ -1,5 +1,9 @@
 # MVP Implementation Plan
 
+> **Historical.** This is the v1 (interview-copilot) build plan, fully shipped
+> as of v1.5.3. The current plan is [10-ROADMAP.md](./10-ROADMAP.md); the v2
+> spec is [01-PRD.md](./01-PRD.md) and the vision [00-VISION.md](./00-VISION.md).
+
 Incremental milestones. Each is independently runnable/testable. The skeleton in
 this repo delivers M0 and the scaffolding for M1–M2.
 

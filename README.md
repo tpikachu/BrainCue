@@ -1,14 +1,15 @@
 <p align="center">
-  <img src="resources/icon.png" alt="BrainCue Copilot" width="128" height="128" />
+  <img src="resources/icon.png" alt="BrainCue" width="128" height="128" />
 </p>
 
-<h1 align="center">BrainCue Copilot</h1>
+<h1 align="center">BrainCue</h1>
 
 <p align="center">
-  <strong>Your AI copilot for live interviews.</strong><br />
-  Real-time transcription, question detection, and grounded answer cues — in a
-  floating, <em>screen-share-invisible</em> panel.<br />
-  Local-first. Bring your own OpenAI key.
+  <strong>The AI that's in the room with you.</strong><br />
+  BrainCue hears the conversation you're actually in — an interview, a meeting,
+  a study session — and contributes through a floating,
+  <em>screen-share-invisible</em> Cue Card, or its own voice.<br />
+  Local-first. Bring your own AI key.
 </p>
 
 <p align="center">
@@ -18,23 +19,41 @@
   <img alt="Built with Electron" src="https://img.shields.io/badge/Electron-React%20%C2%B7%20TypeScript-47848F?style=flat-square" />
 </p>
 
-## See it in action
+## One engine, many modes
+
+BrainCue is one conversation engine — *listen → decide when to contribute →
+ground in your documents → respond via overlay or voice* — with modes as
+presets over it:
+
+| Mode | You are… | BrainCue… | Status |
+| --- | --- | --- | --- |
+| **Interview Copilot** | the candidate | detects questions, streams grounded answer cues | ✅ shipped |
+| **Practice** | rehearsing | plays interviewer with a voice, coaches every answer | ✅ shipped |
+| **Interviewer Assist** | the one asking | suggests questions & follow-ups, tracks coverage, drafts the eval | 🔜 planned |
+| **Meeting Copilot** | a participant | quietly surfaces context, unanswered questions, action items | 🔜 planned |
+| **Tutor** | learning something | voice dialogue + drills grounded in any material you give it | 🔜 planned |
+| **Companion** | working / gaming | ambient presence with memory; knows when *not* to talk | 🔜 planned |
+
+The vision and full plan live in [docs/00-VISION.md](docs/00-VISION.md) and
+[docs/10-ROADMAP.md](docs/10-ROADMAP.md).
+
+## See it in action — Interview Copilot, the first mode
+
+<!-- Media below shows the interview mode; assets to be refreshed as new modes land. -->
 
 <p align="center">
   <img src="docs/media/cuecard-stream.gif" width="360" alt="The floating Cue Card: the interviewer's question is transcribed live, then a grounded, cited answer streams in." />
-  <br /><sub><b>Live, in real time</b> — the interviewer's question is heard, and a grounded, cited answer streams into the Cue Card.</sub>
+  <br /><sub><b>Live, in real time</b> — the question is heard, and a grounded, cited answer streams into the Cue Card.</sub>
 </p>
 
 <p align="center">
-  <img src="docs/media/stealth-split.gif" width="820" alt="The same moment in two views: your screen shows the Cue Card over a video call; the interviewer's screen share shows the call with the app absent." />
-  <br /><sub><b>The same moment, two views</b> — your screen has the copilot; the interviewer's screen share (and any recording) has nothing.</sub>
+  <img src="docs/media/stealth-split.gif" width="820" alt="The same moment in two views: your screen shows the Cue Card over a video call; the other side's screen share shows the call with the app absent." />
+  <br /><sub><b>The same moment, two views</b> — your screen has BrainCue; the shared screen (and any recording) has nothing.</sub>
 </p>
 
 <p align="center">
   <a href="docs/media/braincue-demo.mp4"><b>▶ Watch the full demo</b></a> — 74s, narrated with on-screen captions.
 </p>
-
-### The whole interview, one copilot
 
 <table>
   <tr>
@@ -47,37 +66,41 @@
       <br /><sub><b>Live coding rounds</b><br />optimal solution + complexity</sub>
     </td>
     <td width="33%" align="center" valign="top">
-      <img src="docs/media/mock-interview.gif" width="240" alt="An AI interviewer asks a question aloud and the copilot answers it in the Cue Card." />
-      <br /><sub><b>Mock interviews</b><br />the AI asks · the copilot answers</sub>
+      <img src="docs/media/mock-interview.gif" width="240" alt="An AI interviewer asks a question aloud and BrainCue answers it in the Cue Card." />
+      <br /><sub><b>Practice mode</b><br />the AI asks · BrainCue answers</sub>
     </td>
   </tr>
 </table>
 
 <p align="center">
-  <img src="docs/media/interview-grounded.gif" width="640" alt="The Interview page: pick a profile, and each interview is grounded in its own résumé, job description, and company research." />
-  <br /><sub><b>Grounded in your story</b> — every interview draws on its own résumé, JD, and company research, parsed and indexed on your machine.</sub>
+  <img src="docs/media/interview-grounded.gif" width="640" alt="The session page: pick a profile, and each session is grounded in its own documents — résumé, job description, company research." />
+  <br /><sub><b>Grounded in your story</b> — every session draws on its own documents (résumé, JD, company research), parsed and indexed on your machine.</sub>
 </p>
 
 ---
 
 > ⚠️ **Use only where AI assistance is permitted.** Your data stays on your
-> machine; only the retrieved context + the current question is sent to OpenAI.
+> machine; only the retrieved context + the current moment of conversation is
+> sent to your AI provider.
 
 ## Why BrainCue
 
-- 🎙️ **Live transcription & question detection** — hears the interviewer (system
-  audio) and flags the question being asked, in real time.
-- 💡 **Grounded answer cues** — suggestions are drawn from *your* resume, the job
-  description, and your notes via on-device retrieval (local RAG), not generic
-  filler.
-- 🪟 **Floating Cue Card** — an always-on-top panel that's **excluded from screen
-  sharing & recording**, so it's there for you and invisible to everyone else.
-- 🧪 **Mock interview mode** — an AI interviewer asks questions aloud and the
-  copilot answers them in the Cue Card: a full rehearsal of the live experience.
+- 🎙️ **Hears the real conversation** — system-audio loopback puts it inside your
+  actual calls and meetings; a mic covers in-person. It flags the moment worth
+  responding to, in real time.
+- 💡 **Grounded contributions** — cues are drawn from *your* documents via
+  on-device retrieval (local RAG), not generic filler — and it says so when it
+  doesn't know, instead of inventing.
+- 🪟 **The Cue Card** — an always-on-top panel **excluded from screen sharing &
+  recording**: there for you, invisible to everyone else.
+- 🗣️ **A voice of its own** — practice mode already talks; full realtime voice
+  dialogue is on the [roadmap](docs/10-ROADMAP.md).
 - ⌨️ **Global hotkeys** — toggle the Cue Card, solve a copied problem, or
   drag-select a region of the screen to read and answer.
-- 🔒 **Local-first & private** — data lives on your machine in a local database;
-  your OpenAI key is encrypted by the OS keychain and never leaves the main process.
+- 🔒 **Local-first & private** — data lives in a local database; your API key is
+  encrypted by the OS keychain and never leaves the main process.
+- 🔌 **Bring your own AI** — OpenAI today; a provider abstraction with support
+  for multiple AI providers is on the roadmap.
 
 ## Download
 
@@ -93,9 +116,9 @@ SmartScreen ("More info → Run anyway"), macOS Gatekeeper (right-click → Open
 
 ## System requirements
 
-BrainCue Copilot is a local desktop app that streams live audio to OpenAI for
-transcription and answers, so a steady internet connection and a microphone
-matter more than raw compute.
+BrainCue is a local desktop app that streams live audio to your AI provider
+(OpenAI today) for transcription and responses, so a steady internet connection
+and a microphone matter more than raw compute.
 
 | | Minimum | Recommended |
 |---|---|---|
@@ -105,17 +128,18 @@ matter more than raw compute.
 | **Disk** | ~600 MB (app) + room for local data | 2 GB+ free (profiles, vectors, transcripts) |
 | **GPU** | Any (integrated is fine) | Discrete or modern integrated |
 | **Display** | 1280 × 800 | 1920 × 1080 or larger |
-| **Audio** | Microphone | Mic + system-audio loopback (to hear the interviewer) |
+| **Audio** | Microphone | Mic + system-audio loopback (to hear the other side) |
 | **Network** | Broadband internet | Low-latency broadband (for real-time transcription) |
 
-You also need your **own OpenAI API key** (set in Settings) and an OpenAI account
-with access to the models in use (Realtime/STT, Responses, embeddings, TTS, Vision).
+You also need your **own OpenAI API key** (set in Settings) with access to the
+models in use (Realtime/STT, Responses, embeddings, TTS, Vision). Support for
+additional providers is planned — see the [roadmap](docs/10-ROADMAP.md).
 
 **Notes**
 - **Privacy Mode** (hiding the app from screen sharing/recording) is most reliable
   on **Windows 10 version 2004+** and Windows 11; on older builds the window may
   show as black to viewers instead of being cleanly excluded.
-- **System-audio capture** (the interviewer's voice in online calls) uses Windows
+- **System-audio capture** (the other side's voice in online calls) uses Windows
   loopback automatically. On **macOS**, capturing system audio needs a virtual
   audio device (e.g. BlackHole); the microphone path works without one.
 - **Hybrid-GPU laptops** (e.g. NVIDIA Optimus): if a window shows up blank/black,
@@ -129,7 +153,8 @@ STT/Realtime, TTS, Vision) · electron-builder.
 
 ## Design docs
 See [`docs/`](docs/):
-1. [PRD](docs/01-PRD.md)
+0. [Vision](docs/00-VISION.md) — the v2 north star: ambient companion, mode catalog, principles
+1. [PRD (v2)](docs/01-PRD.md) — the project spec: domain model, engine, per-mode requirements
 2. [Architecture](docs/02-ARCHITECTURE.md)
 3. [Windows (main/renderer/overlay)](docs/03-WINDOWS.md)
 4. [Database schema](docs/04-DATABASE.md)
@@ -137,7 +162,9 @@ See [`docs/`](docs/):
 6. [OpenAI service layer](docs/06-OPENAI-SERVICE.md)
 7. [API key security](docs/07-API-KEY-SECURITY.md)
 8. [Folder structure](docs/08-FOLDER-STRUCTURE.md)
-9. [MVP plan](docs/09-MVP-PLAN.md)
+9. [MVP plan (historical, v1)](docs/09-MVP-PLAN.md)
+10. [Roadmap](docs/10-ROADMAP.md) — v2.0 → v3.0 phases and the development rules
+11. [UX & navigation](docs/11-UX-NAVIGATION.md) — the mode-first layout redesign
 
 ## Getting started
 ```bash
@@ -175,14 +202,16 @@ workflow manually from the **Actions** tab — they're attached as downloadable
 artifacts instead.
 
 ## Security invariants
-- The OpenAI key lives **only** in the main process; the renderer learns a
+- The API key lives **only** in the main process; the renderer learns a
   boolean `apiKeyPresent` and nothing more.
-- All OpenAI/DB/secret access happens in main; the renderer talks via the typed
-  `window.api` preload bridge.
+- All provider/DB/secret access happens in main; the renderer talks via the
+  typed `window.api` preload bridge.
 - `.env` is gitignored; the key is never logged (logger redacts `sk-…`).
 
 ## Project status
-Actively developed. The core flows are in place — profiles, live session with
-grounded answers, the Cue Card, region/clipboard solve, mock interviews, and
-coaching reports. See the [changelog](changelog/) for what ships in each release
-and [docs/09-MVP-PLAN.md](docs/09-MVP-PLAN.md) for the roadmap.
+Actively developed. The interview modes shipped end-to-end (v1.5.x): profiles,
+live sessions with grounded answers, the Cue Card, region/clipboard solve,
+practice with an AI voice, and coaching reports. The project is now widening
+into the **ambient companion** described in [docs/00-VISION.md](docs/00-VISION.md) —
+see [docs/10-ROADMAP.md](docs/10-ROADMAP.md) for what's next and the
+[changelog](changelog/) for what ships in each release.

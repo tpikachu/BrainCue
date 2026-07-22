@@ -8,12 +8,13 @@ export interface TourStep {
   body: string;
 }
 
-/** First-run walkthrough. Steps spotlight sidebar entries (always on-screen), so
- *  the tour works regardless of the current route. */
+/** First-run walkthrough. Steps spotlight sidebar entries or Home's mode cards
+ *  by `data-tour`; when a target isn't on-screen (e.g. replaying the tour from
+ *  Settings), that step gracefully falls back to a centered card. */
 export const TOUR_STEPS: TourStep[] = [
   {
     title: 'Welcome to BrainCue 👋',
-    body: 'Your AI copilot for live interviews — it listens, detects questions, and streams grounded answer cues into a floating, screen-share-invisible panel. Here’s the full workflow in about a minute.',
+    body: 'BrainCue hears the conversation you’re in and cues you in real time — grounded answers streamed into a floating, screen-share-invisible panel. Interviews are the first mode; meetings, tutoring, and more are on the way. Here’s the flow in about a minute.',
   },
   {
     target: 'nav-settings',
@@ -21,36 +22,41 @@ export const TOUR_STEPS: TourStep[] = [
     body: 'Everything runs on your own key. Paste it in Settings — it’s encrypted in your OS keychain and never leaves your machine except to call OpenAI. Tip: defaults use cost-effective models; you can change any model per task here.',
   },
   {
-    target: 'nav-profiles',
-    title: '2 · Create your profile',
-    body: 'A profile is you: name, target role, and résumé. We parse the résumé so answers are grounded in YOUR real experience — never made up. Create it once and reuse it for every interview.',
+    target: 'nav-library',
+    title: '2 · Build your Library',
+    body: 'The Library holds who you are: your profile with name, target role, and résumé. We parse the résumé so answers are grounded in YOUR real experience — never made up. Create it once and reuse it everywhere.',
   },
   {
-    target: 'nav-session',
-    title: '3 · Add an interview',
-    body: 'On the Interview page, add the job: paste the JD (or a link), and optionally a company website — we research it so answers can speak to the company’s products and values. Each interview is saved and reusable.',
+    target: 'nav-home',
+    title: '3 · Start from Home',
+    body: 'Home is the launcher: pick what we’re doing. Interview Copilot and Practice are live today; the other modes show where BrainCue is headed.',
   },
   {
-    target: 'nav-session',
-    title: '4 · Start it',
+    target: 'mode-interview',
+    title: '4 · Set up the interview',
+    body: 'The Interview Copilot card opens the interview workspace. Add the job: paste the JD (or a link), and optionally a company website — we research it so answers can speak to the company’s products and values. Each interview is saved and reusable.',
+  },
+  {
+    target: 'mode-interview',
+    title: '5 · Start it',
     body: 'Pick the profile, then press Start on an interview row. Your mic/system audio is captured and the floating Cue Card opens — you can minimize this dashboard during the call.',
   },
   {
-    title: '5 · The Cue Card is your live surface',
+    title: '6 · The Cue Card is your live surface',
     body: 'Everything happens here: the live transcript (resizable), the streamed answer, and which profile · interview is loaded. It’s always-on-top and excluded from screen sharing. Toggle it with the tray or hotkey.',
   },
   {
-    title: '6 · Tune answers on the fly',
+    title: '7 · Tune answers on the fly',
     body: 'In the Cue Card you can change Interview Type, Answer Format, and Length live; toggle pronunciation hints; Regenerate or Clear an answer; type a manual question in the Ask box; and pick your mic in ⚙ Settings.',
   },
   {
-    title: '7 · Stop & save',
+    title: '8 · Stop & save',
     body: 'When you stop, we ask whether to Save the session to Reports (you pick what kind of interview it was) or Discard it. Nothing is kept unless you choose to save.',
   },
   {
-    target: 'nav-mock',
-    title: 'Practice with a mock interviewer',
-    body: 'Mock Interview runs an AI interviewer that asks questions aloud — a safe way to rehearse and to see the copilot in action. (Mock runs aren’t saved to Reports.)',
+    target: 'mode-practice',
+    title: 'Practice first, if you like',
+    body: 'The Practice card rehearses the real thing: a mock interviewer asks questions aloud, or a sparring drill coaches every spoken answer. A safe way to see BrainCue in action.',
   },
   {
     target: 'nav-reports',
@@ -64,7 +70,7 @@ export const TOUR_STEPS: TourStep[] = [
   },
   {
     title: 'You’re set 🚀',
-    body: 'That’s the whole flow: profile → interview → Start → Cue Card → Stop & save → Reports. Replay this tour anytime from Settings → Getting started.',
+    body: 'That’s the whole flow: Library profile → Home → Interview → Start → Cue Card → Stop & save → Reports. Replay this tour anytime from Settings → Getting started.',
   },
 ];
 
