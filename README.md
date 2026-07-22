@@ -13,7 +13,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/tpikachu/Interview-Copilot/releases"><img alt="Download" src="https://img.shields.io/badge/download-Releases-5C6BC0?style=flat-square" /></a>
+  <a href="https://github.com/tpikachu/BrainCue/releases"><img alt="Download" src="https://img.shields.io/badge/download-Releases-5C6BC0?style=flat-square" /></a>
+  <a href="https://tpikachu.github.io/BrainCue/"><img alt="Website" src="https://img.shields.io/badge/website-braincue-4F46E5?style=flat-square" /></a>
   <img alt="Platforms" src="https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-2D2D2D?style=flat-square" />
   <img alt="License" src="https://img.shields.io/badge/license-MIT-3FB950?style=flat-square" />
   <img alt="Built with Electron" src="https://img.shields.io/badge/Electron-React%20%C2%B7%20TypeScript-47848F?style=flat-square" />
@@ -29,10 +30,10 @@ presets over it:
 | --- | --- | --- | --- |
 | **Interview Copilot** | the candidate | detects questions, streams grounded answer cues | ✅ shipped |
 | **Practice** | rehearsing | plays interviewer with a voice, coaches every answer | ✅ shipped |
+| **Meeting Copilot** | a participant | quietly surfaces context, unanswered questions, action items | 🧪 Labs |
+| **Companion** | working / gaming | ambient presence with memory; knows when *not* to talk | 🧪 Labs |
 | **Interviewer Assist** | the one asking | suggests questions & follow-ups, tracks coverage, drafts the eval | 🔜 planned |
-| **Meeting Copilot** | a participant | quietly surfaces context, unanswered questions, action items | 🔜 planned |
 | **Tutor** | learning something | voice dialogue + drills grounded in any material you give it | 🔜 planned |
-| **Companion** | working / gaming | ambient presence with memory; knows when *not* to talk | 🔜 planned |
 
 The vision and full plan live in [docs/00-VISION.md](docs/00-VISION.md) and
 [docs/10-ROADMAP.md](docs/10-ROADMAP.md).
@@ -93,8 +94,10 @@ The vision and full plan live in [docs/00-VISION.md](docs/00-VISION.md) and
   doesn't know, instead of inventing.
 - 🪟 **The Cue Card** — an always-on-top panel **excluded from screen sharing &
   recording**: there for you, invisible to everyone else.
-- 🗣️ **A voice of its own** — practice mode already talks; full realtime voice
-  dialogue is on the [roadmap](docs/10-ROADMAP.md).
+- 🗣️ **A voice of its own** — push-to-talk from anywhere: ask by voice and hear
+  the answer back, with barge-in when you talk over it.
+- 🧠 **Memory you approve** — it can remember across sessions, but nothing is
+  kept silently: memories are proposed, and only ones you approve are recalled.
 - ⌨️ **Global hotkeys** — toggle the Cue Card, solve a copied problem, or
   drag-select a region of the screen to read and answer.
 - 🔒 **Local-first & private** — data lives in a local database; your API key is
@@ -105,7 +108,7 @@ The vision and full plan live in [docs/00-VISION.md](docs/00-VISION.md) and
 ## Download
 
 Grab the latest installer from the
-[**Releases**](https://github.com/tpikachu/Interview-Copilot/releases) page:
+[**Releases**](https://github.com/tpikachu/BrainCue/releases) page:
 
 - **Windows** — `.exe` (NSIS installer)
 - **macOS** — `.dmg`
@@ -152,19 +155,20 @@ SQLite (better-sqlite3) · Drizzle ORM · OpenAI Node SDK (Responses, embeddings
 STT/Realtime, TTS, Vision) · electron-builder.
 
 ## Design docs
-See [`docs/`](docs/):
-0. [Vision](docs/00-VISION.md) — the v2 north star: ambient companion, mode catalog, principles
-1. [PRD (v2)](docs/01-PRD.md) — the project spec: domain model, engine, per-mode requirements
-2. [Architecture](docs/02-ARCHITECTURE.md)
-3. [Windows (main/renderer/overlay)](docs/03-WINDOWS.md)
-4. [Database schema](docs/04-DATABASE.md)
-5. [IPC map](docs/05-IPC-MAP.md)
-6. [OpenAI service layer](docs/06-OPENAI-SERVICE.md)
-7. [API key security](docs/07-API-KEY-SECURITY.md)
-8. [Folder structure](docs/08-FOLDER-STRUCTURE.md)
-9. [MVP plan (historical, v1)](docs/09-MVP-PLAN.md)
-10. [Roadmap](docs/10-ROADMAP.md) — v2.0 → v3.0 phases and the development rules
-11. [UX & navigation](docs/11-UX-NAVIGATION.md) — the mode-first layout redesign
+
+BrainCue is docs-driven — the design documents are the source of truth the
+implementation follows, not a write-up produced afterwards.
+
+📖 **[Read them as a site](https://tpikachu.github.io/BrainCue/)** ·
+📁 **[Browse them here](docs/)** ([index with descriptions](docs/README.md))
+
+Start with the [Vision](docs/00-VISION.md) (the north star and mode catalog),
+the [PRD](docs/01-PRD.md) (domain model and per-mode requirements), and the
+[Roadmap](docs/10-ROADMAP.md) (phases + the development rules). The
+[Engine plan](docs/12-ENGINE-PLAN.md) describes the six-stage pipeline every
+mode configures; [Architecture](docs/02-ARCHITECTURE.md),
+[Database](docs/04-DATABASE.md), [IPC map](docs/05-IPC-MAP.md), and
+[API key security](docs/07-API-KEY-SECURITY.md) cover the rest.
 
 ## Getting started
 ```bash

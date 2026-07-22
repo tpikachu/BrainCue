@@ -263,6 +263,7 @@ export default function HomePage() {
             title="Meeting Copilot"
             desc="Sits in quietly and surfaces context, open questions, action items, and decisions — only when confident."
             labs
+            tour="mode-meeting"
             onClick={() => {
               setStartMode('meeting');
               setStartOpen(true);
@@ -275,6 +276,7 @@ export default function HomePage() {
             title="Companion"
             desc="An ambient presence while you work: remembers what you saved, flags tasks, offers context — only through deterministic gates you control."
             labs
+            tour="mode-companion"
             onClick={() => {
               setStartMode('companion');
               setStartOpen(true);

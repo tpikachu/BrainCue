@@ -1,4 +1,5 @@
 import { api } from '../../lib/api';
+import { Dropdown } from '../../components/ui';
 import { noDrag } from '../lib/style';
 import type { CompanionPresence, CompanionStatusEvent } from '@shared/types';
 
@@ -27,17 +28,15 @@ export function CompanionBar(props: { status: CompanionStatusEvent }) {
       aria-label="Companion controls"
     >
       <span className="text-neutral-500">Companion</span>
-      <select
+      {/* Dropdown (not a native <select>): a native option popup is a separate
+          OS window that screen shares CAN see even in Privacy Mode, and it does
+          not dismiss reliably over the always-on-top Cue Card. */}
+      <Dropdown
         value={presence}
-        onChange={(e) => void api.session.setPresence(e.target.value)}
-        className="rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-0.5 text-[11px] text-neutral-200 outline-none focus:border-indigo-500"
-      >
-        {PRESENCE_LABELS.map((p) => (
-          <option key={p.value} value={p.value}>
-            {p.label}
-          </option>
-        ))}
-      </select>
+        options={PRESENCE_LABELS}
+        onChange={(v) => void api.session.setPresence(v)}
+        buttonClassName="flex items-center justify-between gap-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-0.5 text-[11px] text-neutral-200 outline-none focus:border-indigo-500"
+      />
       <span className="flex-1" />
       <span
         title={`${cost.calls} model calls · estimate, not billing`}

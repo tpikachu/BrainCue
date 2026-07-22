@@ -214,11 +214,18 @@ export function Dropdown({
         setOpen(false);
       }
     };
+    // Close when the window itself loses focus. Without this the list can be
+    // left hanging open: over the click-through Cue Card a click on a
+    // non-interactive region is forwarded to the app behind, so the mousedown
+    // above never reaches this document.
+    const onWindowBlur = () => setOpen(false);
     document.addEventListener('mousedown', onDocMouseDown);
     document.addEventListener('keydown', onDocKeyDown);
+    window.addEventListener('blur', onWindowBlur);
     return () => {
       document.removeEventListener('mousedown', onDocMouseDown);
       document.removeEventListener('keydown', onDocKeyDown);
+      window.removeEventListener('blur', onWindowBlur);
     };
   }, [open]);
 
