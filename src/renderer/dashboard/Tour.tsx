@@ -14,63 +14,73 @@ export interface TourStep {
 export const TOUR_STEPS: TourStep[] = [
   {
     title: 'Welcome to BrainCue 👋',
-    body: 'BrainCue hears the conversation you’re in and cues you in real time — grounded answers streamed into a floating, screen-share-invisible panel. Interviews are the first mode; meetings, tutoring, and more are on the way. Here’s the flow in about a minute.',
+    body: 'BrainCue hears the conversation you’re actually in — an interview, a meeting, or just your working day — and contributes through a floating, screen-share-invisible Cue Card, or its own voice. It runs on your machine, on your own API key. Here’s the whole flow in about a minute.',
   },
   {
     target: 'nav-settings',
     title: '1 · Add your OpenAI key',
-    body: 'Everything runs on your own key. Paste it in Settings — it’s encrypted in your OS keychain and never leaves your machine except to call OpenAI. Tip: defaults use cost-effective models; you can change any model per task here.',
+    body: 'Everything runs on your own key. Paste it in Settings — it’s encrypted in your OS keychain and never leaves the main process except to call OpenAI. Defaults use cost-effective models; you can override any model per task here.',
   },
   {
     target: 'nav-library',
     title: '2 · Build your Library',
-    body: 'The Library holds who you are and what BrainCue should know: your profile (name, role, résumé) and your Spaces — one per context, e.g. a job with its JD and company research. We parse everything so answers are grounded in YOUR real world — never made up.',
+    body: 'The Library holds what BrainCue should know: your profile (name, role, résumé), your Spaces — one per context, like a job with its JD and company research — and Memory. Everything is parsed and indexed locally, so contributions are grounded in YOUR real world instead of invented.',
   },
   {
     target: 'nav-home',
     title: '3 · Start from Home',
-    body: 'Home is the launcher: “Start listening” opens the shared start flow — pick the mode, the Space, and the audio source, see exactly what will be captured and sent, then start. Interview Copilot and Practice are live today; Labs shows what’s coming.',
+    body: 'Home is the launcher. “Start listening” opens one shared start flow for every mode: pick the mode, the Space that grounds it, and what to listen to — then see exactly what gets captured and what leaves your machine, before anything starts.',
+  },
+  {
+    target: 'primary-actions',
+    title: '4 · Four ways in',
+    body: 'Start listening for a live session · Talk to BrainCue to ask by voice · Share screen to capture a region and solve it · Add context to create a Space. Nothing captures anything until you explicitly start it.',
   },
   {
     target: 'mode-interview',
-    title: '4 · Set up the interview',
-    body: 'The Interview Copilot card opens the interview workspace. Add the job: paste the JD (or a link), and optionally a company website — we research it so answers can speak to the company’s products and values. Each interview is saved and reusable.',
-  },
-  {
-    target: 'mode-interview',
-    title: '5 · Start it',
-    body: 'Pick the profile, then press Start on an interview row. Your mic/system audio is captured and the floating Cue Card opens — you can minimize this dashboard during the call.',
-  },
-  {
-    title: '6 · The Cue Card is your live surface',
-    body: 'Everything happens here: the live transcript (resizable), the streamed answer, and which profile · interview is loaded. It’s always-on-top and excluded from screen sharing. Toggle it with the tray or hotkey.',
-  },
-  {
-    title: '7 · Tune answers on the fly',
-    body: 'In the Cue Card you can change Interview Type, Answer Format, and Length live; toggle pronunciation hints; Regenerate or Clear an answer; type a manual question in the Ask box; and pick your mic in ⚙ Settings.',
-  },
-  {
-    title: '8 · Stop & save',
-    body: 'When you stop, we ask whether to Save the session to Reports (you pick what kind of interview it was) or Discard it. Nothing is kept unless you choose to save.',
+    title: 'Interview Copilot',
+    body: 'You’re the candidate. BrainCue hears the interviewer’s questions and streams grounded answer cues into the Cue Card — with the format (key points, explanation, STAR story) switchable live, mid-answer.',
   },
   {
     target: 'mode-practice',
-    title: 'Practice first, if you like',
-    body: 'The Practice card rehearses the real thing: a mock interviewer asks questions aloud, or a sparring drill coaches every spoken answer. A safe way to see BrainCue in action.',
+    title: 'Practice',
+    body: 'Rehearse out loud before the real thing: a mock interviewer asks questions with a voice, or a sparring drill coaches every spoken answer. The safest way to see BrainCue work.',
+  },
+  {
+    target: 'mode-meeting',
+    title: 'Meeting Copilot · Labs',
+    body: 'Sits in quietly and surfaces context, open questions, action items, and decisions — only when it’s confident. A Presence dial (summoned → quiet → balanced → active) sets explicit thresholds, so “how much it talks” is a number you choose, not a vibe.',
+  },
+  {
+    target: 'mode-companion',
+    title: 'Companion · Labs',
+    body: 'An ambient presence while you work: it remembers what you saved, flags tasks, and offers context — through deterministic gates you control. Set a posture (Off is a hard mute), quiet hours, and a hard per-session spend cap. Silence and small talk never cost a model call.',
+  },
+  {
+    title: 'Talk to BrainCue',
+    body: 'Press Ctrl+Shift+T anywhere to summon it: push-to-talk, and the answer comes back spoken and on-screen. Start talking over it and it stops to listen. Works with a session live — or on its own, when you just have a question.',
+  },
+  {
+    title: 'The Cue Card is your live surface',
+    body: 'Everything lands here: the live transcript, streamed cards and answers, and the controls to retune them. It’s always-on-top and excluded from screen sharing and recording — there for you, invisible to everyone else. Toggle it from the tray or a hotkey.',
+  },
+  {
+    title: 'Memory — off until you say so',
+    body: 'BrainCue can remember things across sessions, but nothing is remembered silently: memories are proposed, and only ones you approve in the Library are ever recalled. You can correct or forget any of them, right from the card that used it.',
   },
   {
     target: 'nav-sessions',
     title: 'Review afterwards',
-    body: 'Sessions is your history — open any saved session for a coaching report: summary, strengths, improvements, and per-question notes. Insights aggregates your practice progress over time.',
+    body: 'Sessions is your history. Interviews get a coaching report — summary, strengths, improvements, per-question notes; meetings get their own structured report with decisions and action items. Insights aggregates your progress over time.',
   },
   {
     target: 'nav-settings',
     title: 'Stay invisible — and in control',
-    body: 'Privacy Mode (Ctrl+Shift+H) hides every window from screen capture; you can also hide the app from the taskbar. Need a clean slate? Settings → Danger zone lets you reset settings or wipe all data.',
+    body: 'Privacy Mode (Ctrl+Shift+H) hides every window from screen capture; you can also hide the app from the taskbar. Settings → Danger zone resets settings or wipes all local data. More modes — Interviewer Assist and Tutor — are on the way; Home’s Labs strip shows what’s coming.',
   },
   {
     title: 'You’re set 🚀',
-    body: 'That’s the whole flow: Library profile → Home → Start listening → Cue Card → Stop & save → Sessions. Replay this tour anytime from Settings → Getting started.',
+    body: 'That’s the flow: Library → Home → Start listening → the Cue Card → Sessions. Replay this tour anytime from Settings → Getting started.',
   },
 ];
 

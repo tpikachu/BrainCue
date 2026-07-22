@@ -12,14 +12,17 @@ describe('mode catalog', () => {
     );
   });
 
-  it('flag-gated modes are hidden, not rendered dead — only shipped modes are enabled', () => {
-    // Meeting shipped with Prompt 7 (FLAGS.meeting); the rest stay gated.
+  it('only shipped modes are startable; gated ones stay listed as coming soon', () => {
     expect(enabledModes().map((m) => m.id)).toEqual([
       'interview',
       'practice',
       'meeting',
       'companion',
     ]);
+    // The gated ones are NOT dropped from the catalog — pickers render them
+    // disabled with a "Coming soon" mark rather than hiding the roadmap.
+    const gated = START_MODES.filter((m) => !m.enabled).map((m) => m.id);
+    expect(gated).toEqual(['interviewer_assist', 'tutor']);
   });
 });
 

@@ -2,8 +2,9 @@ import { FLAGS } from '@shared/flags';
 import type { CompanionPresence, Presence, Profile } from '@shared/types';
 
 /** The universal start flow's mode catalog (StartSessionModal + Home). One
- *  entry per SessionMode; `enabled` is the flag gate — a disabled mode is
- *  hidden from pickers, never rendered as a dead option. */
+ *  entry per SessionMode; `enabled` is the flag gate. A disabled mode is still
+ *  LISTED — shown as "Coming soon" and not startable — so the catalog reads
+ *  honestly about what exists instead of hiding the roadmap. */
 export interface StartMode {
   id: 'interview' | 'practice' | 'interviewer_assist' | 'meeting' | 'tutor' | 'companion';
   label: string;
@@ -45,6 +46,8 @@ export const START_MODES: StartMode[] = [
   },
 ];
 
+/** The modes that can actually be STARTED right now. Pickers render the full
+ *  catalog (gated ones disabled + "Coming soon"); this is the startable set. */
 export const enabledModes = (): StartMode[] => START_MODES.filter((m) => m.enabled);
 
 /** Presence options for ambient modes (Meeting) — labels for the explicit

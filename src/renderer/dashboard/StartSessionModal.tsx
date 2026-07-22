@@ -11,8 +11,8 @@ import {
   BUDGET_OPTIONS,
   COMPANION_PRESENCE_OPTIONS,
   PRESENCE_OPTIONS,
+  START_MODES,
   captureSummary,
-  enabledModes,
   startBlocker,
   type StartMode,
 } from './startFlow';
@@ -36,7 +36,9 @@ export function StartSessionModal(props: {
   const { settings, load: loadSettings } = useSettingsStore();
   const live = useLiveSession();
 
-  const modes = enabledModes();
+  // Every mode is listed; the ones still in build are shown disabled with a
+  // "Coming soon" mark rather than hidden, so the catalog reads honestly.
+  const modes = START_MODES;
   const [mode, setMode] = useState<StartMode['id']>('interview');
   const [profileId, setProfileId] = useState(props.initialProfileId ?? '');
   const [spaceId, setSpaceId] = useState(props.initialSpaceId ?? '');
@@ -155,17 +157,26 @@ export function StartSessionModal(props: {
               <button
                 key={m.id}
                 type="button"
+                disabled={!m.enabled}
                 aria-pressed={mode === m.id}
-                onClick={() => setMode(m.id)}
+                aria-disabled={!m.enabled}
+                title={m.enabled ? undefined : `${m.label} isn’t built yet — it’s on the way.`}
+                onClick={() => m.enabled && setMode(m.id)}
                 className={`rounded-xl border p-3 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400 ${
-                  mode === m.id
-                    ? 'border-indigo-400/50 bg-indigo-500/10'
-                    : 'border-white/5 bg-neutral-900/60 hover:bg-neutral-900'
+                  !m.enabled
+                    ? 'cursor-not-allowed border-white/5 bg-neutral-900/30 opacity-55'
+                    : mode === m.id
+                      ? 'border-indigo-400/50 bg-indigo-500/10'
+                      : 'border-white/5 bg-neutral-900/60 hover:bg-neutral-900'
                 }`}
               >
-                <span className="flex items-center gap-1.5 font-medium text-neutral-100">
+                <span className="flex flex-wrap items-center gap-1.5 font-medium text-neutral-100">
                   {m.label}
-                  {(m.id === 'meeting' || m.id === 'companion') && <Badge tone="amber">Labs</Badge>}
+                  {!m.enabled ? (
+                    <Badge tone="neutral">Coming soon</Badge>
+                  ) : (
+                    (m.id === 'meeting' || m.id === 'companion') && <Badge tone="amber">Labs</Badge>
+                  )}
                 </span>
                 <span className="mt-0.5 block text-xs leading-snug text-neutral-400">{m.desc}</span>
               </button>
