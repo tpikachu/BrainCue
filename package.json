@@ -1,6 +1,6 @@
 {
   "name": "braincue",
-  "version": "1.5.3",
+  "version": "2.0.0",
   "description": "BrainCue Copilot — desktop AI interview copilot (Electron + React + OpenAI). Local-first data, BYO OpenAI key.",
   "author": "tpikachu",
   "license": "MIT",
