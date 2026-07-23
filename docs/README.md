@@ -38,6 +38,7 @@ the fact.
 
 | Doc | What it covers |
 | --- | --- |
+| [13 · GitTensor plan](13-GITTENSOR.md) | Bittensor SN74 listing plan and the automated PR evaluation pipeline (scoring, anti-gaming, roadmap). |
 | [Session log](sessions/README.md) | The running development diary — one file per day. |
 | [09 · MVP plan](09-MVP-PLAN.md) | Historical: the record of the shipped v1 build. |
 | [Changelog](../changelog/) | What shipped in each release (also drives the in-app "What's New"). |

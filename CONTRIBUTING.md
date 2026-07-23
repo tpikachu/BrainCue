@@ -146,6 +146,33 @@ tested and should stay that way — it's what lets the engine change safely.
 - Say what you ran and what you couldn't (e.g. "no macOS machine, Windows only").
 - Screenshots or a short clip for UI changes are very welcome.
 
+## Contributing via GitTensor (Bittensor SN74)
+
+BrainCue is preparing for listing as a GitTensor master repository — merged
+PRs here would earn TAO for registered miners. Until listing lands this
+section is forward-looking, but the workflow below is already how the repo
+runs, and it is designed around how SN74 actually scores
+([docs/13-GITTENSOR.md](docs/13-GITTENSOR.md) has the full mechanics):
+
+- **Start from a labeled issue.** Maintainer-labeled `bounty:*` issues carry
+  SN74's maintainer-issue multiplier (×1.66) — and they're the work we will
+  actually merge. Unsolicited scope has the highest close risk, and closed
+  PRs damage your credibility ratio (the 0.80 eligibility floor).
+- **Every PR is evaluated automatically** (see [eval/](eval/)): intake guards
+  and a secret scan now; deterministic quality gates and a rubric-pinned LLM
+  review as the pipeline matures. The scorecard comment tells you exactly
+  what to fix **before** a human reviews — bot feedback never counts as a
+  "changes requested" review, so iterating against it is free.
+- **We don't casually close PRs.** A failed evaluation gets `eval:needs-work`
+  and a fix window; closes happen on abandonment or bad faith. Your
+  credibility is safe with honest work.
+- **One concern per PR**, ≤ 40 files / ≤ 2500 lines for external PRs, no
+  binaries. Splitting one concern across many PRs to farm per-PR score is
+  detected and collapsed.
+- **Tests and docs pay here.** SN74's own token scoring underweights them
+  (×0.05 / ×0.08), so we deliberately price them back in with labeled
+  `bounty:test` / `bounty:docs` issues.
+
 ## Reporting bugs
 
 Open an issue with your OS and app version (Settings shows it, and it's in the

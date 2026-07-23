@@ -1,0 +1,118 @@
+name: PR evaluation
+
+# Stage 0 of the evaluation pipeline (docs/13-GITTENSOR.md): intake guards +
+# secret scan, then a sticky scorecard comment and eval:* labels. The heavy
+# gates (typecheck/tests/build) stay in ci.yml — both are required checks.
+#
+# Runs WITHOUT npm ci: the gate scripts are dependency-free Node, so this
+# completes in seconds and can't be slowed or attacked via install scripts
+# from a contributor's package.json change.
+#
+# Known limitation (fine until external contributors arrive): GITHUB_TOKEN is
+# read-only for fork PRs, so comment/label posting no-ops there — the gate
+# results still fail the check itself. Commenting moves to a workflow_run
+# follower in Phase 1.
+
+on:
+  pull_request:
+    # `edited` so the linked-issue check re-runs when the body is fixed.
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-eval-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Intake guards
+        id: intake
+        continue-on-error: true
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          # Via env, never interpolated into the script — PR bodies are
+          # attacker-controlled input.
+          PR_BODY: ${{ github.event.pull_request.body }}
+          MAINTAINERS: tpikachu
+        run: node eval/gates/intake.mjs
+
+      - name: Secret scan
+        id: secrets
+        continue-on-error: true
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: node eval/gates/secret-scan.mjs
+
+      - name: Scorecard
+        uses: actions/github-script@v7
+        env:
+          INTAKE_OUTCOME: ${{ steps.intake.outcome }}
+          SECRETS_OUTCOME: ${{ steps.secrets.outcome }}
+        with:
+          script: |
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const read = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
+            const intake = read('eval-intake.json');
+            const secrets = read('eval-secrets.json');
+            const weights = fs.readFileSync('eval/config/weights.json');
+            const rubricHash = crypto.createHash('sha256').update(weights).digest('hex').slice(0, 12);
+
+            const pass = process.env.INTAKE_OUTCOME === 'success' && process.env.SECRETS_OUTCOME === 'success';
+            const mark = (ok) => (ok ? '✅' : '❌');
+
+            const lines = [
+              '<!-- braincue-pr-eval -->',
+              `## PR evaluation — ${pass ? '✅ intake passed' : '❌ needs work'}`,
+              '',
+              '| Gate | Result | Detail |',
+              '| --- | --- | --- |',
+              `| Intake guards | ${mark(process.env.INTAKE_OUTCOME === 'success')} | ${intake ? `${intake.changedFiles} files, ${intake.changedLines} lines${intake.maintainerExempt ? ' (maintainer — size caps waived)' : ''}` : 'no report'} |`,
+              `| Secret scan | ${mark(process.env.SECRETS_OUTCOME === 'success')} | ${secrets ? `${secrets.findings.length} finding(s)` : 'no report'} |`,
+              '| Typecheck · tests · build | ⏳ | see the **CI** check on this PR |',
+              '',
+            ];
+            const problems = [
+              ...(intake?.failures ?? []).map((f) => `- ❌ ${f}`),
+              ...(secrets?.findings ?? []).map((f) => `- ❌ possible **${f.pattern}** at \`${f.file}:${f.line}\` — rotate it now; removing the line does not un-leak it`),
+            ];
+            const warns = (intake?.warnings ?? []).map((w) => `- ⚠️ ${w}`);
+            if (problems.length) lines.push('**Blocking:**', ...problems, '');
+            if (warns.length) lines.push('**Advisory:**', ...warns, '');
+            lines.push(
+              `<sub>Stage 0 of the pipeline in [docs/13-GITTENSOR.md](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/master/docs/13-GITTENSOR.md) · rubric \`${rubricHash}\` · a ❌ here is a fix window, not a rejection — this bot never files a "changes requested" review.</sub>`,
+            );
+            const body = lines.join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            try {
+              const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+              const mine = comments.find((c) => c.body?.includes('<!-- braincue-pr-eval -->'));
+              if (mine) await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+              else await github.rest.issues.createComment({ owner, repo, issue_number, body });
+
+              const add = pass ? 'eval:pass' : 'eval:needs-work';
+              const remove = pass ? 'eval:needs-work' : 'eval:pass';
+              await github.rest.issues.addLabels({ owner, repo, issue_number, labels: [add] });
+              await github.rest.issues.removeLabel({ owner, repo, issue_number, name: remove }).catch(() => {});
+            } catch (e) {
+              // Fork PRs: read-only token. The check result below still gates.
+              core.warning(`scorecard posting skipped: ${e.message}`);
+            }
+
+            if (!pass) core.setFailed('intake gates failed — see the scorecard comment');

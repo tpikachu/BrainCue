@@ -1,0 +1,13 @@
+# Every path requires maintainer review before merge. Deliberately broad:
+# on GitTensor (SN74), the maintainer's merge is the subnet's quality oracle,
+# so no path may bypass a human pass — the evaluation pipeline ranks the
+# queue, it does not replace the review.
+* @tpikachu
+
+# Security-critical surfaces — flagged so tooling can require extra scrutiny.
+/src/main/services/security/ @tpikachu
+/src/main/ipc/               @tpikachu
+/src/preload/                @tpikachu
+/src/main/services/session/privacy.ts @tpikachu
+/.github/                    @tpikachu
+/eval/                       @tpikachu

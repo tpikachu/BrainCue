@@ -1,0 +1,34 @@
+{
+  "$comment": "Dimension weights for the PR evaluation scorecard (docs/13-GITTENSOR.md §5). Version bumps only via PR — every scorecard embeds the sha256 of this file so miners can verify which rubric scored them.",
+  "version": "0.1.0",
+  "gates": [
+    "intake.size",
+    "intake.no-binaries",
+    "intake.no-generated-paths",
+    "intake.no-secrets",
+    "ci.typecheck",
+    "ci.tests",
+    "ci.build"
+  ],
+  "dimensions": {
+    "correctness": 0.22,
+    "architecture": 0.15,
+    "tests": 0.15,
+    "security": 0.12,
+    "impact": 0.12,
+    "documentation": 0.08,
+    "performance": 0.08,
+    "maintenance": 0.08
+  },
+  "caps": {
+    "maxChangedFiles": 40,
+    "maxChangedLines": 2500,
+    "maxFileSizeBytes": 1000000
+  },
+  "antiGaming": {
+    "churnDiscount": true,
+    "noveltyDiscount": true,
+    "testGamingCheck": true,
+    "splitDetectionWindowHours": 48
+  }
+}

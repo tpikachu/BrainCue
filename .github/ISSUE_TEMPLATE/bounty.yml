@@ -1,0 +1,38 @@
+name: Bounty proposal
+description: >-
+  Propose a scoped unit of work you'd like to take on (GitTensor / SN74
+  miners: score-bearing work must start from a maintainer-labeled issue)
+labels: ['bounty:proposed', 'triage']
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Only maintainer-labeled `bounty:*` issues carry the maintainer-issue
+        multiplier on SN74. Proposing here first — before writing code —
+        protects your credibility ratio: PRs for unlabeled scope may sit
+        unmerged, and unscoped drive-by PRs are the main reason contributor
+        PRs get closed.
+  - type: textarea
+    id: scope
+    attributes:
+      label: Proposed scope
+      description: What you'd build/fix, and where it lives in the codebase.
+    validations:
+      required: true
+  - type: textarea
+    id: approach
+    attributes:
+      label: Approach sketch
+      description: >-
+        A few sentences. Modes configure the engine, never fork it; IPC goes
+        through the 4-step contract; the privacy invariants in CONTRIBUTING.md
+        are non-negotiable.
+    validations:
+      required: true
+  - type: input
+    id: size
+    attributes:
+      label: Estimated size
+      placeholder: 'e.g. ~300 lines across engine/trigger + tests'
+    validations:
+      required: true

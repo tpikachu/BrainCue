@@ -1,0 +1,37 @@
+{
+  "$comment": "Label taxonomy consumed by the evaluation pipeline and pushed to GitHub via `node scripts/sync-labels.mjs`. Colors are GitHub hex without '#'.",
+  "labels": [
+    { "name": "triage", "color": "ededed", "description": "Awaiting maintainer triage" },
+
+    { "name": "kind:bug", "color": "d73a4a", "description": "Something broken" },
+    { "name": "kind:feature", "color": "a2eeef", "description": "New capability" },
+    { "name": "kind:polish", "color": "c5def5", "description": "UX/quality improvement, no new capability" },
+
+    { "name": "area:engine", "color": "1d76db", "description": "Conversation engine, trigger policies, modes" },
+    { "name": "area:overlay", "color": "1d76db", "description": "Cue Card overlay window" },
+    { "name": "area:dashboard", "color": "1d76db", "description": "Dashboard renderer UI" },
+    { "name": "area:db", "color": "1d76db", "description": "Schema, migrations, repositories" },
+    { "name": "area:providers", "color": "1d76db", "description": "Provider capability layer" },
+    { "name": "area:voice", "color": "1d76db", "description": "Voice/summon layer, TTS" },
+    { "name": "area:memory", "color": "1d76db", "description": "Review-first memory subsystem" },
+    { "name": "area:security", "color": "b60205", "description": "Key handling, IPC validation, capture invisibility" },
+    { "name": "area:build", "color": "1d76db", "description": "Build, packaging, CI, tooling" },
+    { "name": "area:docs", "color": "1d76db", "description": "Design docs, README, site" },
+
+    { "name": "difficulty:starter", "color": "0e8a16", "description": "Small, well-scoped, low context needed" },
+    { "name": "difficulty:intermediate", "color": "fbca04", "description": "Touches one subsystem, needs repo context" },
+    { "name": "difficulty:advanced", "color": "e99695", "description": "Cross-cutting or concurrency/privacy sensitive" },
+
+    { "name": "bounty:proposed", "color": "d4c5f9", "description": "Contributor-proposed scope awaiting maintainer decision" },
+    { "name": "bounty:core", "color": "5319e7", "description": "Maintainer-approved: engine/product work (SN74 maintainer-issue multiplier)" },
+    { "name": "bounty:test", "color": "5319e7", "description": "Maintainer-approved: test coverage work — priced up because SN74 underweights tests" },
+    { "name": "bounty:docs", "color": "5319e7", "description": "Maintainer-approved: documentation work — priced up because SN74 underweights docs" },
+    { "name": "bounty:perf", "color": "5319e7", "description": "Maintainer-approved: measured performance work (numbers required)" },
+    { "name": "bounty:security", "color": "b60205", "description": "Maintainer-approved: security hardening (disclosure rules in SECURITY.md apply)" },
+
+    { "name": "eval:pass", "color": "0e8a16", "description": "Automated evaluation passed — in the merge queue" },
+    { "name": "eval:needs-work", "color": "fbca04", "description": "Automated evaluation found actionable problems — fix window open, not a rejection" },
+    { "name": "eval:human", "color": "f9d0c4", "description": "Evaluation escalated to a human (disagreement, size, or sensitive surface)" },
+    { "name": "eval:exempt", "color": "ededed", "description": "Maintainer-authored or pipeline-exempt PR" }
+  ]
+}

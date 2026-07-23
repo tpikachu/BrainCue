@@ -26,3 +26,7 @@ scripts/privacy-affinity/.out/
 # Raw capture frames — scratch for scripts/build-media.mjs. Only the assembled
 # .gif/.mp4 in docs/media/ are committed. See e2e/README.md.
 docs/media/frames/
+
+# PR evaluation gate reports (eval/gates/*.mjs write these at the repo root)
+eval-intake.json
+eval-secrets.json
