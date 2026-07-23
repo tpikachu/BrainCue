@@ -1,0 +1,53 @@
+# CodeRabbit configuration — https://docs.coderabbit.ai/reference/configuration
+#
+# Division of labor: CodeRabbit does contributor-facing line-level review and
+# Q&A; the eval/ pipeline owns scoring, labels, and verdicts. The one hard rule
+# is that CodeRabbit must never file approvals or "changes requested" reviews:
+# an approval could satisfy the ruleset's required review and trigger
+# auto-merge, and a changes-requested review costs GitTensor miners 15% of a
+# PR's score (docs/13-GITTENSOR.md) — comments only.
+language: en-US
+
+tone_instructions: >-
+  Be direct and technical. Skip praise. This repo runs its own scoring
+  pipeline (eval/); focus on concrete line-level correctness, not verdicts.
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!docs/media/**"
+    - "!docs/images/**"
+    - "!drizzle/**"
+    - "!package-lock.json"
+    - "!eval/package-lock.json"
+    - "!changelog/**"
+  path_instructions:
+    - path: "src/**"
+      instructions: >-
+        Enforce repo law (CONTRIBUTING.md, CLAUDE.md): IPC follows the 4-step
+        contract (IPC/EVENTS constants -> handle()+zod -> preload facade ->
+        typed events), never hardcoded channel strings; the renderer never
+        imports main/db/provider modules; modes CONFIGURE the engine — flag
+        any mode-specific branching inside engine internals; no native
+        <select> or title tooltips (they escape Privacy Mode's screen-capture
+        exclusion); the API key must never cross IPC or appear in logs.
+    - path: "eval/**"
+      instructions: >-
+        These scripts run in privileged CI context. Flag any new dependency,
+        any execution or eval of diff content, any path where PR-controlled
+        data reaches a shell, and any weakening of the advisory-only /
+        never-auto-close guarantees.
+    - path: "docs/**"
+      instructions: >-
+        Docs lead code: flag behavior changes that don't update the matching
+        doc. Do not review docs/sessions/ prose — it is a historical log.
+
+chat:
+  auto_reply: true

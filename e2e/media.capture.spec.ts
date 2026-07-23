@@ -1,7 +1,7 @@
 import { test, disablePrivacyMode, hasKey, setApiKey } from './fixtures';
 import type { Page } from '@playwright/test';
 import { resolve } from 'node:path';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 
 // Opt-in capture utility — records the ANIMATED clips (the GIFs / demo video)
 // used by the README and the landing page, as numbered PNG frames:
@@ -207,8 +207,10 @@ test('@capture dashboard walkthrough (demo scenes + grounded gif)', async ({ das
 
   // ── Scene 3 · Library: Spaces + documents (what grounds the answers) ──────
   await go('#/library?tab=spaces');
+  await snap(dashboard, 'demo/03-library-spaces');
   await snap(dashboard, 'interview-grounded');
   await go('#/library?tab=documents');
+  await snap(dashboard, 'demo/04-library-docs');
   await snap(dashboard, 'interview-grounded');
 
   // ── Scene 4 · The interview workspace: profile picked, Spaces listed ──────
@@ -222,7 +224,7 @@ test('@capture dashboard walkthrough (demo scenes + grounded gif)', async ({ das
   await dashboard.getByRole('option').nth(1).click(); // 0 = the placeholder
   await dashboard.getByText(/Google|Amazon|Stripe/).first().waitFor();
   await dashboard.waitForTimeout(600);
-  await snap(dashboard, 'demo/03-grounded');
+  await snap(dashboard, 'demo/05-grounded');
   await snap(dashboard, 'interview-grounded');
   await snap(dashboard, 'interview-grounded'); // hold the payoff view a beat longer
 
@@ -241,14 +243,14 @@ test('@capture dashboard walkthrough (demo scenes + grounded gif)', async ({ das
       profileId,
     )
     .catch(() => {});
-  const frames = await captureStream(overlay, 'demo/04-cuecard', {
+  const frames = await captureStream(overlay, 'demo/06-cuecard', {
     intervalMs: 100,
     settleMs: 700,
     minGrowth: 250,
     maxFrames: 300,
     startTimeoutMs: 90_000,
   });
-  console.log(`demo/04-cuecard: captured ${frames} frames`);
+  console.log(`demo/06-cuecard: captured ${frames} frames`);
   await running;
   await dashboard.evaluate(async () => {
     const api = (window as any).api;
@@ -256,11 +258,25 @@ test('@capture dashboard walkthrough (demo scenes + grounded gif)', async ({ das
     if (r[0]) await api.mock.end(r[0].id);
   });
 
-  // The demo ends on the Cue Card payoff (a mock session never persists —
-  // mock.end tears down and deletes — so a Sessions scene would show an
-  // empty table and read as broken).
+  // ── Scene 7 · Settings (the trust story: local key, privacy, providers) ───
+  await go('#/settings');
+  await dashboard.waitForTimeout(600);
+  await snap(dashboard, 'demo/08-settings');
+
+  // ── Scene 8 · Outro: back on the launcher ─────────────────────────────────
+  // (Two scenes are deliberately absent: Sessions — a mock session never
+  // persists, so it would show an empty table and read as broken — and the
+  // mock workspace mid-run, which renders its start form rather than a live
+  // view when the session was started via IPC.)
+  await go('#/home');
+  await dashboard.waitForTimeout(600);
+  await snap(dashboard, 'demo/09-outro');
 
   // The manifest is the assembly contract for build-media.mjs --manifest.
+  // Scenes whose capture was skipped (see 07-session) must not be listed —
+  // the assembler treats every manifest entry as required. Checked on DISK,
+  // not via the snap counters: captureStream writes its frames directly.
+  const captured = (dir: string): boolean => existsSync(resolve(DEMO, dir));
   writeFileSync(
     resolve(DEMO, 'manifest.json'),
     JSON.stringify(
@@ -268,11 +284,15 @@ test('@capture dashboard walkthrough (demo scenes + grounded gif)', async ({ das
         width: 1280,
         height: 800,
         scenes: [
-          { dir: '01-home', holdSec: 3, caption: 'BrainCue - the AI that is in the room with you' },
-          { dir: '02-start', holdSec: 4, caption: 'One start flow for every mode - see exactly what leaves your machine, before anything starts' },
-          { dir: '03-grounded', holdSec: 3.5, caption: 'Grounded in your documents - resume, job description, company research' },
-          { dir: '04-cuecard', fps: 10, tailHoldSec: 2.5, caption: 'A question is heard - a cited answer streams into the screen-share-invisible Cue Card' },
-        ],
+          { dir: '01-home', holdSec: 3.2, caption: 'BrainCue - the AI that is in the room with you' },
+          { dir: '02-start', holdSec: 4.5, caption: 'One start flow for every mode - see exactly what will be captured, before anything starts' },
+          { dir: '03-library-spaces', holdSec: 3, caption: 'Spaces collect what you know - profiles, jobs, research' },
+          { dir: '04-library-docs', holdSec: 3, caption: 'Your documents are indexed locally - nothing uploads anywhere' },
+          { dir: '05-grounded', holdSec: 3.5, caption: 'Pick a profile - every answer is grounded in YOUR material' },
+          { dir: '06-cuecard', fps: 10, tailHoldSec: 3, caption: 'A question is heard - a cited answer streams into the screen-share-invisible Cue Card' },
+          { dir: '08-settings', holdSec: 3, caption: 'Local-first - your API key is OS-encrypted and never leaves the main process' },
+          { dir: '09-outro', holdSec: 3.2, caption: 'Free and open source - github.com/tpikachu/BrainCue' },
+        ].filter((s) => captured(s.dir)),
       },
       null,
       2,
