@@ -16,7 +16,17 @@ AI_Inter/
 ├─ index.html                   # single renderer entry (dashboard/overlay/selection roots chosen at runtime)
 │
 ├─ CONTRIBUTING.md              # setup, gate, IPC contract, invariants
-├─ .github/workflows/           # ci.yml · release.yml · pages.yml (docs site deploy)
+├─ SECURITY.md / CODE_OF_CONDUCT.md
+├─ .github/workflows/           # ci.yml · release.yml · pages.yml · pr-eval.yml
+│                               #   · pr-eval-report.yml (privileged workflow_run
+│                               #     follower: scorecard comment + LLM review)
+├─ .github/                     # CODEOWNERS · PR template · ISSUE_TEMPLATE/
+│
+├─ eval/                        # automated PR evaluation (docs/13-GITTENSOR.md)
+│  ├─ config/                   # weights.json · labels.json · rubric.md
+│  ├─ gates/                    # intake.mjs · secret-scan.mjs · coverage-diff.mjs
+│  ├─ llm/                      # review.mjs — schema-constrained LLM review
+│  └─ package.json              # isolated deps (openai) for the LLM stage
 │
 ├─ scripts/
 │  ├─ run-electron-vite.mjs     # dev/preview launcher

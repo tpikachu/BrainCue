@@ -1,0 +1,48 @@
+name: Arm auto-merge
+
+# Arms GitHub's native auto-merge on every PR at open, so the merge fires the
+# moment the last ruleset requirement is satisfied — in practice: required
+# checks green + one maintainer approval. The HUMAN approval remains the
+# trigger; this never merges anything the ruleset wouldn't already allow, it
+# only removes the second "click Merge" round-trip after approving.
+#
+# Needs the repo setting General → "Allow auto-merge" enabled; until it is,
+# this logs a warning and does nothing.
+#
+# SECURITY: pull_request_target runs with a write token in base-repo context
+# so fork PRs can be armed too. That is safe here ONLY because this job never
+# checks out or executes anything from the PR — it calls one GraphQL mutation
+# with the PR's node id. Keep it that way: no checkout steps in this file.
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  arm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              await github.graphql(
+                `mutation($pr: ID!) {
+                  enablePullRequestAutoMerge(input: { pullRequestId: $pr, mergeMethod: MERGE }) {
+                    pullRequest { number }
+                  }
+                }`,
+                { pr: context.payload.pull_request.node_id },
+              );
+              core.info(`auto-merge armed for #${context.payload.pull_request.number}`);
+            } catch (e) {
+              // Benign cases: "Allow auto-merge" not enabled in repo settings,
+              // or the PR is already mergeable-clean (nothing pending to wait
+              // for — the merge button is right there).
+              core.warning(`could not arm auto-merge: ${e.message}`);
+            }

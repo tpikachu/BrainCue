@@ -1,0 +1,25 @@
+name: Feature request
+description: Propose a capability or improvement
+labels: ['kind:feature', 'triage']
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What can't you do today, in real usage terms?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: >-
+        What should happen. BrainCue is one engine with modes as configuration
+        (docs/00-VISION.md) — proposals that fork the engine per mode will be
+        redirected to an engine extension.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

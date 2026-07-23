@@ -1,0 +1,272 @@
+name: PR evaluation report
+
+# The privileged half of the evaluation pipeline (docs/13-GITTENSOR.md).
+#
+# pr-eval.yml and ci.yml run in the PR's own (untrusted, read-only) context
+# and only upload report artifacts. THIS workflow fires when either of them
+# completes, runs trusted code from the default branch, and does everything
+# that needs privilege: the sticky scorecard comment, eval:* labels, and the
+# LLM review (the only place the OPENAI_API_KEY secret is ever mounted).
+# That split is what makes fork PRs work — their GITHUB_TOKEN is read-only,
+# ours is not — and what keeps secrets out of any run that executes
+# contributor-influenced code.
+#
+# Fires twice per push (once per completing workflow) and converges: each
+# firing re-renders the comment from whatever artifacts exist by then. The
+# LLM review runs only on the CI firing, only when CI + gates passed — no
+# spend on diffs that don't build.
+#
+# SECURITY: never check out the PR's code here. The diff is fetched via the
+# API as data; artifacts are parsed as JSON, never executed. Everything in
+# them is contributor-influenced — render it, don't run it.
+
+on:
+  workflow_run:
+    workflows: ['PR evaluation', 'CI']
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+
+concurrency:
+  group: pr-eval-report-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  report:
+    # CI also runs on pushes to master — only PR runs get a scorecard.
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      # Default branch code — trusted. The PR's version of the eval scripts
+      # never runs in this workflow.
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Locate sibling runs
+        id: runs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const wr = context.payload.workflow_run;
+            const find = async (workflowFile) => {
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                ...context.repo,
+                workflow_id: workflowFile,
+                head_sha: wr.head_sha,
+                per_page: 5,
+              });
+              return data.workflow_runs[0] ?? null;
+            };
+            const prEval = wr.name === 'PR evaluation' ? wr : await find('pr-eval.yml');
+            const ci = wr.name === 'CI' ? wr : await find('ci.yml');
+            core.setOutput('trigger', wr.name);
+            core.setOutput('pr_eval_run_id', prEval?.id ?? '');
+            core.setOutput('pr_eval_conclusion', prEval?.conclusion ?? 'pending');
+            core.setOutput('ci_run_id', ci?.id ?? '');
+            core.setOutput('ci_conclusion', ci?.conclusion ?? 'pending');
+
+      - name: Download gate reports
+        if: steps.runs.outputs.pr_eval_run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: eval-reports
+          run-id: ${{ steps.runs.outputs.pr_eval_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: .eval-in/reports
+
+      - name: Download coverage report
+        if: steps.runs.outputs.ci_run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: eval-coverage
+          run-id: ${{ steps.runs.outputs.ci_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: .eval-in/coverage
+
+      - name: Read PR coordinates
+        id: meta
+        run: |
+          if [ -f .eval-in/reports/eval-pr.json ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "pr_number=$(node -p 'JSON.parse(require("fs").readFileSync(".eval-in/reports/eval-pr.json","utf8")).number')" >> "$GITHUB_OUTPUT"
+          else
+            # pr-eval hasn't finished yet (CI won the race) — its own firing
+            # of this workflow will post the scorecard.
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::no eval-pr.json yet — skipping this firing"
+          fi
+
+      # ── LLM review: CI firing only, everything green, key configured ──────
+      - name: Install review dependencies
+        if: >
+          steps.meta.outputs.found == 'true' &&
+          steps.runs.outputs.trigger == 'CI' &&
+          steps.runs.outputs.ci_conclusion == 'success' &&
+          steps.runs.outputs.pr_eval_conclusion == 'success'
+        run: npm ci --prefix eval --no-audit --no-fund
+
+      - name: Fetch diff (as data)
+        if: >
+          steps.meta.outputs.found == 'true' &&
+          steps.runs.outputs.trigger == 'CI' &&
+          steps.runs.outputs.ci_conclusion == 'success' &&
+          steps.runs.outputs.pr_eval_conclusion == 'success'
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.meta.outputs.pr_number }}
+        with:
+          script: |
+            const fs = require('fs');
+            const pull_number = Number(process.env.PR_NUMBER);
+            const { data: diff } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number,
+              mediaType: { format: 'diff' },
+            });
+            fs.writeFileSync('pr.diff', diff);
+            const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number });
+            fs.writeFileSync(
+              'pr-meta.json',
+              JSON.stringify({
+                number: pr.number,
+                title: pr.title,
+                body: pr.body,
+                author: pr.user?.login,
+                baseRef: pr.base?.ref,
+              }),
+            );
+
+      - name: LLM review
+        if: >
+          steps.meta.outputs.found == 'true' &&
+          steps.runs.outputs.trigger == 'CI' &&
+          steps.runs.outputs.ci_conclusion == 'success' &&
+          steps.runs.outputs.pr_eval_conclusion == 'success'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DIFF_FILE: pr.diff
+          PR_META_FILE: pr-meta.json
+        run: node eval/llm/review.mjs
+
+      # ── Scorecard ─────────────────────────────────────────────────────────
+      - name: Post scorecard + labels
+        if: steps.meta.outputs.found == 'true'
+        uses: actions/github-script@v7
+        env:
+          CI_CONCLUSION: ${{ steps.runs.outputs.ci_conclusion }}
+        with:
+          script: |
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const read = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
+
+            const meta = read('.eval-in/reports/eval-pr.json');
+            const intake = read('.eval-in/reports/eval-intake.json');
+            const secrets = read('.eval-in/reports/eval-secrets.json');
+            const coverage = read('.eval-in/coverage/eval-coverage.json');
+            const llm = read('eval-llm.json');
+
+            // Same pin as eval/llm/review.mjs: sha256(weights.json + rubric.md).
+            const rubricHash = crypto.createHash('sha256')
+              .update(fs.readFileSync('eval/config/weights.json'))
+              .update(fs.readFileSync('eval/config/rubric.md'))
+              .digest('hex').slice(0, 12);
+
+            const issue_number = meta.number;
+            const gatesPass = meta.gates?.intake === 'success' && meta.gates?.secrets === 'success';
+            const ci = process.env.CI_CONCLUSION;
+            const mark = (v) => (v === 'success' ? '✅' : v === 'pending' ? '⏳' : '❌');
+
+            // Integrity note: pull_request workflows run the PR's own copy of
+            // the workflow + gate scripts, so a PR editing the pipeline can
+            // self-report. Surface that; this comment is rendered from trusted
+            // code either way.
+            const { data: prFiles } = await github.rest.pulls.listFiles({
+              ...context.repo, pull_number: issue_number, per_page: 100,
+            });
+            const touchesPipeline = prFiles.some((f) =>
+              f.filename.startsWith('eval/') || f.filename.startsWith('.github/'));
+
+            const lines = [
+              '<!-- braincue-pr-eval -->',
+              `## PR evaluation — ${gatesPass ? (ci === 'success' ? '✅ all gates green' : ci === 'pending' ? '✅ intake passed · CI running' : '❌ CI failed') : '❌ needs work'}`,
+              '',
+              '| Gate | Result | Detail |',
+              '| --- | --- | --- |',
+              `| Intake guards | ${mark(meta.gates?.intake)} | ${intake ? `${intake.changedFiles} files, ${intake.changedLines} lines${intake.maintainerExempt ? ' (maintainer — size caps waived)' : ''}` : 'no report'} |`,
+              `| Secret scan | ${mark(meta.gates?.secrets)} | ${secrets ? `${secrets.findings.length} finding(s)` : 'no report'} |`,
+              `| Typecheck · tests · build | ${mark(ci)} | the **CI** check on this PR |`,
+              `| Coverage on changed lines | ${coverage?.totalPct != null ? (coverage.totalPct >= coverage.threshold ? '✅' : '⚠️') : '➖'} | ${coverage?.totalPct != null ? `${coverage.totalPct}% of changed executable lines (advisory floor ${coverage.threshold}%)` : coverage?.skipped ? coverage.reason : ci === 'pending' ? 'waiting for CI' : 'no report'} |`,
+              '',
+            ];
+
+            if (touchesPipeline) {
+              lines.push('> ⚠️ This PR modifies the evaluation pipeline or workflows — gate results above are self-reported by the PR\'s own copy of the scripts. Review those files first.', '');
+            }
+
+            const problems = [
+              ...(intake?.failures ?? []).map((f) => `- ❌ ${f}`),
+              ...(secrets?.findings ?? []).map((f) => `- ❌ possible **${f.pattern}** at \`${f.file}:${f.line}\` — rotate it now; removing the line does not un-leak it`),
+            ];
+            const warns = (intake?.warnings ?? []).map((w) => `- ⚠️ ${w}`);
+            if (problems.length) lines.push('**Blocking:**', ...problems, '');
+            if (warns.length) lines.push('**Advisory:**', ...warns, '');
+
+            // ── LLM review section ──
+            if (llm?.card) {
+              const c = llm.card;
+              lines.push(
+                `### LLM review — ${llm.weightedScore}/100 (advisory)`,
+                '',
+                c.summary,
+                '',
+                '| Dimension | Score | Note |',
+                '| --- | --- | --- |',
+                ...Object.entries(c.dimensions).map(([d, v]) => `| ${d} | ${v.score} | ${v.rationale} |`),
+                '',
+              );
+              const sevRank = { blocking: 0, major: 1, minor: 2, info: 3 };
+              const findings = [...c.findings].sort((a, b) => sevRank[a.severity] - sevRank[b.severity]).slice(0, 10);
+              if (findings.length) {
+                lines.push('**Findings:**', ...findings.map((f) =>
+                  `- **${f.severity}** \`${f.file}${f.line ? `:${f.line}` : ''}\` (${f.dimension}) — ${f.claim}${f.suggestion ? ` _Fix: ${f.suggestion}_` : ''}`), '');
+              }
+              if (c.gaming.length) {
+                lines.push('**⛔ Gaming flags:**', ...c.gaming.map((g) => `- \`gaming.${g.type}\` — ${g.evidence}`), '');
+              }
+              if (c.verdict === 'escalate-human') {
+                lines.push('> 🧑‍⚖️ The reviewer escalated this PR for human judgment (`eval:human`).', '');
+              }
+            } else if (llm?.skipped) {
+              lines.push(`<sub>LLM review skipped: ${llm.reason}.</sub>`, '');
+            } else if (gatesPass && ci === 'pending') {
+              lines.push('<sub>LLM review runs after CI completes.</sub>', '');
+            } else if (gatesPass && ci === 'success') {
+              lines.push('<sub>LLM review pending — posted on the CI firing of this workflow.</sub>', '');
+            }
+
+            lines.push(
+              `<sub>Pipeline: [docs/13-GITTENSOR.md](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/master/docs/13-GITTENSOR.md) · rubric \`${rubricHash}\` · a ❌ here is a fix window, not a rejection — this bot never files a "changes requested" review.</sub>`,
+            );
+            const body = lines.join('\n');
+
+            const { owner, repo } = context.repo;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+            const mine = comments.find((c) => c.body?.includes('<!-- braincue-pr-eval -->'));
+            if (mine) await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            else await github.rest.issues.createComment({ owner, repo, issue_number, body });
+
+            const add = gatesPass ? 'eval:pass' : 'eval:needs-work';
+            const remove = gatesPass ? 'eval:needs-work' : 'eval:pass';
+            const labels = [add];
+            if (llm?.card?.verdict === 'escalate-human') labels.push('eval:human');
+            await github.rest.issues.addLabels({ owner, repo, issue_number, labels });
+            await github.rest.issues.removeLabel({ owner, repo, issue_number, name: remove }).catch(() => {});

@@ -10,11 +10,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: coverage-on-diff needs the merge base with the PR's
+          # target branch to know which lines this PR changed.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      # Runs the suite (hard gate) and, on PRs, measures unit coverage of the
+      # changed lines (advisory) — see eval/gates/coverage-diff.mjs.
+      - name: Tests + coverage on diff
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: node eval/gates/coverage-diff.mjs
       - run: npm run build
+      # Picked up by pr-eval-report.yml for the scorecard comment.
+      - name: Upload coverage report
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-coverage
+          path: eval-coverage.json
+          if-no-files-found: ignore
+          retention-days: 14

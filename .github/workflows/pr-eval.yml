@@ -1,0 +1,104 @@
+name: PR evaluation
+
+# Stage 0 of the evaluation pipeline (docs/13-GITTENSOR.md): intake guards +
+# secret scan. The heavy gates (typecheck/tests/build + coverage-on-diff) stay
+# in ci.yml — both are required checks.
+#
+# Runs WITHOUT npm ci: the gate scripts are dependency-free Node, so this
+# completes in seconds and can't be slowed or attacked via install scripts
+# from a contributor's package.json change.
+#
+# This workflow only GATES and uploads its reports as an artifact. The sticky
+# scorecard comment + eval:* labels are posted by pr-eval-report.yml — a
+# workflow_run follower that runs in base-repo context with a write token, so
+# fork PRs get the same feedback as branch PRs. Never add write permissions
+# or secrets HERE: this workflow's trigger checks out contributor-influenced
+# context, the follower is where privilege lives.
+
+on:
+  pull_request:
+    # `edited` so the linked-issue check re-runs when the body is fixed.
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-eval-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Intake guards
+        id: intake
+        continue-on-error: true
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          # Via env, never interpolated into the script — PR bodies are
+          # attacker-controlled input.
+          PR_BODY: ${{ github.event.pull_request.body }}
+          MAINTAINERS: tpikachu
+        run: node eval/gates/intake.mjs
+
+      - name: Secret scan
+        id: secrets
+        continue-on-error: true
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: node eval/gates/secret-scan.mjs
+
+      # The follower can't see this run's event payload, so ship it the PR
+      # coordinates + gate outcomes alongside the gate reports. Title goes via
+      # env (attacker-controlled), never interpolated into the script.
+      - name: Bundle reports for the follower
+        if: always()
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_REF: ${{ github.base_ref }}
+          INTAKE_OUTCOME: ${{ steps.intake.outcome }}
+          SECRETS_OUTCOME: ${{ steps.secrets.outcome }}
+        run: |
+          node -e '
+            const { writeFileSync } = require("fs");
+            const e = process.env;
+            writeFileSync("eval-pr.json", JSON.stringify({
+              number: Number(e.PR_NUMBER),
+              author: e.PR_AUTHOR,
+              title: e.PR_TITLE,
+              headSha: e.PR_HEAD_SHA,
+              baseRef: e.PR_BASE_REF,
+              gates: { intake: e.INTAKE_OUTCOME, secrets: e.SECRETS_OUTCOME },
+            }, null, 2));
+          '
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-reports
+          path: |
+            eval-pr.json
+            eval-intake.json
+            eval-secrets.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Gate
+        if: steps.intake.outcome == 'failure' || steps.secrets.outcome == 'failure'
+        run: |
+          echo "::error::intake gates failed — the scorecard comment on the PR has the details"
+          exit 1

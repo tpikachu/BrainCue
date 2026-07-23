@@ -1,0 +1,9 @@
+{
+  "name": "braincue-eval",
+  "private": true,
+  "description": "Isolated dependencies for the LLM review stage. Deliberately separate from the app's package.json so the report workflow can `npm ci --prefix eval` in seconds — no Electron download, no native rebuilds, and a contributor's changes to the app's dependency tree never reach the privileged reporting context.",
+  "type": "module",
+  "dependencies": {
+    "openai": "^6.48.0"
+  }
+}

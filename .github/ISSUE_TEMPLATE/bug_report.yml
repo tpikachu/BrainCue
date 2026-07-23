@@ -1,0 +1,36 @@
+name: Bug report
+description: Something broken in BrainCue
+labels: ['kind:bug', 'triage']
+body:
+  - type: input
+    id: version
+    attributes:
+      label: App version & OS
+      description: Version is in the sidebar footer and Settings.
+      placeholder: 'v1.5.3 · Windows 11'
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what actually happened.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start a companion session with…
+        2. …
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: >-
+        Mode in use (interview/practice/meeting/companion), whether Privacy
+        Mode was on, and any errors shown. Never paste your API key or
+        transcript content you don't want public.
