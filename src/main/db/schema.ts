@@ -14,6 +14,12 @@ export const profiles = sqliteTable('profiles', {
   jdText: text('jd_text'),
   parsedResume: text('parsed_resume'), // json
   parsedJd: text('parsed_jd'), // json
+  // Who this person actually is (json ProfileAbout) — role, org, where they
+  // are, how they work, who they work with, what they're working on. A résumé
+  // says what someone did for employers; a companion in their daily calls needs
+  // what they're doing now and how they like to be helped. Indexed as `profile`
+  // chunks so it grounds answers in every mode.
+  about: text('about'),
   createdAt: integer('created_at').notNull().default(now),
   updatedAt: integer('updated_at').notNull().default(now),
 });

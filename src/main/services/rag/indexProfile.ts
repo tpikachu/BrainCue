@@ -1,4 +1,4 @@
-import { and, eq, isNull, ne } from 'drizzle-orm';
+import { and, eq, isNull, notInArray } from 'drizzle-orm';
 import { db, schema } from '../../db';
 import { chunkText } from './chunker';
 import { providerFor } from '../../providers/registry';
@@ -6,6 +6,7 @@ import { assertEmbeddingCompatibility } from './embeddingIdentity';
 import { sqliteVectorStore } from './vectorStore';
 import { vectorToBuffer } from './vectorMath';
 import { profilesRepo } from '../../db/repositories/profiles.repo';
+import { PROFILE_ABOUT_FIELDS } from '@shared/types';
 import { storiesRepo, storyInsertValues } from '../../db/repositories/stories.repo';
 import { applicationsRepo } from '../../db/repositories/applications.repo';
 import { apiKeyStore } from '../security/apiKey';
@@ -41,17 +42,22 @@ export async function reindexProfile(
   const profile = profilesRepo.get(profileId);
   if (!profile) throw new Error('Profile not found');
 
-  // Clear only the base (non-job) resume/note chunks for this profile (embeddings
-  // cascade). Excludes `story` chunks — those are managed separately by indexStories,
-  // so re-saving a résumé doesn't wipe the curated story bank. ALWAYS runs, so
-  // removing a resume cleans up its chunks even with no key.
+  // Clear only the chunks THIS pass owns — résumé, notes, and the "about you"
+  // sections (embeddings cascade). Two source types are explicitly spared:
+  //   story   — managed by indexStories, so re-saving a résumé doesn't wipe the
+  //             curated story bank;
+  //   session — conversation archives (docs/16-CONTINUITY.md). Unscoped ones
+  //             have packId null and would otherwise be caught by this delete,
+  //             so editing a profile would silently erase every global memory of
+  //             every call the user has ever had.
+  // ALWAYS runs, so removing a résumé cleans up its chunks even with no key.
   db()
     .delete(schema.chunks)
     .where(
       and(
         eq(schema.chunks.profileId, profileId),
         isNull(schema.chunks.packId),
-        ne(schema.chunks.sourceType, 'story'),
+        notInArray(schema.chunks.sourceType, ['story', 'session']),
       ),
     )
     .run();
@@ -59,8 +65,15 @@ export async function reindexProfile(
   // chunks above are already gone.
   if (!apiKeyStore.isPresent()) return { chunks: 0, embedded: 0 };
 
-  const sources: { type: 'resume' | 'note'; text: string }[] = [];
+  const sources: { type: 'resume' | 'note' | 'profile'; text: string }[] = [];
   if (profile.resumeText) sources.push({ type: 'resume', text: profile.resumeText });
+  // "About you" (ProfileAbout). Each section is indexed as its own chunk, led by
+  // the person's name and a phrase naming what the section is, so a retrieved
+  // fragment reads as a statement about them rather than an orphaned sentence.
+  for (const f of PROFILE_ABOUT_FIELDS) {
+    const value = profile.about?.[f.key]?.trim();
+    if (value) sources.push({ type: 'profile', text: `${profile.name} — ${f.lead} ${value}` });
+  }
   const notes = db().select().from(schema.notes).where(eq(schema.notes.profileId, profileId)).all();
   for (const n of notes) sources.push({ type: 'note', text: n.content });
 

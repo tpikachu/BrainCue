@@ -18,6 +18,7 @@ function toProfile(r: Row): Profile {
     jdText: r.jdText,
     parsedResume: r.parsedResume ? JSON.parse(r.parsedResume) : null,
     parsedJd: r.parsedJd ? JSON.parse(r.parsedJd) : null,
+    about: r.about ? (JSON.parse(r.about) as Profile['about']) : null,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
@@ -51,6 +52,7 @@ export const profilesRepo = {
         language: input.language,
         resumeText: input.resumeText,
         jdText: input.jdText,
+        about: input.about ? JSON.stringify(input.about) : null,
       })
       .run();
     return this.get(id)!;
@@ -72,6 +74,7 @@ export const profilesRepo = {
       set.parsedResume = patch.parsedResume ? JSON.stringify(patch.parsedResume) : null;
     if (patch.parsedJd !== undefined)
       set.parsedJd = patch.parsedJd ? JSON.stringify(patch.parsedJd) : null;
+    if (patch.about !== undefined) set.about = patch.about ? JSON.stringify(patch.about) : null;
 
     db().update(schema.profiles).set(set).where(eq(schema.profiles.id, id)).run();
     return this.get(id)!;

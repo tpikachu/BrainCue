@@ -34,7 +34,107 @@ export type ChunkSource =
   | 'company'
   | 'story'
   | 'tailored'
-  | 'session';
+  | 'session'
+  /** What the user told us about themselves (ProfileAbout). A résumé says what
+   *  someone did for employers; this says who they are now. */
+  | 'profile';
+
+/**
+ * The person, as they describe themselves.
+ *
+ * Onboarding used to ask for a target role, a target company, and a résumé —
+ * everything a job applicant needs and almost nothing a companion in someone's
+ * daily calls does. These are the questions whose answers actually change how
+ * well it can stand in for them. Every field is optional: a half-filled profile
+ * is far better than a blank one, and the UI asks rather than demands.
+ */
+export interface ProfileAbout {
+  /** What you do. */
+  role: string;
+  /** Where you do it. */
+  org: string;
+  /** City / timezone — so "tomorrow morning" and "end of day" mean something. */
+  location: string;
+  /** How you work and how you like to be communicated with. */
+  workingStyle: string;
+  /** The people you deal with regularly, and who they are to you. */
+  people: string;
+  /** What you are working on right now. */
+  projects: string;
+  /** Anything else someone standing in for you would need. */
+  other: string;
+}
+
+export const EMPTY_PROFILE_ABOUT: ProfileAbout = {
+  role: '',
+  org: '',
+  location: '',
+  workingStyle: '',
+  people: '',
+  projects: '',
+  other: '',
+};
+
+/** Label + prompt per section — one source of truth for the intake UI and for
+ *  the sentence each section is indexed as. */
+export const PROFILE_ABOUT_FIELDS: {
+  key: keyof ProfileAbout;
+  label: string;
+  placeholder: string;
+  /** How the section reads once indexed, so a retrieved chunk is self-contained. */
+  lead: string;
+  rows: number;
+}[] = [
+  {
+    key: 'role',
+    label: 'What do you do?',
+    placeholder: 'e.g. Product manager for the payments platform',
+    lead: 'What they do:',
+    rows: 2,
+  },
+  {
+    key: 'org',
+    label: 'Where?',
+    placeholder: 'e.g. Acme, on the platform team',
+    lead: 'Where they work:',
+    rows: 2,
+  },
+  {
+    key: 'location',
+    label: 'Where are you based?',
+    placeholder: 'e.g. Lisbon (WET). Team is mostly US Eastern.',
+    lead: 'Based in:',
+    rows: 2,
+  },
+  {
+    key: 'projects',
+    label: 'What are you working on right now?',
+    placeholder: 'e.g. Atlas migration — phase 2 starts in September. Renewal season for the top 20 accounts.',
+    lead: 'Currently working on:',
+    rows: 3,
+  },
+  {
+    key: 'people',
+    label: 'Who do you work with?',
+    placeholder: 'e.g. Sarah Chen — my manager. Priya runs the standup. Marco is my counterpart at Acme.',
+    lead: 'People they work with:',
+    rows: 3,
+  },
+  {
+    key: 'workingStyle',
+    label: 'How do you work, and how should it help you?',
+    placeholder: 'e.g. I keep updates short. Never commit to dates in a call. Prefer bullet points over prose.',
+    lead: 'How they work:',
+    rows: 3,
+  },
+  {
+    key: 'other',
+    label: 'Anything else it should know about you?',
+    placeholder: 'Anything someone standing in for you would need and would not guess.',
+    lead: 'Also worth knowing:',
+    rows: 3,
+  },
+];
 export type SessionStatus = 'idle' | 'live' | 'stopped';
 
 // ---- v2 domain vocabulary (see docs/12-ENGINE-PLAN.md) ----
@@ -189,14 +289,16 @@ export interface Profile {
   jdText: string | null;
   parsedResume: ParsedResume | null;
   parsedJd: ParsedJd | null;
+  /** Who they are now (§ ProfileAbout). null on profiles created before it existed. */
+  about: ProfileAbout | null;
   createdAt: number;
   updatedAt: number;
 }
 
 export type ProfileInput = Omit<
   Profile,
-  'id' | 'createdAt' | 'updatedAt' | 'parsedResume' | 'parsedJd'
->;
+  'id' | 'createdAt' | 'updatedAt' | 'parsedResume' | 'parsedJd' | 'about'
+> & { about?: ProfileAbout | null };
 
 export interface ParsedResume {
   skills: string[];
