@@ -246,6 +246,15 @@ fact, each paired with what it would replace), and `memory:history`
 `factKey` retires the current value for that key in the same step, so recall
 only ever sees one truth per fact.
 
+Portability ([14 · Memory](14-MEMORY.md) §5): `memory:export` (save dialog →
+inspectable JSON; returns `{saved, count, filePath}`) and `memory:import`
+(open dialog → merge; returns `{cancelled}` or a summary of
+`imported`/`duplicates`/`blocked`/`superseded`/`reEmbedded`/`unmatchedScopes`).
+Import takes `mode: 'review' | 'restore'` — `review` lands everything pending,
+`restore` preserves the exported statuses for the user's own backup. The
+sensitive filter runs in both, and nothing is ever uploaded: the user picks
+the path and owns the file.
+
 Meeting Copilot additions (Prompt 7): `session:start` now accepts `mode`
 (SessionMode, default `interview`) and `presence`
 (summoned|quiet|balanced|active) for ambient modes; `session:meeting-report`

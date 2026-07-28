@@ -113,6 +113,8 @@ export const IPC = {
     create: 'memory:create', // author a memory by hand (still lands pending)
     conflicts: 'memory:conflicts', // pending candidates that would replace a current fact
     history: 'memory:history', // a fact's revision chain, newest first
+    export: 'memory:export', // write the profile's memory to a JSON file (save dialog)
+    import: 'memory:import', // merge a memory export back in (open dialog)
     review: 'memory:review', // approve (optionally with edits) or reject a candidate
     update: 'memory:update', // edit an item (content/category/importance/scope/expiry)
     archive: 'memory:archive',

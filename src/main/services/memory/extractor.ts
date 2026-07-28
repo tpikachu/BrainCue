@@ -52,8 +52,9 @@ export const extractionSchema = z.object({
 
 /** Normalized for comparison: case, punctuation, and filler collapsed away so
  *  "We ship on May 3rd." and "we ship on may 3rd" are recognised as the same
- *  claim and the second one doesn't create a duplicate row. */
-function normalize(text: string): string {
+ *  claim and the second one doesn't create a duplicate row. Shared with the
+ *  import path, which dedupes against existing memory the same way. */
+export function normalize(text: string): string {
   return text
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')

@@ -1,8 +1,12 @@
 import { z } from 'zod';
+import { dialog } from 'electron';
+import { readFile, writeFile } from 'fs/promises';
 import { IPC } from '@shared/ipc';
 import { handle } from './helpers';
 import { memoriesRepo } from '../db/repositories/memories.repo';
 import { contextPacksRepo } from '../db/repositories/jobs.repo';
+import { getMainWindow } from '../windows/mainWindow';
+import { buildMemoryExport, importMemories } from '../services/memory/portability';
 import { approveMemory, createMemory, updateMemory } from '../services/memory/memoryService';
 
 /** "domain:subject/attribute", lowercase kebab — mirrors the extractor's
@@ -96,6 +100,66 @@ export function registerMemoryIpc(): void {
     memoriesRepo.delete(id); // row + embedding go together
     return { deleted: true as const };
   });
+
+  // ── Portability (docs/14-MEMORY.md §7) ─────────────────────────────────
+  // The file never leaves the machine on its own: the user picks the path,
+  // and where it goes afterwards is their decision. Nothing is uploaded.
+  handle(
+    IPC.memory.export,
+    z.object({ profileId: z.string().min(1) }),
+    async ({ profileId }) => {
+      const payload = buildMemoryExport(profileId);
+      const stamp = new Date(payload.exportedAt).toISOString().slice(0, 10);
+      const safeName = `${(payload.profile?.name ?? 'memory').replace(/[\\/:*?"<>|]/g, '-')} memory ${stamp}.json`;
+      const win = getMainWindow();
+      const options = {
+        defaultPath: safeName,
+        filters: [{ name: 'BrainCue memory', extensions: ['json'] }],
+      };
+      const res = win
+        ? await dialog.showSaveDialog(win, options)
+        : await dialog.showSaveDialog(options);
+      if (res.canceled || !res.filePath) return { saved: false as const, count: 0 };
+      await writeFile(res.filePath, JSON.stringify(payload, null, 2), 'utf8');
+      return { saved: true as const, count: payload.memories.length, filePath: res.filePath };
+    },
+  );
+
+  handle(
+    IPC.memory.import,
+    z.object({
+      profileId: z.string().min(1),
+      // 'restore' preserves exported statuses (your own backup); 'review'
+      // makes everything pending. The sensitive filter runs in both.
+      mode: z.enum(['review', 'restore']).default('review'),
+      filePath: z.string().min(1).optional(),
+    }),
+    async ({ profileId, mode, filePath }) => {
+      let path = filePath;
+      if (!path) {
+        const win = getMainWindow();
+        const options = {
+          properties: ['openFile' as const],
+          filters: [{ name: 'BrainCue memory', extensions: ['json'] }],
+        };
+        const res = win
+          ? await dialog.showOpenDialog(win, options)
+          : await dialog.showOpenDialog(options);
+        if (res.canceled || !res.filePaths[0]) return { cancelled: true as const };
+        path = res.filePaths[0];
+      }
+      const raw = await readFile(path, 'utf8');
+      let payload: unknown;
+      try {
+        payload = JSON.parse(raw);
+      } catch {
+        throw new Error('That file is not valid JSON.');
+      }
+      // `cancelled` is the flag; `imported` inside the summary is a COUNT —
+      // keeping them distinct so neither can shadow the other.
+      return { cancelled: false as const, ...(await importMemories(profileId, payload, mode)) };
+    },
+  );
 
   handle(
     IPC.memory.setPackEnabled,

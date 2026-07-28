@@ -172,7 +172,51 @@ chain. Nothing bypasses the approval gate — imported items land `pending` too.
    FTS entry, and its entity links; deleting the *head* of a supersession
    chain promotes the previous revision rather than orphaning it.
 
-## 5. Scale plan
+## 5. Portability — the memory is the user's to take
+
+Memory becomes the most valuable thing in the app and, until now, the least
+portable: it lived in one SQLite file with no way out. `memory:export` writes a
+profile's memory to a JSON file the user names and places; `memory:import`
+merges one back.
+
+**Plain JSON, deliberately not an encrypted blob.** This file is the most
+sensitive artefact BrainCue produces, which is exactly why it must be
+*inspectable* — the user can open it, read every line, edit it, diff two
+exports, and feed it to something else. An opaque container would hide the one
+thing they most need to verify. The UI states plainly what the file contains;
+where it is then stored (a drive, a backup, a sync folder) is the user's
+decision. **Nothing is uploaded by the app**, in keeping with the local-first
+contract. Optional passphrase encryption is a reasonable future addition, not
+a substitute for legibility.
+
+What an export contains and what it never contains:
+
+| In | Out |
+| --- | --- |
+| Memories that are currently true — approved, pending, and archived | Superseded revisions (historical; their ids mean nothing elsewhere) |
+| Category, importance, confidence, fact key, validity, timestamps | Rejected candidates — the user already said no |
+| Space **titles** (not ids), so scope survives the trip | The API key, settings, documents, transcripts |
+| Embedding vectors + the identity that produced them | Anything the sensitive filter would have blocked (never stored) |
+
+**Import is a merge, never a replace.** Nothing existing is deleted. Rules:
+
+- Every incoming item passes the **sensitive filter** — a hand-edited file is
+  untrusted input regardless of what it claims to be.
+- **Duplicates** (same normalized content, same scope) are skipped, so
+  importing the same file twice is a no-op.
+- **Fact keys still supersede** (§3.1): restoring a newer value retires the
+  one already here, with history intact.
+- An **unknown Space** name imports as profile-global rather than creating a
+  dangling reference — slightly-too-visible is recoverable, a broken foreign
+  key is not.
+- **Vectors are reused only when the embedding identity matches**; otherwise
+  approved rows are re-embedded on import and the count is reported.
+- Two modes: `review` (default — everything lands `pending`, for a file from
+  anywhere) and `restore` (preserves the exported statuses, for the user's own
+  backup, where forcing re-approval of hundreds of items would just teach them
+  to rubber-stamp).
+
+## 6. Scale plan
 
 Stay on brute-force cosine until measured pain, then swap the `VectorStore`
 backend — the interface already anticipates this. Trigger points:
@@ -186,14 +230,15 @@ backend — the interface already anticipates this. Trigger points:
 Benchmarks land as a test (`recall.bench.test.ts`) with synthetic corpora at
 1k / 10k / 50k rows, so the trigger points are observed rather than guessed.
 
-## 6. Delivery
+## 7. Delivery
 
 | Stage | Content |
 | --- | --- |
 | **M1 · Truthfulness** ✅ | Additive migration (§3.1), supersession + conflict review, consolidation stage 2, `memory:create` / `memory:conflicts` / `memory:history`. The twin cannot be built before this — it is the "don't state a stale fact" guarantee. |
 | **M2 · Recall quality** | FTS5 index + hybrid union, recency/entity signals, benchmark test |
 | **M3 · Entities** | `entities` + `memory_entities`, alias resolution with approval, entity-browse UI |
-| **M4 · Authoring** | Import (paste/drop a doc), bulk approve, merge/split, history view |
+| **M4 · Authoring** | Ingest a document as "things to know about me", bulk approve, merge/split, history view |
+| **M6 · Portability** ✅ | Export/import a profile's memory as inspectable JSON (§5). Shipped alongside M1 — a store the user cannot get their data out of is not one they should trust with more of it. |
 | **M5 · Scale** | Worker-side scoring, `sqlite-vec` behind the interface if the benchmark says so |
 
 M1 is the dependency for [15 · Delegate](15-DELEGATE.md); M2–M4 improve it but

@@ -69,6 +69,7 @@ import { memoriesRepo } from '../../db/repositories/memories.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
 import { extractMemoryCandidates, extractionSchema } from './extractor';
 import { approveMemory, createMemory, updateMemory } from './memoryService';
+import { buildMemoryExport, importMemories, inspectMemoryExport } from './portability';
 import { recallMemories } from './recall';
 
 let seq = 0;
@@ -521,6 +522,139 @@ describe('consolidation + authoring', () => {
       ],
     });
     expect(parsed.success).toBe(false);
+  });
+
+  it('portability: export → import restores memory into a clean profile', async () => {
+    const source = seedProfile();
+    seedApproved(source, 'Prefers concise bullet answers.');
+    seedApproved(source, 'The launch deadline is March 3.', { factKey: KEY });
+    memoriesRepo.insertCandidate({
+      profileId: source,
+      packId: null,
+      category: 'fact',
+      content: 'A candidate still awaiting review.',
+      confidence: 0.8,
+      importance: 0.5,
+      sourceRefs: [],
+    });
+
+    const file = buildMemoryExport(source);
+    expect(file.memories).toHaveLength(3); // approved + pending, nothing rejected
+    expect(inspectMemoryExport(file)).toMatchObject({ valid: true, count: 3, vectorsUsable: true });
+
+    const target = seedProfile();
+    const before = h.embedCalls;
+    const summary = await importMemories(target, file, 'restore');
+
+    expect(summary.imported).toBe(3);
+    expect(summary.blocked).toBe(0);
+    // Vectors travelled with the file and the embedding identity matches, so
+    // restoring cost no embedding calls at all.
+    expect(summary.reEmbedded).toBe(0);
+    expect(h.embedCalls).toBe(before);
+    // The approved ones are immediately recallable in the new profile.
+    const out = await recallMemories(target, 'launch deadline', null, T0);
+    expect(out[0].content).toContain('March 3');
+  });
+
+  it('portability: import is idempotent — the same file twice adds nothing', async () => {
+    const source = seedProfile();
+    seedApproved(source, 'Prefers concise bullet answers.');
+    const file = buildMemoryExport(source);
+
+    const target = seedProfile();
+    expect((await importMemories(target, file, 'restore')).imported).toBe(1);
+    const second = await importMemories(target, file, 'restore');
+    expect(second.imported).toBe(0);
+    expect(second.duplicates).toBe(1);
+    expect(memoriesRepo.list({ profileId: target })).toHaveLength(1);
+  });
+
+  it('portability: review mode lands everything pending; restore preserves approval', async () => {
+    const source = seedProfile();
+    seedApproved(source, 'Prefers concise bullet answers.');
+    const file = buildMemoryExport(source);
+
+    const reviewed = seedProfile();
+    await importMemories(reviewed, file, 'review');
+    expect(memoriesRepo.list({ profileId: reviewed, status: 'approved' })).toHaveLength(0);
+    expect(memoriesRepo.list({ profileId: reviewed, status: 'pending' })).toHaveLength(1);
+
+    const restored = seedProfile();
+    await importMemories(restored, file, 'restore');
+    expect(memoriesRepo.list({ profileId: restored, status: 'approved' })).toHaveLength(1);
+  });
+
+  it('portability: the sensitive filter blocks a hand-edited file in BOTH modes', async () => {
+    const target = seedProfile();
+    const hostile = {
+      format: 'braincue.memory' as const,
+      version: 1,
+      exportedAt: T0,
+      embedding: null,
+      memories: [
+        { content: 'My password is hunter2 for the staging box.', category: 'fact' as const },
+        { content: 'A perfectly ordinary preference about meetings.', category: 'preference' as const },
+      ],
+    };
+    for (const mode of ['review', 'restore'] as const) {
+      const p = seedProfile();
+      const s = await importMemories(p, hostile, mode);
+      expect(s.blocked).toBe(1);
+      expect(s.imported).toBe(1);
+    }
+    expect(memoriesRepo.list({ profileId: target })).toHaveLength(0); // untouched
+  });
+
+  it('portability: rejects a file that is not a BrainCue export', async () => {
+    const pid = seedProfile();
+    await expect(importMemories(pid, { hello: 'world' })).rejects.toThrow();
+    expect(inspectMemoryExport({ hello: 'world' }).valid).toBe(false);
+  });
+
+  it('portability: an unknown Space becomes profile-global, never a dangling ref', async () => {
+    const pid = seedProfile();
+    const summary = await importMemories(
+      pid,
+      {
+        format: 'braincue.memory' as const,
+        version: 1,
+        exportedAt: T0,
+        embedding: null,
+        memories: [
+          { content: 'Scoped to a Space that does not exist here.', category: 'fact' as const, scope: 'Ghost Space' },
+        ],
+      },
+      'review',
+    );
+    expect(summary.imported).toBe(1);
+    expect(summary.unmatchedScopes).toEqual(['Ghost Space']);
+    expect(memoriesRepo.list({ profileId: pid })[0].packId).toBeNull();
+  });
+
+  it('portability: restoring a fact supersedes the value already here', async () => {
+    const source = seedProfile();
+    seedApproved(source, 'The launch deadline moved to May 9.', { factKey: KEY });
+    const file = buildMemoryExport(source);
+
+    const target = seedProfile();
+    const stale = seedApproved(target, 'The launch deadline is March 3.', { factKey: KEY });
+    const summary = await importMemories(target, file, 'restore');
+
+    expect(summary.superseded).toBe(1);
+    expect(memoriesRepo.get(stale)!.supersededBy).not.toBeNull();
+    const out = await recallMemories(target, 'launch deadline', null, T0);
+    expect(out).toHaveLength(1);
+    expect(out[0].content).toContain('May 9');
+  });
+
+  it('portability: an export never carries credentials or settings', () => {
+    const pid = seedProfile();
+    seedApproved(pid, 'Prefers concise bullet answers.');
+    const serialized = JSON.stringify(buildMemoryExport(pid));
+    for (const forbidden of ['apiKey', 'api_key', 'sk-', 'settings', 'embedProvider']) {
+      expect(serialized).not.toContain(forbidden);
+    }
   });
 
   it('authored memories land pending and still pass the sensitive gate', () => {

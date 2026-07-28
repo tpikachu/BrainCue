@@ -268,6 +268,25 @@ const api = {
       invoke<MemoryConflict[]>(IPC.memory.conflicts, { profileId }),
     history: (profileId: string, factKey: string) =>
       invoke<MemoryItem[]>(IPC.memory.history, { profileId, factKey }),
+    /** Save this profile's memory to a JSON file the user picks. Nothing is
+     *  uploaded — where the file goes next is their decision. */
+    export: (profileId: string) =>
+      invoke<{ saved: boolean; count: number; filePath?: string }>(IPC.memory.export, {
+        profileId,
+      }),
+    /** Merge a memory export back in. 'review' (default) makes everything
+     *  pending; 'restore' preserves approved status for your own backup. */
+    import: (profileId: string, mode: 'review' | 'restore' = 'review') =>
+      invoke<{
+        /** true when the user dismissed the file picker — no counts follow. */
+        cancelled: boolean;
+        imported?: number;
+        duplicates?: number;
+        blocked?: number;
+        superseded?: number;
+        reEmbedded?: number;
+        unmatchedScopes?: string[];
+      }>(IPC.memory.import, { profileId, mode }),
     review: (
       id: string,
       action: 'approve' | 'reject',
