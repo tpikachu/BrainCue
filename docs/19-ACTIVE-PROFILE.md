@@ -68,12 +68,45 @@ Not decoration: it is the visible proof of which profile the whole page is
 scoped to. A dashboard scoped by an invisible setting is a dashboard you cannot
 trust.
 
-## 5. What did NOT change
+## 5. Two kinds of nav
+
+Once the profile scopes the app, the sidebar's entries stop being one list:
+
+| Group | Entries | What it is |
+| --- | --- | --- |
+| *(labelled with the active profile's name)* | Home, Library, Sessions, Insights | views of ONE person; every one changes when the switcher changes |
+| **App** | Profiles, Settings | about the app, or about the set of people; does not move when you switch |
+
+Running them together made the switcher look like it scoped Settings too, and
+hid that the four above it are all views of whoever is selected. The first
+group's label is the profile's own **name** — the plainest available statement
+of what changes when you switch.
+
+## 6. The Library stops being two things
+
+`Library › Profile` listed every profile, created them, and deleted them —
+sitting beside three tabs that each showed exactly *one* profile's things. So
+the Library answered both "what does BrainCue know about you?" and "which
+you?". Those are different questions and they now have different homes:
+
+- **which you** → the sidebar switcher;
+- **the set of people** → `/profiles`, a global page in the App group;
+- **who you are** → the profile editor at `/profiles/:id`;
+- **what it knows about the active one** → the Library (Spaces, Documents,
+  Memory), default tab Spaces.
+
+### Sample data has to survive the gate
+
+"Load sample data" lived only on that tab. With the first-run modal covering
+the whole app until a profile exists, the one page offering it sat behind the
+very gate you could not pass — so a fresh install could no longer try the app
+with sample data at all. The modal offers it directly.
+
+## 7. What did NOT change
 
 - **Profiles remain the unit of ownership.** Spaces, sessions, chunks, and
   memories were always keyed by `profile_id`; this changes who is selected, not
   what belongs to whom.
-- **The Library's Profile tab** is still where profiles are created in bulk,
-  renamed, deleted, and seeded with sample data. It lists them; the sidebar
-  chooses among them.
+- **Settings stays global.** It always was; it just no longer sits in a list
+  that implies otherwise.
 - **No migration.** A setting, not a column.

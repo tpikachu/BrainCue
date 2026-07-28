@@ -192,8 +192,16 @@ not a sidebar item).
 > activity. See [18-ACTIVITIES.md](./18-ACTIVITIES.md) — where this file says
 > "mode card" or "mode launcher", read "activity".
 
-> **Also superseded (2026-07-28): the profile is picked in the sidebar.**
+> **Also superseded (2026-07-28): the profile is picked in the sidebar, and
+> the sidebar is two groups.**
 > Seven surfaces each carried their own profile `<Select>` and defaulted
 > independently, so "whose dashboard is this?" had seven answers free to
 > disagree. There is one switcher now, above the nav, and every page under it
-> reads the active profile. See [19-ACTIVE-PROFILE.md](./19-ACTIVE-PROFILE.md).
+> reads the active profile.
+>
+> That split the five "durable sections" this document describes. Home,
+> Library, Sessions, and Insights are views of ONE profile and sit under a group
+> labelled with that profile's name; **Profiles** (promoted out of the Library,
+> where it had been listing every profile beside three tabs showing exactly one)
+> and **Settings** are global and sit below a divider under "App". See
+> [19-ACTIVE-PROFILE.md](./19-ACTIVE-PROFILE.md).

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { api } from '../lib/api';
 import { useProfileStore } from '../store/useProfileStore';
 import { Button, Field, Modal, TextInput } from '../components/ui';
 
@@ -24,11 +25,31 @@ export function NewProfileModal(props: {
   dismissable?: boolean;
   onCreated?: (id: string) => void;
 }) {
-  const create = useProfileStore((s) => s.create);
+  const { create, load } = useProfileStore();
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
+  const [sampling, setSampling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dismissable = props.dismissable !== false;
+
+  /** On a fresh install this modal covers the whole app, so without an escape
+   *  hatch here "Load sample data" is unreachable — the only page offering it
+   *  is behind the very gate you cannot pass. */
+  const loadSamples = async () => {
+    setSampling(true);
+    setError(null);
+    try {
+      const res = (await api.data.loadSamples()) as { profileId: string };
+      await api.settings.set({ activeProfileId: res.profileId });
+      await load();
+      props.onCreated?.(res.profileId);
+      props.onClose();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSampling(false);
+    }
+  };
 
   useEffect(() => {
     if (props.open) {
@@ -93,15 +114,26 @@ export function NewProfileModal(props: {
           </p>
         )}
 
-        <div className="flex justify-end gap-2">
-          {dismissable && (
+        <div className="flex items-center justify-end gap-2">
+          {dismissable ? (
             <Button variant="ghost" onClick={props.onClose}>
               Cancel
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              className="mr-auto"
+              loading={sampling}
+              disabled={saving}
+              onClick={() => void loadSamples()}
+              title="Create a sample profile with a résumé and a few Spaces, to try the app"
+            >
+              Try sample data
             </Button>
           )}
           <Button
             variant="primary"
-            disabled={!name.trim()}
+            disabled={!name.trim() || sampling}
             loading={saving}
             onClick={() => void submit()}
           >

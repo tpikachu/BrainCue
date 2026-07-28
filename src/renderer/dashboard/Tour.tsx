@@ -22,18 +22,23 @@ export const TOUR_STEPS: TourStep[] = [
     body: 'Everything runs on your own key. Paste it in Settings — it’s encrypted in your OS keychain and never leaves the main process except to call OpenAI. Defaults use cost-effective models; you can override any model per task here.',
   },
   {
+    target: 'profile-switcher',
+    title: '2 · Pick who this is for',
+    body: 'BrainCue works for one person at a time. The switcher scopes everything under it — Home, Library, Sessions, Insights all show this profile. Profiles and Settings sit below the line because they are not about any one person.',
+  },
+  {
     target: 'nav-library',
-    title: '2 · Build your Library',
-    body: 'The Library holds what BrainCue should know: your profile (name, role, résumé), your Spaces — one per context, like a job with its JD and company research — and Memory. Everything is parsed and indexed locally, so contributions are grounded in YOUR real world instead of invented.',
+    title: '3 · Build the Library',
+    body: 'The Library holds what BrainCue should know about the active profile: its Spaces — one per context, like a meeting with its agenda or a job with its JD — its documents, and its Memory. Everything is parsed and indexed locally, so contributions are grounded in YOUR real world instead of invented.',
   },
   {
     target: 'nav-home',
-    title: '3 · Start from Home',
-    body: 'Home is the launcher. “Start listening” opens one shared start flow for every mode: pick the mode, the Space that grounds it, and what to listen to — then see exactly what gets captured and what leaves your machine, before anything starts.',
+    title: '4 · Start from Home',
+    body: 'Home is the launcher. “Start listening” opens one shared start flow for every conversation: say what the call is, pick the Space that grounds it and what to listen to — then see exactly what gets captured and what leaves your machine, before anything starts.',
   },
   {
     target: 'primary-actions',
-    title: '4 · Four ways in',
+    title: '5 · Four ways in',
     body: 'Start listening for a live session · Talk to BrainCue to ask by voice · Share screen to capture a region and solve it · Add context to create a Space. Nothing captures anything until you explicitly start it.',
   },
   {
