@@ -627,7 +627,7 @@ export interface AppSettings {
   hideTaskbarIcon: boolean; // keep the app off the taskbar (stealth)
   dataConsentAck: boolean;
   /** Global memory consent — OFF by default: no extraction, no recall until
-   *  the user explicitly enables it (Library › Memory). */
+   *  the user explicitly enables it (the Memory section). */
   memoryEnabled: boolean;
   /** Write a short archive of each finished conversation and let later ones
    *  retrieve it (docs/16-CONTINUITY.md). ON by default, unlike memory: this

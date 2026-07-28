@@ -1,11 +1,9 @@
 import { useSearchParams } from 'react-router-dom';
-import { FLAGS } from '@shared/flags';
 import { Page } from '../../components/ui';
 import { SpacesTab } from '../library/SpacesTab';
 import { DocumentsTab } from '../library/DocumentsTab';
-import { MemoryTab } from '../library/MemoryTab';
 
-type TabId = 'spaces' | 'documents' | 'memory';
+type TabId = 'spaces' | 'documents';
 
 /**
  * The Library: everything BrainCue knows about the ACTIVE profile — its Spaces
@@ -19,16 +17,19 @@ type TabId = 'spaces' | 'documents' | 'memory';
  * other of which is the profile editor's. Editing who you are lives at
  * `/profiles/:id`, reached from the switcher.
  *
+ * Memory left too, for a different reason: the Library is the knowledge base
+ * you assemble deliberately, while Memory is what BrainCue proposes to keep
+ * from your conversations and has a queue waiting on you. It has its own
+ * section now (docs/16-CONTINUITY.md §12).
+ *
  * The active tab lives in the URL (?tab=documents) so Home and Spaces rows can
- * deep-link; Memory appears only when it ships (FLAGS.memory) rather than
- * sitting here dead.
+ * deep-link.
  */
 export default function LibraryPage() {
   const [params, setParams] = useSearchParams();
   const tabs: { id: TabId; label: string }[] = [
     { id: 'spaces', label: 'Spaces' },
     { id: 'documents', label: 'Documents' },
-    ...(FLAGS.memory ? [{ id: 'memory' as TabId, label: 'Memory' }] : []),
   ];
   const raw = params.get('tab');
   const tab: TabId = tabs.some((t) => t.id === raw) ? (raw as TabId) : 'spaces';
@@ -58,7 +59,6 @@ export default function LibraryPage() {
 
       {tab === 'spaces' && <SpacesTab />}
       {tab === 'documents' && <DocumentsTab />}
-      {tab === 'memory' && <MemoryTab />}
     </Page>
   );
 }

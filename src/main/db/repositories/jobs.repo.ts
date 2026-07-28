@@ -53,7 +53,7 @@ export const contextPacksRepo = {
     return r ? toPack(r) : null;
   },
 
-  /** Per-Space memory opt-out (Library › Memory). */
+  /** Per-Space memory opt-out (the Memory section). */
   setMemoryEnabled(id: string, enabled: boolean): void {
     db()
       .update(schema.contextPacks)

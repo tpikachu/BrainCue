@@ -269,8 +269,12 @@ const api = {
     ) => invoke<Contribution>(IPC.contributions.update, { id, ...patch }),
   },
   memory: {
-    list: (profileId: string, opts: { status?: string; query?: string } = {}) =>
-      invoke<MemoryItem[]>(IPC.memory.list, { profileId, ...opts }),
+    /** `packId`: a string filters to that Space, null to what is remembered
+     *  everywhere, absent to every scope. */
+    list: (
+      profileId: string,
+      opts: { status?: string; query?: string; packId?: string | null } = {},
+    ) => invoke<MemoryItem[]>(IPC.memory.list, { profileId, ...opts }),
     review: (
       id: string,
       action: 'approve' | 'reject',

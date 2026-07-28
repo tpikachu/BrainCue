@@ -6,6 +6,7 @@ import { useTourStore } from '../store/useTourStore';
 import { Tour, TOUR_STEPS } from './Tour';
 import HomePage from './pages/HomePage';
 import LibraryPage from './pages/LibraryPage';
+import MemoryPage from './pages/MemoryPage';
 import ProfilesPage from './pages/ProfilesPage';
 import ProfileEditorPage from './pages/ProfileEditorPage';
 import InterviewPage from './pages/InterviewPage';
@@ -32,6 +33,7 @@ import {
   LibraryIcon,
   ReportIcon,
   SettingsIcon,
+  SparklesIcon,
   UserIcon,
 } from '../components/icons';
 import { Logo } from '../components/Logo';
@@ -58,6 +60,12 @@ const DEV = import.meta.env.DEV;
 const PROFILE_NAV = [
   { to: '/home', label: 'Home', Icon: HomeIcon, tour: 'nav-home' },
   { to: '/library', label: 'Library', Icon: LibraryIcon, tour: 'nav-library' },
+  // Memory is its own section, not a Library tab: the Library is the knowledge
+  // base you assemble, Memory is what BrainCue proposes to keep and is waiting
+  // on your decision. Flag-gated because the whole surface can be unshipped.
+  ...(FLAGS.memory
+    ? [{ to: '/memory', label: 'Memory', Icon: SparklesIcon, tour: 'nav-memory' }]
+    : []),
   { to: '/sessions', label: 'Sessions', Icon: ClockIcon, tour: 'nav-sessions' },
   { to: '/reports', label: 'Insights', Icon: ReportIcon, tour: 'nav-reports' },
 ];
@@ -183,6 +191,10 @@ export default function App() {
             <Route path="/" element={<Navigate to="/home" replace />} />
             <Route path="/home" element={<HomePage />} />
             <Route path="/library" element={<LibraryPage />} />
+            <Route
+              path="/memory"
+              element={FLAGS.memory ? <MemoryPage /> : <Navigate to="/library" replace />}
+            />
             <Route path="/profiles" element={<ProfilesPage />} />
             <Route path="/profiles/:id" element={<ProfileEditorPage />} />
             <Route path="/interview" element={<InterviewPage />} />

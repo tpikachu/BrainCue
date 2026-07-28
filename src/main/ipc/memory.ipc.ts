@@ -16,7 +16,7 @@ const zCategory = z.enum([
   'custom',
 ]);
 
-/** Library › Memory review surface. Every transition here is an explicit user
+/** The Memory section — a review-first surface. Every transition here is an explicit user
  *  action — extraction only ever produces `pending` rows. */
 export function registerMemoryIpc(): void {
   handle(
@@ -25,8 +25,12 @@ export function registerMemoryIpc(): void {
       profileId: z.string().min(1),
       status: z.enum(['pending', 'approved', 'rejected', 'archived']).optional(),
       query: z.string().optional(),
+      // Filter to ONE Space (or, with null, to what is remembered everywhere).
+      // Absent means every scope — the memory page's default view.
+      packId: z.string().min(1).nullable().optional(),
     }),
-    ({ profileId, status, query }) => memoriesRepo.list({ profileId, status, query }),
+    ({ profileId, status, query, packId }) =>
+      memoriesRepo.list({ profileId, status, query, packId }),
   );
 
   handle(

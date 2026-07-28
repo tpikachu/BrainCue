@@ -70,8 +70,9 @@ export const TOUR_STEPS: TourStep[] = [
     body: 'Everything lands here: the live transcript, streamed cards and answers, and the controls to retune them. It’s always-on-top and excluded from screen sharing and recording — there for you, invisible to everyone else. Toggle it from the tray or a hotkey.',
   },
   {
+    target: 'nav-memory',
     title: 'Memory — off until you say so',
-    body: 'BrainCue can remember things across sessions, but nothing is remembered silently: memories are proposed, and only ones you approve in the Library are ever recalled. You can correct or forget any of them, right from the card that used it.',
+    body: 'BrainCue can remember things across sessions, but nothing is remembered silently: memories are proposed after a session and only the ones you approve here are ever recalled. Each belongs to a Space or to you generally, so you can see exactly what each context knows — and correct or forget any of them, right from the card that used it.',
   },
   {
     target: 'nav-sessions',

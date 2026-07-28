@@ -500,7 +500,7 @@ export default function Overlay() {
       {live && <AskBar />}
 
       {/* In-place memory correction (a memory card's ✎). Saves through the
-          same review-guarded update path as Library › Memory. */}
+          same review-guarded update path as the Memory section. */}
       {memoryEdit && (
         <div data-ct-interactive className="mt-2 shrink-0 rounded-md border border-violet-500/40 bg-neutral-950 p-2" style={noDrag}>
           <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-violet-300">

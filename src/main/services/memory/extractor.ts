@@ -14,7 +14,7 @@ import { checkSensitive } from './sensitiveFilter';
  *  - anything the sensitive filter flags is REJECTED before persistence —
  *    secrets/payment/health/sensitive-personal content is never stored;
  *  - everything lands as status 'pending': nothing is remembered until the
- *    user approves it in Library › Memory.
+ *    user approves it in the Memory section.
  */
 
 export const MEMORY_CONFIDENCE_FLOOR = 0.6;

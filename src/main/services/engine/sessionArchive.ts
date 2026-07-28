@@ -9,6 +9,8 @@ import { assertEmbeddingCompatibility } from '../rag/embeddingIdentity';
 import { chunkText } from '../rag/chunker';
 import { vectorToBuffer } from '../rag/vectorMath';
 import { checkSensitive } from '../memory/sensitiveFilter';
+import { archiveFormat } from '@shared/archiveFormat';
+import type { ArchiveSection } from '@shared/archiveFormat';
 
 /**
  * Session archive — the thing that makes BrainCue continuous
@@ -45,15 +47,20 @@ const ARCHIVE_CHUNK_CHARS = 700;
  *  archive can be quoted back, few enough that it stays a summary. */
 const MAX_QUOTES = 6;
 
+/**
+ * ONE envelope for every activity; the per-activity part is `sections`
+ * (shared/archiveFormat.ts). A dynamically-built zod object per activity would
+ * be stricter on paper and worse in practice — the model still returns whatever
+ * it returns, so the real validation is `takeSections` below, which keeps only
+ * the keys THIS activity declared and caps each one. That way an unexpected key
+ * is dropped rather than failing the whole archive, and the order in the
+ * rendered text is ours rather than the model's.
+ */
 export const archiveSchema = z.object({
   /** One line naming what this conversation was, for retrieval to match on. */
   topic: z.string().min(3).max(160),
   /** 1-3 sentences of what actually happened. */
   summary: z.string().min(10).max(800),
-  decisions: z.array(z.string().min(3).max(300)).max(8).default([]),
-  /** "Owner — what they committed to", owner omitted when unclear. */
-  actionItems: z.array(z.string().min(3).max(300)).max(10).default([]),
-  openQuestions: z.array(z.string().min(3).max(300)).max(6).default([]),
   /** People/companies/projects the conversation was about. */
   participants: z.array(z.string().min(2).max(80)).max(10).default([]),
   /**
@@ -63,23 +70,53 @@ export const archiveSchema = z.object({
    * put in the wrong person's mouth.
    */
   keyQuotes: z.array(z.string().min(8).max(400)).max(MAX_QUOTES).default([]),
+  /** The activity's own sections, keyed by ArchiveSection.key. */
+  sections: z.record(z.array(z.string().min(3).max(300))).default({}),
 });
 
 export type SessionArchive = z.infer<typeof archiveSchema>;
 
-const SYSTEM = `You write the archive entry for a conversation that just ended, so that WEEKS LATER someone can retrieve it and know what happened without re-reading the transcript.
+/**
+ * Keep only what this activity's format declares, in the order it declares it,
+ * capped as it declares. The model is told the keys; this is what makes that
+ * instruction binding — an interview archive cannot grow an "Action items"
+ * section just because the summariser is used to writing one.
+ */
+export function takeSections(
+  format: ArchiveSection[],
+  raw: Record<string, string[]>,
+): { section: ArchiveSection; items: string[] }[] {
+  const out: { section: ArchiveSection; items: string[] }[] = [];
+  for (const section of format) {
+    const items = (raw[section.key] ?? [])
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .slice(0, section.max);
+    if (items.length) out.push({ section, items });
+  }
+  return out;
+}
+
+/** The summariser prompt for one activity. Built from the format so the keys it
+ *  is asked for and the keys we keep can never drift apart. */
+export function buildSystem(format: ArchiveSection[]): string {
+  const keys = format.map((f) => `"${f.key}": string[]`).join(', ');
+  const guidance = format.map((f) => `  - "${f.key}": ${f.guidance}.`).join('\n');
+  return `You write the archive entry for a conversation that just ended, so that WEEKS LATER someone can retrieve it and know what happened without re-reading the transcript.
 
 Return STRICT JSON:
-{"topic": string, "summary": string, "decisions": string[], "actionItems": string[], "openQuestions": string[], "participants": string[]}
+{"topic": string, "summary": string, "participants": string[], "keyQuotes": string[], "sections": {${keys}}}
 
 RULES:
 - "topic" names the conversation the way the user would search for it later ("Acme renewal pricing", "Tuesday standup — Atlas migration"). Not "Meeting" or "Discussion".
 - "summary" is 1-3 sentences of what actually happened. Write it self-contained: name the people, projects, and numbers rather than saying "they" or "the client".
-- "decisions" are things that were SETTLED. "actionItems" are commitments someone made — lead with the owner when the transcript names one ("Sarah Chen — send the revised quote by Friday"). "openQuestions" are things raised and left unresolved.
-- Empty arrays are a correct answer. Do not manufacture decisions or action items that were not made; an archive that invents commitments is worse than no archive.
-- NEVER include secrets, credentials, payment data, government IDs, health details, or sensitive personal attributes — not even paraphrased.
 - "participants" are the named people, companies, projects, or products the conversation was about. Omit generic references ("the client", "our team").
-- "keyQuotes" are up to 6 lines COPIED CHARACTER-FOR-CHARACTER from the transcript — the sentences that carry the commitment, the number, the decision, or the objection. Do not paraphrase, correct, translate, merge, or trim them; do not include the speaker label. A line that is not present verbatim in the transcript will be discarded. Prefer few and exact over many and approximate.`;
+- "sections" has EXACTLY these keys and no others:
+${guidance}
+- Empty arrays are a correct answer. Do not manufacture entries that were not in the conversation; an archive that invents commitments is worse than no archive.
+- NEVER include secrets, credentials, payment data, government IDs, health details, or sensitive personal attributes — not even paraphrased.
+- "keyQuotes" are up to ${MAX_QUOTES} lines COPIED CHARACTER-FOR-CHARACTER from the transcript — the sentences that carry the commitment, the number, the decision, or the objection. Do not paraphrase, correct, translate, merge, or trim them; do not include the speaker label. A line that is not present verbatim in the transcript will be discarded. Prefer few and exact over many and approximate.`;
+}
 
 const norm = (t: string): string => t.toLowerCase().replace(/\s+/g, ' ').trim();
 
@@ -137,14 +174,15 @@ export function attributeQuotes(
 export function renderArchive(
   a: SessionArchive,
   when: number,
-  quotes: AttributedQuote[] = [],
+  opts: { format?: ArchiveSection[]; quotes?: AttributedQuote[] } = {},
 ): string {
+  const format = opts.format ?? archiveFormat(null);
   const date = new Date(when).toISOString().slice(0, 10);
   const lines = [`Conversation on ${date} — ${a.topic}.`, a.summary];
   if (a.participants.length) lines.push(`Who: ${a.participants.join(', ')}.`);
-  if (a.decisions.length) lines.push(`Decided: ${a.decisions.join('; ')}.`);
-  if (a.actionItems.length) lines.push(`Action items: ${a.actionItems.join('; ')}.`);
-  if (a.openQuestions.length) lines.push(`Still open: ${a.openQuestions.join('; ')}.`);
+  for (const { section, items } of takeSections(format, a.sections))
+    lines.push(`${section.label}: ${items.join('; ')}.`);
+  const quotes = opts.quotes ?? [];
   if (quotes.length)
     lines.push(['In their own words:', ...quotes.map((q) => `${q.speaker}: “${q.text}”`)].join('\n'));
   return lines.join('\n\n');
@@ -173,10 +211,8 @@ export async function archiveSession(sessionId: string): Promise<number> {
     if (session.mode === 'practice' || session.kind === 'mock' || session.kind === 'sparring') {
       return 0;
     }
-    if (session.packId) {
-      const pack = contextPacksRepo.get(session.packId);
-      if (pack && !pack.memoryEnabled) return 0; // the Space opted out of remembering
-    }
+    const pack = session.packId ? contextPacksRepo.get(session.packId) : null;
+    if (pack && !pack.memoryEnabled) return 0; // the Space opted out of remembering
 
     const turns = db()
       .select()
@@ -191,9 +227,12 @@ export async function archiveSession(sessionId: string): Promise<number> {
     const transcript =
       full.length > MAX_TRANSCRIPT_CHARS ? full.slice(-MAX_TRANSCRIPT_CHARS) : full;
 
+    // The activity decides what is worth carrying forward. Fall back to the
+    // Space's kind for v1 rows that predate `sessions.activity`.
+    const format = archiveFormat(session.activity ?? pack?.kind);
     const raw = await providerFor('chat').json<unknown>({
       task: 'parsing',
-      system: SYSTEM,
+      system: buildSystem(format),
       user: `Transcript:\n${transcript}`,
       maxOutputTokens: 900,
     });
@@ -201,7 +240,10 @@ export async function archiveSession(sessionId: string): Promise<number> {
     if (!parsed.success) return 0; // unusable shape → archive nothing
 
     const quotes = attributeQuotes(parsed.data.keyQuotes, turns);
-    const text = renderArchive(parsed.data, session.endedAt ?? session.createdAt, quotes);
+    const text = renderArchive(parsed.data, session.endedAt ?? session.createdAt, {
+      format,
+      quotes,
+    });
     // The privacy gate applies here exactly as it does to memory: a summary can
     // repeat a credential someone read aloud, and an archive is retrievable.
     if (checkSensitive(text).sensitive) return 0;

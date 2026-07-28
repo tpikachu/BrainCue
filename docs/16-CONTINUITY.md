@@ -235,8 +235,62 @@ Two consequences:
   both attached to the old Space. `null` files it out of every Space; omitting
   it leaves the session where it ran.
 
-Saved memory is grouped by Space in Library › Memory for the same reason. A
+Saved memory is grouped by Space in the Memory section for the same reason. A
 flat list said nothing about scope, and reading them interleaved you cannot
 tell which of your Spaces actually knows something — the question that page
 exists to answer. Scope is editable there too: where a memory should be
 recalled is a judgement people usually make only after seeing it written down.
+
+## 12 · One format per activity (2026-07-28)
+
+A Space accumulates. Its documents are where it starts; every session kept in
+it adds an archive, so the tenth standup is grounded in the previous nine.
+
+That only works if the entries are **comparable**. A retrieval hit is useful
+when "Decided:" means the same thing in every entry for that Space, and useless
+when each entry is shaped however the summariser felt that day. So the archive
+format is standardized — and standardized **per activity**
+(`shared/archiveFormat.ts`), because what is worth carrying forward genuinely
+differs:
+
+| Activity | Sections beyond topic / summary / who / quotes |
+| --- | --- |
+| meeting, custom | Decided · Action items · Still open |
+| project | + Changed since last time |
+| **job** | They asked · You said · They emphasised · Next steps |
+| **subject** | Covered · Did not land · Still unresolved · To review |
+| personal | Decided · Action items · Still open · Dates and amounts |
+| game | What happened · Chose · Unfinished |
+| solo | Worked out · To do · Still open |
+
+An interview leaves behind which questions were asked and what you claimed;
+"action items" barely occurs. A study session leaves behind what was covered and
+what did not land. Forcing one shape on all of them either invents decisions in
+a tutorial or throws away the questions from an interview.
+
+### How it stays honest
+
+- **The prompt is generated from the format**, so the keys the summariser is
+  asked for and the keys we keep cannot drift apart. The failure mode of a
+  hand-written prompt here is silent: sections that are always empty.
+- **`takeSections` is the real validator.** One static zod envelope accepts
+  `sections` as a record; the activity's format then decides which keys survive,
+  in which order, capped at which count. An unexpected key is dropped rather
+  than failing the whole archive, and an interview cannot grow an "Action items"
+  section because the model is in the habit of writing one.
+- **The activity comes off the SESSION** (`sessions.activity`), falling back to
+  the Space's kind for rows that predate the column.
+
+No migration: an archive is text chunks, and the old ones stay readable.
+
+## 13 · Memory is its own section
+
+The Library is the knowledge base you assemble deliberately — documents you
+chose to give it, Spaces you set up. Memory is what BrainCue *proposes* to keep
+from your conversations, and every item in it is waiting on a decision you have
+not made. Filing the one surface with a queue behind a tab in the place you go
+to add documents buried it.
+
+It is a top-level section now, in the profile-scoped nav group, filterable by
+Space — because a Space's memory is a separate body of knowledge from another's,
+recalled in that Space's conversations and nowhere else.

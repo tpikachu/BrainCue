@@ -205,7 +205,7 @@ Known keys (see `SETTINGS_KEYS` in `settings.repo.ts`):
 - `hide_taskbar_icon` — `'1'`/`'0'` (tray-only mode).
 - `data_consent_ack` — `'1'` once user acknowledges the compliance reminder.
 - `memory_enabled` — `'1'`/`'0'` global memory consent (absent = off; no
-  extraction or recall until the user enables it in Library › Memory).
+  extraction or recall until the user enables it in the Memory section).
 - `voice_prefs` — json VoicePrefs (TTS voice, hard mute, output device,
   quick-ask persistence + default Space). Quick asks (summons with no session
   live) are EPHEMERAL unless `saveQuickAsks` is on — then they persist as

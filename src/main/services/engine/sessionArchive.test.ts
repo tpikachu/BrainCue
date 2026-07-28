@@ -66,7 +66,15 @@ import { createTestDb } from '../../test/dbHarness';
 import { sessionsRepo } from '../../db/repositories/sessions.repo';
 import { memoriesRepo } from '../../db/repositories/memories.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
-import { archiveSession, attributeQuotes, renderArchive } from './sessionArchive';
+import {
+  archiveSession,
+  attributeQuotes,
+  buildSystem,
+  renderArchive,
+  takeSections,
+} from './sessionArchive';
+import { ARCHIVE_FORMATS, archiveFormat } from '@shared/archiveFormat';
+import { ACTIVITY_ORDER } from '@shared/activities';
 import { SESSION_ARCHIVE_MAX, capSource, retrieve } from '../rag/retriever';
 import { ground } from './grounding';
 import type { RetrievedChunk } from '@shared/types';
@@ -153,11 +161,13 @@ const FOUR_TURNS = [
 const GOOD_ARCHIVE = {
   topic: 'Acme renewal pricing',
   summary: 'Acme discussed renewal terms; the current rate holds for a two-year commitment.',
-  decisions: ['Hold the current rate for a two-year term'],
-  actionItems: ['Sarah Chen — confirm the two-year commitment by Friday'],
-  openQuestions: [],
   participants: ['Acme', 'Sarah Chen'],
   keyQuotes: ['We can hold the current rate if you commit to two years.'],
+  sections: {
+    decisions: ['Hold the current rate for a two-year term'],
+    actionItems: ['Sarah Chen — confirm the two-year commitment by Friday'],
+    openQuestions: [],
+  },
 };
 
 beforeAll(async () => {
@@ -265,11 +275,175 @@ describe('archiving a finished conversation', () => {
   });
 
   it('renders the pieces as one coherent block — an action item alone is not context', () => {
-    const text = renderArchive(GOOD_ARCHIVE, Date.parse('2026-07-28T10:00:00Z'));
+    const text = renderArchive(GOOD_ARCHIVE, Date.parse('2026-07-28T10:00:00Z'), {
+      format: archiveFormat('meeting'),
+    });
     expect(text).toContain('2026-07-28');
     expect(text).toContain('Acme renewal pricing');
     expect(text).toContain('Sarah Chen — confirm');
     expect(text).not.toContain('Still open'); // empty sections are omitted
+  });
+});
+
+/**
+ * A Space accumulates: its documents are where it starts, and every kept
+ * session adds an archive, so the tenth standup is grounded in the previous
+ * nine. That only works if the entries are COMPARABLE — "Decided:" has to mean
+ * the same thing in every entry for that Space. And the things worth carrying
+ * forward differ by activity: forcing one shape on all of them either invents
+ * decisions in a tutorial or throws away the questions from an interview.
+ */
+describe('the archive format is fixed per activity', () => {
+  it('gives every activity a format, with unique keys and real guidance', () => {
+    for (const kind of ACTIVITY_ORDER) {
+      const format = ARCHIVE_FORMATS[kind];
+      expect(format.length, kind).toBeGreaterThan(0);
+      expect(new Set(format.map((f) => f.key)).size, kind).toBe(format.length);
+      for (const s of format) {
+        expect(s.label.length, `${kind}.${s.key}`).toBeGreaterThan(0);
+        expect(s.guidance.length, `${kind}.${s.key}`).toBeGreaterThan(10);
+        expect(s.max, `${kind}.${s.key}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('records what an interview leaves behind, not what a standup does', () => {
+    const job = ARCHIVE_FORMATS.job.map((f) => f.key);
+    expect(job).toContain('questionsAsked');
+    expect(job).toContain('claims');
+    // "Action items" is a meeting's residue; an interview's is what was asked.
+    expect(job).not.toContain('actionItems');
+  });
+
+  it('records what a study session leaves behind', () => {
+    const subject = ARCHIVE_FORMATS.subject.map((f) => f.key);
+    expect(subject).toContain('covered');
+    expect(subject).toContain('struggled'); // the point of coming back
+    expect(subject).not.toContain('decisions');
+  });
+
+  it('falls back to the conversation shape for an unknown activity', () => {
+    // v1 rows have no activity at all, and are still conversations.
+    expect(archiveFormat(null)).toBe(ARCHIVE_FORMATS.custom);
+    expect(archiveFormat('not-a-kind')).toBe(ARCHIVE_FORMATS.custom);
+    expect(archiveFormat('subject')).toBe(ARCHIVE_FORMATS.subject);
+  });
+
+  it('asks the summariser for exactly the keys it will keep', () => {
+    // The prompt is built from the format, so the keys requested and the keys
+    // kept cannot drift — the failure mode is silent, empty sections.
+    for (const kind of ACTIVITY_ORDER) {
+      const format = ARCHIVE_FORMATS[kind];
+      const system = buildSystem(format);
+      for (const s of format) expect(system, `${kind}.${s.key}`).toContain(`"${s.key}"`);
+    }
+    // And it does not offer another activity's keys.
+    expect(buildSystem(ARCHIVE_FORMATS.subject)).not.toContain('actionItems');
+  });
+});
+
+describe('archiveSession reads the format off the SESSION', () => {
+  // The table above proves each activity HAS a format; it cannot prove the
+  // archive uses the right one. A constant here would leave every standup and
+  // every interview archived identically — silently, and only visible weeks
+  // later when retrieval brings back the wrong shape.
+  it('archives a study session under the study headings', async () => {
+    const pid = seedProfile();
+    let asked = '';
+    h.chatJson = async (req) => {
+      asked = req.system;
+      return {
+        topic: 'Consensus protocols',
+        summary: 'Worked through Raft leader election end to end.',
+        participants: [],
+        keyQuotes: [],
+        sections: {
+          covered: ['Raft leader election'],
+          struggled: ['why terms increase'],
+          actionItems: ['book a follow-up'], // not a section this activity has
+        },
+      };
+    };
+    const sid = seedSession(pid, null, FOUR_TURNS, { activity: 'subject' });
+    await archiveSession(sid);
+
+    const text = archiveChunks(pid)
+      .map((c) => c.content)
+      .join('\n');
+    expect(text).toContain('Covered:');
+    expect(text).toContain('Did not land:');
+    expect(text).not.toContain('Action items:');
+    // …and the summariser was asked for the study keys, not the meeting ones.
+    expect(asked).toContain('"struggled"');
+    expect(asked).not.toContain('"actionItems"');
+  });
+
+  it('falls back to the Space’s kind when the session predates activities', async () => {
+    const pid = seedProfile();
+    const packId = `arc-jobpack${++seq}`;
+    h.db
+      .insert(schema.contextPacks)
+      .values({ id: packId, profileId: pid, title: 'Acme — Senior PM', kind: 'job' })
+      .run();
+    let asked = '';
+    h.chatJson = async (req) => {
+      asked = req.system;
+      return { ...GOOD_ARCHIVE, sections: { questionsAsked: ['why this role?'] } };
+    };
+    const sid = seedSession(pid, packId, FOUR_TURNS); // no activity column value
+    await archiveSession(sid);
+
+    expect(asked).toContain('"questionsAsked"');
+    expect(archiveChunks(pid).map((c) => c.content).join('\n')).toContain('They asked:');
+  });
+});
+
+describe('takeSections — what the model returns is not what gets stored', () => {
+  const format = ARCHIVE_FORMATS.meeting;
+
+  it('keeps the declared keys, in the declared order', () => {
+    // The model returned them backwards; the archive reads the same either way.
+    const out = takeSections(format, {
+      openQuestions: ['who owns rollout?'],
+      decisions: ['ship on the 12th'],
+    });
+    expect(out.map((o) => o.section.key)).toEqual(['decisions', 'openQuestions']);
+  });
+
+  it('DROPS a key this activity did not declare', () => {
+    // An interview archive must not grow "Action items" because the summariser
+    // is in the habit of writing one.
+    const out = takeSections(ARCHIVE_FORMATS.job, {
+      questionsAsked: ['why this role?'],
+      actionItems: ['send a thank-you note'],
+    });
+    expect(out.map((o) => o.section.key)).toEqual(['questionsAsked']);
+  });
+
+  it('caps a section at its declared max', () => {
+    const items = Array.from({ length: 30 }, (_, i) => `decision ${i}`);
+    const out = takeSections(format, { decisions: items });
+    expect(out[0].items).toHaveLength(8);
+  });
+
+  it('omits an empty section rather than printing an empty heading', () => {
+    expect(takeSections(format, { decisions: [], actionItems: ['   '] })).toEqual([]);
+  });
+
+  it('renders each activity under its own headings', () => {
+    const archive = {
+      topic: 'Consensus protocols',
+      summary: 'Worked through Raft leader election.',
+      participants: [],
+      keyQuotes: [],
+      sections: { covered: ['Raft leader election'], struggled: ['why terms increase'] },
+    };
+    const text = renderArchive(archive, Date.parse('2026-07-28T10:00:00Z'), {
+      format: archiveFormat('subject'),
+    });
+    expect(text).toContain('Covered: Raft leader election.');
+    expect(text).toContain('Did not land: why terms increase.');
+    expect(text).not.toContain('Decided');
   });
 });
 

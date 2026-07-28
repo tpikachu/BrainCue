@@ -3,19 +3,35 @@ import { api } from '../../lib/api';
 import { useProfileStore } from '../../store/useProfileStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import type { Job, MemoryItem } from '@shared/types';
-import { Badge, Button, Card, SearchInput, Select, Switch, TextInput } from '../../components/ui';
+import { Badge, Button, Card, Field, Page, SearchInput, Select, Switch, TextInput } from '../../components/ui';
 
-/** Library › Memory: the review-first memory surface. Nothing is captured
- *  before the consent switch is on; nothing is recalled until a candidate is
- *  explicitly approved here. Every item shows its provenance and scope, and
- *  delete removes the memory together with its embedding. */
-export function MemoryTab() {
+/**
+ * Memory — the review-first surface for what BrainCue remembers about this
+ * profile.
+ *
+ * Its own section rather than a Library tab. The Library is the knowledge base
+ * you assemble: documents you chose to give it, Spaces you set up. Memory is
+ * what it proposes to keep from your conversations, and every item there is
+ * waiting on a decision you have not made yet. Filing that behind a tab in the
+ * place you go to add documents buried the one surface that has a queue.
+ *
+ * Nothing is captured before the consent switch is on; nothing is recalled
+ * until a candidate is explicitly approved here. Every item shows its
+ * provenance and its scope, and delete removes the memory together with its
+ * embedding.
+ */
+export default function MemoryPage() {
   // Whose memory this is is decided once, in the sidebar switcher.
   const profileId = useProfileStore((s) => s.activeId) ?? '';
   const { settings, load: loadSettings } = useSettingsStore();
   const [pending, setPending] = useState<MemoryItem[]>([]);
   const [approved, setApproved] = useState<MemoryItem[]>([]);
   const [query, setQuery] = useState('');
+  // '' = every scope, 'global' = remembered everywhere, otherwise a Space id.
+  // A Space's memory is a different body of knowledge from another's, and the
+  // format that produced it differs by activity — so the table is filterable
+  // by the thing that scopes it, not only searchable by text.
+  const [scope, setScope] = useState<string>('');
   const [spaces, setSpaces] = useState<Job[]>([]);
   const [edits, setEdits] = useState<Record<string, string>>({}); // id → draft content
   const [error, setError] = useState<string | null>(null);
@@ -26,8 +42,16 @@ export function MemoryTab() {
 
   const refresh = async (pid = profileId) => {
     if (!pid) return;
-    setPending(await api.memory.list(pid, { status: 'pending' }));
-    setApproved(await api.memory.list(pid, { status: 'approved', query: query.trim() || undefined }));
+    // undefined = every scope; null = the ones recalled everywhere.
+    const packId = scope === '' ? undefined : scope === 'global' ? null : scope;
+    setPending(await api.memory.list(pid, { status: 'pending', packId }));
+    setApproved(
+      await api.memory.list(pid, {
+        status: 'approved',
+        query: query.trim() || undefined,
+        packId,
+      }),
+    );
     const { items } = await api.jobs.page(pid, '', 100, 0);
     setSpaces(items as Job[]);
   };
@@ -36,7 +60,7 @@ export function MemoryTab() {
     const t = setTimeout(() => void refresh(), 200);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profileId, query]);
+  }, [profileId, query, scope]);
 
   const memoryOn = !!settings?.memoryEnabled;
   const setConsent = async (on: boolean) => {
@@ -86,10 +110,14 @@ export function MemoryTab() {
   })();
 
   return (
-    <div>
+    <Page
+      title="Memory"
+      subtitle="What BrainCue remembers about this profile — proposed after each session, kept only when you say so."
+      width="max-w-4xl"
+    >
       <Card className="mb-5 flex items-center justify-between !py-4">
         <div>
-          <div className="font-medium text-neutral-100">Memory</div>
+          <div className="font-medium text-neutral-100">Remember across sessions</div>
           <p className="mt-1 max-w-xl text-xs leading-relaxed text-neutral-500">
             When on, BrainCue suggests memories after each session — nothing is saved until you
             approve it here, only approved memories ever ground answers, and everything stays in
@@ -97,6 +125,23 @@ export function MemoryTab() {
           </p>
         </div>
         <Switch checked={memoryOn} onChange={(v) => void setConsent(v)} />
+      </Card>
+
+      {/* Filter by what scopes it. A Space's memory is a separate body of
+          knowledge from another's — recalled in that Space and nowhere else. */}
+      <Card className="mb-5">
+        <Field label="Space">
+          <Select value={scope} onChange={(e) => setScope(e.target.value)}>
+            <option value="">All memory for this profile</option>
+            <option value="global">Everywhere — not tied to a Space</option>
+            {spaces.map((sp) => (
+              <option key={sp.id} value={sp.id}>
+                {sp.title || 'Untitled'}
+                {sp.company ? ` · ${sp.company}` : ''}
+              </option>
+            ))}
+          </Select>
+        </Field>
       </Card>
 
       {error && (
@@ -281,6 +326,6 @@ export function MemoryTab() {
           )}
         </>
       )}
-    </div>
+    </Page>
   );
 }
