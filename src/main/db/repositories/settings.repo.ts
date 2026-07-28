@@ -58,6 +58,7 @@ export const SETTINGS_KEYS = {
   hideTaskbarIcon: 'hide_taskbar_icon',
   codingLanguage: 'coding_language',
   memoryEnabled: 'memory_enabled', // global memory consent ('1'/'0'; absent = off)
+  sessionArchiveEnabled: 'session_archive_enabled', // conversation continuity ('1'/'0'; absent = ON)
   voicePrefs: 'voice_prefs', // json VoicePrefs (TTS voice, mute, output device, quick-ask opts)
   companionPrefs: 'companion_prefs', // json CompanionPrefs (personality, presence, DND, budget)
 } as const;
@@ -77,6 +78,7 @@ const APP_SETTING_KEYS: string[] = [
   SETTINGS_KEYS.hideTaskbarIcon,
   SETTINGS_KEYS.codingLanguage,
   SETTINGS_KEYS.memoryEnabled,
+  SETTINGS_KEYS.sessionArchiveEnabled,
   SETTINGS_KEYS.voicePrefs,
   SETTINGS_KEYS.companionPrefs,
 ];

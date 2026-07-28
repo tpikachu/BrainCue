@@ -1,4 +1,4 @@
-import { asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { db, schema } from '../index';
 import type {
   AiAnswer,
@@ -199,7 +199,23 @@ export const sessionsRepo = {
     return this.getReport(report.sessionId)!;
   },
 
+  /**
+   * Drop a session's retrievable archive (docs/16-CONTINUITY.md).
+   *
+   * `chunks.source_id` is a plain column, not a foreign key, so SQLite cannot
+   * cascade this for us — and an archive that outlives its session would keep
+   * grounding answers in a conversation the user deleted. Embeddings DO cascade
+   * from `chunks`, so the vector goes with it.
+   */
+  deleteArchive(sessionId: string): void {
+    db()
+      .delete(schema.chunks)
+      .where(and(eq(schema.chunks.sourceType, 'session'), eq(schema.chunks.sourceId, sessionId)))
+      .run();
+  },
+
   delete(id: string): void {
+    this.deleteArchive(id); // must go first: deleting the session loses the id
     db().delete(schema.sessions).where(eq(schema.sessions.id, id)).run();
   },
 
@@ -284,8 +300,10 @@ export const sessionsRepo = {
     return { total: rows.length, live: rows.filter((r) => r.status === 'live').length };
   },
 
-  /** Delete every session (and its cascaded transcript/questions/answers/report). */
+  /** Delete every session (and its cascaded transcript/questions/answers/report),
+   *  together with every conversation archive — those do not cascade. */
   deleteAll(): void {
+    db().delete(schema.chunks).where(eq(schema.chunks.sourceType, 'session')).run();
     db().delete(schema.sessions).run();
   },
 };

@@ -23,7 +23,18 @@ export type AnswerFormat = 'key_points' | 'explanation' | 'detailed' | 'story_te
 export type DocumentKind = 'resume' | 'jd' | 'note' | 'other';
 /** `tailored` = an application's tailored resume, indexed pack-scoped; when a pack
  *  has tailored chunks, retrieval drops the base `resume` chunks for its sessions. */
-export type ChunkSource = 'resume' | 'jd' | 'note' | 'company' | 'story' | 'tailored';
+/** `session` = the archive of a FINISHED conversation (docs/16-CONTINUITY.md).
+ *  It is what makes BrainCue continuous rather than a very good single-meeting
+ *  tool: without it every call starts from zero and "what did we agree three
+ *  calls ago" is unanswerable. */
+export type ChunkSource =
+  | 'resume'
+  | 'jd'
+  | 'note'
+  | 'company'
+  | 'story'
+  | 'tailored'
+  | 'session';
 export type SessionStatus = 'idle' | 'live' | 'stopped';
 
 // ---- v2 domain vocabulary (see docs/12-ENGINE-PLAN.md) ----
@@ -502,6 +513,12 @@ export interface AppSettings {
   /** Global memory consent — OFF by default: no extraction, no recall until
    *  the user explicitly enables it (Library › Memory). */
   memoryEnabled: boolean;
+  /** Write a short archive of each finished conversation and let later ones
+   *  retrieve it (docs/16-CONTINUITY.md). ON by default, unlike memory: this
+   *  summarises sessions the user deliberately ran and whose transcripts are
+   *  already stored locally, rather than extracting standing claims about
+   *  them. Respects the same per-Space opt-out. */
+  sessionArchiveEnabled: boolean;
   /** Global companion configuration (personality, default presence, DND,
    *  default budget). */
   companionPrefs: CompanionPrefs;

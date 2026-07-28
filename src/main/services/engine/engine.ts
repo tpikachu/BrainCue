@@ -15,6 +15,7 @@ import { meetingMode } from './modes/meeting.mode';
 import { companionMode } from './modes/companion.mode';
 import { getOrGenerateMeetingReport } from './meetingReport';
 import { extractMemoryCandidates } from '../memory/extractor';
+import { archiveSession } from './sessionArchive';
 import { enginePersistence } from './persistence/enginePersistence';
 import { createRealtimeSource, pcmLevel } from './sourceAdapter';
 import type { AnswerFormat, InterviewType, Presence, Session, SessionMode } from '@shared/types';
@@ -310,12 +311,18 @@ class Engine {
             log.warn('meeting report generation failed', e),
           );
         }
-        // Memory candidates (Prompt 8): consent-gated inside the extractor —
-        // a no-op until the user enables memory. Candidates land as PENDING;
-        // nothing is remembered until reviewed in Library › Memory.
+        // Memory candidates: consent-gated inside the extractor — a no-op
+        // until the user enables memory. Candidates land as PENDING; nothing
+        // is remembered until reviewed in Library › Memory.
         void extractMemoryCandidates(sessionId).catch((e) =>
           log.warn('memory extraction failed', e),
         );
+        // Conversation archive (docs/16-CONTINUITY.md): a short, retrievable
+        // record of what happened, so the NEXT conversation can be grounded in
+        // this one. Gated inside the archiver and fire-and-forget — a session
+        // that ended successfully must not report an error because its
+        // summary failed.
+        void archiveSession(sessionId).catch((e) => log.warn('session archive failed', e));
       }
     }
     return result;

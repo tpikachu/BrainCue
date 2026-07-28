@@ -100,7 +100,14 @@ they can ground live answers.
 
 ### `chunks`
 Chunked text from documents/notes/profile fields/stories/tailored resumes for RAG.
-| id | profile_id FK | job_id FK (nullable) — TS: `packId` | source_type (resume/jd/note/company/story/tailored) | source_id | ord | content | token_count | created_at |
+| id | profile_id FK | job_id FK (nullable) — TS: `packId` | source_type (resume/jd/note/company/story/tailored/session) | source_id | ord | content | token_count | created_at |
+
+`source_type='session'` is a finished conversation's archive
+([16 · Continuity](./16-CONTINUITY.md)); `source_id` is the session id and
+`job_id` scopes it to the Space the conversation happened in. It is **not** a
+foreign key, so deleting a session cannot cascade — `sessionsRepo.delete` /
+`deleteAll` remove archives explicitly, and embeddings then cascade from
+`chunks`.
 
 `job_id` is set on JD, company-research, **and** `tailored` chunks (all cascade on
 pack delete); resume/note/story chunks have `job_id` null. `story` chunks are managed

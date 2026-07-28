@@ -41,6 +41,10 @@ function readSettings(): AppSettings {
     hideTaskbarIcon: settingsRepo.get(SETTINGS_KEYS.hideTaskbarIcon) === '1',
     dataConsentAck: settingsRepo.get(SETTINGS_KEYS.dataConsentAck) === '1',
     memoryEnabled: settingsRepo.get(SETTINGS_KEYS.memoryEnabled) === '1', // consent: OFF until enabled
+    // Continuity defaults ON (absent = on): it summarises sessions the user
+    // ran, from transcripts already stored locally — a much smaller step than
+    // memory, which extracts standing claims about the person.
+    sessionArchiveEnabled: settingsRepo.get(SETTINGS_KEYS.sessionArchiveEnabled) !== '0',
     companionPrefs: readCompanionPrefs(),
     tourDone: settingsRepo.get(SETTINGS_KEYS.tourDone) === '1',
     shortcuts: getShortcuts(),
@@ -68,6 +72,7 @@ const settingsPatch = z.object({
   codingLanguage: z.string().min(1).max(40).optional(),
   dataConsentAck: z.boolean().optional(),
   memoryEnabled: z.boolean().optional(),
+  sessionArchiveEnabled: z.boolean().optional(),
   companionPrefs: z
     .object({
       personality: z.object({
@@ -121,6 +126,11 @@ export function registerSettingsIpc(): void {
       settingsRepo.set(SETTINGS_KEYS.dataConsentAck, patch.dataConsentAck ? '1' : '0');
     if (patch.memoryEnabled !== undefined)
       settingsRepo.set(SETTINGS_KEYS.memoryEnabled, patch.memoryEnabled ? '1' : '0');
+    if (patch.sessionArchiveEnabled !== undefined)
+      settingsRepo.set(
+        SETTINGS_KEYS.sessionArchiveEnabled,
+        patch.sessionArchiveEnabled ? '1' : '0',
+      );
     if (patch.companionPrefs)
       settingsRepo.setJson(SETTINGS_KEYS.companionPrefs, patch.companionPrefs);
     if (patch.tourDone !== undefined)

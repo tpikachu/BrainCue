@@ -36,7 +36,7 @@ validates input with zod via the `handle()` helper. Errors are returned as
 ### settings
 | Channel | Request | Response |
 |---|---|---|
-| `settings:get` | — | `AppSettings` (no raw key — only `apiKeyPresent`; incl. `tourDone`) |
+| `settings:get` | — | `AppSettings` (no raw key — only `apiKeyPresent`; incl. `tourDone`, `sessionArchiveEnabled`) |
 | `settings:set` | `Partial<AppSettings>` (`models`, `overlay`, `dataConsentAck`, `tourDone`) | `AppSettings` |
 | `settings:set-api-key` | `{ key }` | `{ apiKeyPresent: true }` |
 | `settings:clear-api-key` | — | `{ apiKeyPresent: false }` |

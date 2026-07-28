@@ -156,6 +156,11 @@ export default function SettingsPage() {
     }
   };
 
+  const setSessionArchive = async (next: boolean) => {
+    await api.settings.set({ sessionArchiveEnabled: next });
+    await load();
+  };
+
   const setHideTaskbarIcon = async (next: boolean) => {
     setHideTaskbar(next); // optimistic
     try {
@@ -297,6 +302,28 @@ export default function SettingsPage() {
             </p>
           </div>
           <Switch checked={hideTaskbar} onChange={setHideTaskbarIcon} onLabel="Hidden" offLabel="Shown" />
+        </div>
+
+        {/* Continuity is what makes BrainCue a companion rather than a
+            single-meeting tool, so it defaults ON — but it is conversation
+            content, so it says plainly what it keeps and can be turned off. */}
+        <div className="mt-4 flex items-center justify-between gap-4 border-t border-white/5 pt-4">
+          <div>
+            <h3 className="font-medium">Remember conversations</h3>
+            <p className="mt-0.5 max-w-2xl text-xs leading-relaxed text-neutral-500">
+              After each session, BrainCue saves a short summary — what it was about, what was
+              decided, who committed to what — so later conversations can be grounded in earlier
+              ones. Summaries stay in the local database, stay inside the Space they happened in,
+              and are deleted with their session. A Space with memory turned off is never
+              summarised.
+            </p>
+          </div>
+          <Switch
+            checked={!!settings?.sessionArchiveEnabled}
+            onChange={(v) => void setSessionArchive(v)}
+            onLabel="On"
+            offLabel="Off"
+          />
         </div>
       </Card>
 
