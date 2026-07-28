@@ -169,7 +169,11 @@ export function registerSessionIpc(): void {
 
   handle(IPC.session.clearAnswer, z.void(), () => sessionManager.clearAnswerActive());
 
-  handle(IPC.session.list, z.void(), () => sessionsRepo.list());
+  // Scoped to a profile: Sessions and Insights are views of the ACTIVE profile
+  // (docs/19-ACTIVE-PROFILE.md), and used to list every session in the database.
+  handle(IPC.session.list, z.object({ profileId: z.string().min(1).optional() }).optional(), (a) =>
+    sessionsRepo.list(a?.profileId),
+  );
 
   handle(IPC.session.get, zId, ({ id }) => {
     const detail = sessionsRepo.detail(id);
@@ -189,14 +193,27 @@ export function registerSessionIpc(): void {
    * even if summarising or extraction fails, so the counts come back as they
    * are and the UI can say what actually happened.
    */
-  handle(IPC.session.remember, zId, async ({ id }) => {
-    if (!sessionsRepo.detail(id)) throw new Error('Session not found');
-    const [archived, memories] = await Promise.all([
-      archiveSession(id).catch(() => 0),
-      extractMemoryCandidates(id).catch(() => 0),
-    ]);
-    return { archived, memories };
-  });
+  handle(
+    IPC.session.remember,
+    z.object({
+      id: z.string().min(1),
+      /** Where to remember it. A string files the session into that Space,
+       *  `null` files it out of every Space, absent leaves it where it ran. */
+      packId: z.string().min(1).nullable().optional(),
+    }),
+    async ({ id, packId }) => {
+      if (!sessionsRepo.detail(id)) throw new Error('Session not found');
+      // Filing FIRST is what makes the choice mean anything: both the archive
+      // and the memory candidates read their scope off this column, so moving
+      // the session afterwards would leave them attached to the old Space.
+      if (packId !== undefined) sessionsRepo.setPack(id, packId);
+      const [archived, memories] = await Promise.all([
+        archiveSession(id).catch(() => 0),
+        extractMemoryCandidates(id).catch(() => 0),
+      ]);
+      return { archived, memories };
+    },
+  );
 
   handle(IPC.session.delete, zId, ({ id }) => {
     // Discard means discard: the session, its transcript, its archive, and any
@@ -219,5 +236,9 @@ export function registerSessionIpc(): void {
     ({ sessionId }) => sessionsRepo.getReport(sessionId),
   );
 
-  handle(IPC.session.practiceStats, z.void(), () => sessionsRepo.practiceStats());
+  handle(
+    IPC.session.practiceStats,
+    z.object({ profileId: z.string().min(1).optional() }).optional(),
+    (a) => sessionsRepo.practiceStats(a?.profileId),
+  );
 }

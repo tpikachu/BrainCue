@@ -220,8 +220,11 @@ const api = {
     /** Keep this conversation: archive it for retrieval and extract memory
      *  candidates. Both stay gated by the user's own settings, so the counts
      *  can legitimately come back as zero. */
-    remember: (id: string) =>
-      invoke<{ archived: number; memories: number }>(IPC.session.remember, { id }),
+    /** Keep a finished conversation. `packId` files it into a Space first (null
+     *  = no Space, undefined = leave it where it ran) — the archive and the
+     *  memory candidates are both scoped from there. */
+    remember: (id: string, packId?: string | null) =>
+      invoke<{ archived: number; memories: number }>(IPC.session.remember, { id, packId }),
     setInterviewType: (sessionId: string, interviewType: string) =>
       invoke<{ ok: true }>(IPC.session.setInterviewType, { sessionId, interviewType }),
     setAnswering: (enabled: boolean) =>
@@ -241,12 +244,14 @@ const api = {
       ipcRenderer.send(IPC.session.realtimeAudio, { sessionId, pcm }),
     ask: (sessionId: string, questionText: string) =>
       invoke(IPC.session.ask, { sessionId, questionText }),
-    list: () => invoke(IPC.session.list),
+    /** Sessions for ONE profile — Sessions and Insights are views of the
+     *  active profile. Omitting it means every profile (data stats only). */
+    list: (profileId?: string) => invoke(IPC.session.list, { profileId }),
     get: (id: string) => invoke(IPC.session.get, { id }),
     delete: (id: string) => invoke(IPC.session.delete, { id }),
     generateReport: (sessionId: string) => invoke(IPC.session.generateReport, { sessionId }),
     getReport: (sessionId: string) => invoke(IPC.session.getReport, { sessionId }),
-    practiceStats: () => invoke(IPC.session.practiceStats),
+    practiceStats: (profileId?: string) => invoke(IPC.session.practiceStats, { profileId }),
     meetingReport: (sessionId: string) =>
       invoke<{ contributionId: string; report: MeetingReport }>(IPC.session.meetingReport, {
         sessionId,

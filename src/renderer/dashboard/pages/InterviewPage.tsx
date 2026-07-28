@@ -81,12 +81,12 @@ export default function InterviewPage() {
       return;
     }
     void (async () => {
-      const all = (await api.session.list()) as SessionListItem[];
+      const all = (await api.session.list(profileId)) as SessionListItem[];
       const map = new Map<string, SessionListItem>();
       for (const s of all) {
         // Only real interview sessions drive Start/Resume — a Sparring practice
         // drill (kind 'sparring') must never be offered for resumption here.
-        if (s.kind !== 'live' || s.profileId !== profileId || !s.jobId) continue;
+        if (s.kind !== 'live' || !s.jobId) continue;
         if (!map.has(s.jobId)) map.set(s.jobId, s); // list is newest-first
       }
       setSessionsByJob(map);

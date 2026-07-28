@@ -330,6 +330,8 @@ class Engine {
             sessionId,
             mode: s.mode.id,
             activity: wasActivity,
+            profileId: s.profileId,
+            packId: s.packId,
             interviewType,
             jobTitle: packTitle,
             questionCount: sessionsRepo.questionCount(sessionId),

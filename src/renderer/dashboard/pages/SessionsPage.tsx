@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../lib/api';
 import { activity as activityConfig } from '@shared/activities';
+import { useProfileStore } from '../../store/useProfileStore';
 import type { SessionListItem, SessionReport } from '@shared/types';
 import { durationMs, fmtDur, fmtHours } from '../../lib/format';
 import { Badge, Button, Modal, Page, Spinner } from '../../components/ui';
@@ -14,6 +15,9 @@ const PER_PAGE = 12;
  *  per-session coaching report. (Split out of Reports, which is now the
  *  aggregate Insights view.) */
 export default function SessionsPage() {
+  // Sessions are a view of the ACTIVE profile — this page used to list every
+  // session in the database, including other people's conversations.
+  const profileId = useProfileStore((s) => s.activeId);
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(0);
@@ -27,9 +31,14 @@ export default function SessionsPage() {
   const [loadingReport, setLoadingReport] = useState(false);
 
   const refresh = async () => {
+    if (!profileId) {
+      setSessions([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      setSessions((await api.session.list()) as SessionListItem[]);
+      setSessions((await api.session.list(profileId)) as SessionListItem[]);
     } finally {
       setLoading(false);
     }
@@ -37,7 +46,8 @@ export default function SessionsPage() {
 
   useEffect(() => {
     void refresh();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileId]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

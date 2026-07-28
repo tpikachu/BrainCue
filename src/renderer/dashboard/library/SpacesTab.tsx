@@ -67,21 +67,19 @@ export function SpacesTab() {
       header: 'Space',
       render: (j) => (
         <div>
-          <div className="font-medium text-neutral-100">{j.title || 'Untitled role'}</div>
+          <div className="font-medium text-neutral-100">{j.title || 'Untitled'}</div>
           {j.company && <div className="text-xs text-neutral-500">{j.company}</div>}
         </div>
       ),
     },
     {
-      key: 'kind',
-      header: 'Kind',
-      className: 'w-28',
-      render: () => <Badge>Interview</Badge>,
-    },
-    {
-      key: 'docs',
-      header: 'Context',
-      className: 'w-36',
+      // There used to be a "Kind" column here that rendered the literal string
+      // "Interview" for every row — v1 residue from when a Space could only be
+      // a job. It sat next to the column that shows the REAL activity, so a
+      // standup read as "Kind: Interview · Meeting or call".
+      key: 'activity',
+      header: 'Activity',
+      className: 'w-44',
       render: (j) => (
         <div className="flex flex-wrap gap-1.5">
           <Badge>{activity(j.kind).label}</Badge>
@@ -147,9 +145,9 @@ export function SpacesTab() {
   return (
     <div>
       <p className="mb-4 text-sm text-neutral-400">
-        A Space is everything BrainCue should know for one context — for interviews: the job
-        description, company research, and your notes. Answers ground themselves in the active
-        Space.
+        A Space is everything BrainCue should know for one recurring context — a meeting, a
+        project, a subject, an interview. Its activity decides what it asks you for; answers,
+        archives, and memory from a session all attach to the Space it ran in.
       </p>
 
       {profileId && (
@@ -167,7 +165,7 @@ export function SpacesTab() {
               setQuery(q);
               setPage(0);
             }}
-            searchPlaceholder="Search Spaces by role or company…"
+            searchPlaceholder="Search Spaces by name or who they involve…"
             onRowClick={(j) => {
               setEditJob(j);
               setFormOpen(true);

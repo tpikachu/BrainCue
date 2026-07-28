@@ -4,24 +4,34 @@ import { api } from '../../lib/api';
 import type { PracticeStats, SessionListItem } from '@shared/types';
 import { durationMs, fmtHours } from '../../lib/format';
 import { Card, Page } from '../../components/ui';
+import { useProfileStore } from '../../store/useProfileStore';
 
 /** Insights: the aggregate view — practice progress and overall usage. The
  *  per-session history (and its coaching reports) lives on the Sessions page. */
 export default function ReportsPage() {
+  const profileId = useProfileStore((s) => s.activeId);
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [practice, setPractice] = useState<PracticeStats | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Insights are a view of the ACTIVE profile. They used to aggregate every
+  // profile in the database, so the practice averages described nobody.
   useEffect(() => {
     void (async () => {
+      if (!profileId) {
+        setSessions([]);
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
       try {
-        setSessions((await api.session.list()) as SessionListItem[]);
-        setPractice((await api.session.practiceStats()) as PracticeStats);
+        setSessions((await api.session.list(profileId)) as SessionListItem[]);
+        setPractice((await api.session.practiceStats(profileId)) as PracticeStats);
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [profileId]);
 
   const totalMs = useMemo(() => sessions.reduce((n, s) => n + durationMs(s), 0), [sessions]);
   const liveCount = sessions.filter((s) => s.kind === 'live').length;

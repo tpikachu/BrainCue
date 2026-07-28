@@ -102,7 +102,22 @@ the whole app until a profile exists, the one page offering it sat behind the
 very gate you could not pass — so a fresh install could no longer try the app
 with sample data at all. The modal offers it directly.
 
-## 7. What did NOT change
+## 7. Scoping the data, not just the chrome
+
+Two pages were still reading the whole database while claiming to be part of a
+profile-scoped app:
+
+- **Sessions** listed every session ever recorded, including other people's
+  conversations.
+- **Insights** aggregated the same list, so its practice trend and
+  per-competency averages mixed two people's rehearsals into numbers that
+  described neither.
+
+Both were invisible while there was one profile and wrong the moment there were
+two. `sessionsRepo.list` and `practiceStats` take the profile now; the parameter
+stays optional only for the data-stats caller, which genuinely means everything.
+
+## 8. What did NOT change
 
 - **Profiles remain the unit of ownership.** Spaces, sessions, chunks, and
   memories were always keyed by `profile_id`; this changes who is selected, not

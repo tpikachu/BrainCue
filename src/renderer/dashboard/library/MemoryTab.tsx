@@ -3,7 +3,7 @@ import { api } from '../../lib/api';
 import { useProfileStore } from '../../store/useProfileStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import type { Job, MemoryItem } from '@shared/types';
-import { Badge, Button, Card, SearchInput, Switch, TextInput } from '../../components/ui';
+import { Badge, Button, Card, SearchInput, Select, Switch, TextInput } from '../../components/ui';
 
 /** Library › Memory: the review-first memory surface. Nothing is captured
  *  before the consent switch is on; nothing is recalled until a candidate is
@@ -55,10 +55,35 @@ export function MemoryTab() {
   };
 
   const spaceTitle = (packId: string | null) => {
-    if (!packId) return 'Global';
+    if (!packId) return 'Everywhere';
     const s = spaces.find((x) => x.id === packId);
     return s ? s.company || s.title || 'Space' : 'Space';
   };
+
+  /**
+   * Saved memory, grouped by the Space it belongs to.
+   *
+   * A flat list said nothing about scope, and scope is the whole point: a
+   * memory on a Space is recalled in that Space's conversations and nowhere
+   * else, while one on the profile follows the person everywhere. Reading them
+   * interleaved, you cannot tell which of your Spaces actually knows something
+   * — the question this page exists to answer.
+   *
+   * Space-scoped groups come first and profile-wide last, because "everywhere"
+   * is the fallback rather than a place.
+   */
+  const grouped = (() => {
+    const byPack = new Map<string, MemoryItem[]>();
+    for (const m of approved) {
+      const key = m.packId ?? '';
+      byPack.set(key, [...(byPack.get(key) ?? []), m]);
+    }
+    const scoped = [...byPack.entries()]
+      .filter(([key]) => key !== '')
+      .sort((a, b) => spaceTitle(a[0]).localeCompare(spaceTitle(b[0])));
+    const global = byPack.get('');
+    return [...scoped, ...(global ? ([['', global]] as [string, MemoryItem[]][]) : [])];
+  })();
 
   return (
     <div>
@@ -143,50 +168,88 @@ export function MemoryTab() {
             />
           </div>
           {approved.length === 0 ? (
-            <p className="mb-6 text-sm text-neutral-500">No saved memories{query ? ' match your search' : ' yet'}.</p>
+            <p className="mb-6 text-sm text-neutral-500">
+              No saved memories{query ? ' match your search' : ' yet'}.
+            </p>
           ) : (
-            <div className="mb-6 space-y-2">
-              {approved.map((m) => (
-                <Card key={m.id} className="!py-3">
-                  <div className="mb-2 flex items-center gap-2 text-xs text-neutral-500">
-                    <Badge>{m.category}</Badge>
-                    <Badge tone="blue">{spaceTitle(m.packId)}</Badge>
-                    {m.lastUsedAt && (
-                      <span>last used {new Date(m.lastUsedAt).toLocaleDateString()}</span>
-                    )}
-                    {m.sourceRefs?.map((r) => (
-                      <span key={r.id} className="text-neutral-600">
-                        from {r.type}
-                      </span>
+            <div className="mb-6 space-y-5">
+              {grouped.map(([packKey, items]) => (
+                <div key={packKey || 'global'}>
+                  <div className="mb-1.5 flex items-center gap-2">
+                    <Badge tone={packKey ? 'blue' : 'neutral'}>{spaceTitle(packKey || null)}</Badge>
+                    <span className="text-xs text-neutral-500">
+                      {packKey
+                        ? `recalled in this Space · ${items.length}`
+                        : `recalled everywhere · ${items.length}`}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {items.map((m) => (
+                      <Card key={m.id} className="!py-3">
+                        <div className="mb-2 flex items-center gap-2 text-xs text-neutral-500">
+                          <Badge>{m.category}</Badge>
+                          {m.lastUsedAt && (
+                            <span>last used {new Date(m.lastUsedAt).toLocaleDateString()}</span>
+                          )}
+                          {m.sourceRefs?.map((r) => (
+                            <span key={r.id} className="text-neutral-600">
+                              from {r.type}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <TextInput
+                            value={edits[m.id] ?? m.content}
+                            aria-label="Memory text"
+                            onChange={(e) => setEdits((d) => ({ ...d, [m.id]: e.target.value }))}
+                          />
+                          {edits[m.id] !== undefined && edits[m.id] !== m.content && (
+                            <Button
+                              variant="primary"
+                              onClick={() =>
+                                void act(() => api.memory.update(m.id, { content: edits[m.id] }))
+                              }
+                            >
+                              Save
+                            </Button>
+                          )}
+                          {/* Scope is editable here because where a memory is
+                              recalled is a judgement the user often only makes
+                              once they see it written down. */}
+                          <Select
+                            className="w-44 shrink-0"
+                            aria-label="Where this memory is recalled"
+                            value={m.packId ?? ''}
+                            onChange={(e) =>
+                              void act(() =>
+                                api.memory.update(m.id, { packId: e.target.value || null }),
+                              )
+                            }
+                          >
+                            <option value="">Everywhere</option>
+                            {spaces.map((sp) => (
+                              <option key={sp.id} value={sp.id}>
+                                {sp.title || 'Untitled'}
+                                {sp.company ? ` · ${sp.company}` : ''}
+                              </option>
+                            ))}
+                          </Select>
+                          <Button variant="ghost" onClick={() => void act(() => api.memory.archive(m.id))}>
+                            Archive
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            className="text-red-300"
+                            title="Delete this memory and its embedding permanently"
+                            onClick={() => void act(() => api.memory.delete(m.id))}
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                      </Card>
                     ))}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <TextInput
-                      value={edits[m.id] ?? m.content}
-                      aria-label="Memory text"
-                      onChange={(e) => setEdits((d) => ({ ...d, [m.id]: e.target.value }))}
-                    />
-                    {edits[m.id] !== undefined && edits[m.id] !== m.content && (
-                      <Button
-                        variant="primary"
-                        onClick={() => void act(() => api.memory.update(m.id, { content: edits[m.id] }))}
-                      >
-                        Save
-                      </Button>
-                    )}
-                    <Button variant="ghost" onClick={() => void act(() => api.memory.archive(m.id))}>
-                      Archive
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      className="text-red-300"
-                      title="Delete this memory and its embedding permanently"
-                      onClick={() => void act(() => api.memory.delete(m.id))}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </Card>
+                </div>
               ))}
             </div>
           )}

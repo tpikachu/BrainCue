@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useLiveSession } from '../store/useLiveSession';
 import { ACTIVITIES } from '@shared/activities';
-import type { InterviewType, SessionMode } from '@shared/types';
+import type { InterviewType, Job, SessionMode } from '@shared/types';
 import { Button, Field, Modal, Select } from '../components/ui';
 
 const INTERVIEW_TYPES: { value: InterviewType; label: string }[] = [
@@ -45,14 +45,24 @@ const endedTitle = (p: { activity?: string | null; mode?: SessionMode } | null):
 export function SavePromptModal() {
   const { pendingSave, clearPendingSave } = useLiveSession();
   const [saveType, setSaveType] = useState<InterviewType>('general');
+  // Where to keep it. Defaults to the Space the session ran in; '' means keep
+  // it on the profile and out of every Space.
+  const [packId, setPackId] = useState<string>('');
+  const [spaces, setSpaces] = useState<Job[]>([]);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
 
   useEffect(() => {
-    if (pendingSave) {
-      setSaveType(pendingSave.interviewType);
-      setResult(null);
-    }
+    if (!pendingSave) return;
+    setSaveType(pendingSave.interviewType);
+    setPackId(pendingSave.packId ?? '');
+    setResult(null);
+    // A call you did not set a Space for often turns out to belong to one, so
+    // the choice is offered here rather than being fixed at start.
+    void api.jobs
+      .page(pendingSave.profileId, '', 100, 0)
+      .then(({ items }) => setSpaces(items as Job[]))
+      .catch(() => setSpaces([]));
   }, [pendingSave]);
 
   const isInterview = pendingSave?.mode === 'interview' || pendingSave?.mode === 'practice';
@@ -63,7 +73,10 @@ export function SavePromptModal() {
     setBusy(true);
     try {
       if (isInterview) await api.session.setInterviewType(pendingSave.sessionId, saveType);
-      const { archived, memories } = await api.session.remember(pendingSave.sessionId);
+      const { archived, memories } = await api.session.remember(
+        pendingSave.sessionId,
+        packId || null,
+      );
       // Say what was actually kept. Both halves are gated by the user's own
       // settings, so zero is a legitimate outcome and should read as one.
       if (archived === 0 && memories === 0) {
@@ -107,10 +120,30 @@ export function SavePromptModal() {
           </span>
         </p>
 
+        {/* Where it is kept decides what can find it later: a Space-scoped
+            archive and its memories surface in the next conversation in that
+            Space and nowhere else, which is what makes a recurring meeting
+            accumulate instead of leaking into unrelated calls. */}
+        <Field label="Remember it in">
+          <Select value={packId} onChange={(e) => setPackId(e.target.value)}>
+            <option value="">This profile — everywhere</option>
+            {spaces.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.title || 'Untitled'}
+                {s.company ? ` · ${s.company}` : ''}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
         <p className="rounded-lg border border-white/5 bg-neutral-950/60 px-3 py-2 text-xs leading-relaxed text-neutral-400">
           Keeping it saves a short summary — what it was about, what was decided, who committed to
-          what — so later conversations can be grounded in this one, and suggests memories for you
-          to review. Everything stays on this machine.
+          what, and a few lines in the speakers' own words — plus memory suggestions for you to
+          review.{' '}
+          {packId
+            ? 'Both attach to that Space, so the next conversation there starts where this one ended.'
+            : 'Both attach to this profile, so any conversation can draw on them.'}{' '}
+          Everything stays on this machine.
         </p>
 
         {isInterview && (

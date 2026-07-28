@@ -246,7 +246,11 @@ export interface SavePrompt {
    *  rather than the pipeline it ran through. Null on rehearsals and v1 rows. */
   activity: ContextPackKind | null;
   interviewType: InterviewType;
-  /** The Space it was grounded in, if any. */
+  /** Whose it is, so the prompt can offer that profile's Spaces to file it in. */
+  profileId: string;
+  /** The Space it ran in, if any — the default answer to "remember it where?". */
+  packId: string | null;
+  /** That Space's display title. */
   jobTitle: string | null;
   questionCount: number;
   /** Transcript turns captured — "nothing was said" is worth telling the user

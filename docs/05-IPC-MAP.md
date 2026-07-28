@@ -312,3 +312,12 @@ type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 ```
 The preload wrapper unwraps `Result` and throws on `ok:false` so renderer code
 can use normal try/catch / async-await.
+
+**Profile scoping (2026-07-28).** `session:list` and `session:practice-stats`
+take an optional `profileId` and are called WITH one from Sessions, Insights,
+and the interview workspace — they used to return every session in the database
+([19-ACTIVE-PROFILE.md](./19-ACTIVE-PROFILE.md)). `session:remember` takes an
+optional `packId`: a string files the session into that Space before archiving
+and extraction, `null` files it out of every Space, absent leaves it where it
+ran ([16 §11](./16-CONTINUITY.md)). `session:save-prompt` carries `profileId`
+and `packId` so the prompt can offer that profile's Spaces.

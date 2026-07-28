@@ -215,3 +215,28 @@ of the model:
   in. A quote therefore cannot be put in the wrong person's mouth even when the
   model is confused about who was speaking. Unrecognised speaker labels pass
   through unflattened, so diarisation can land here without a change.
+
+## 11 · Remember it WHERE (2026-07-28)
+
+"Keep this?" was only half the question. Where a conversation is kept decides
+what can find it later: a Space-scoped archive and its memory candidates
+surface in the next conversation **in that Space and nowhere else**, which is
+what makes a recurring meeting accumulate instead of leaking into unrelated
+calls. Both read their scope off `sessions.job_id`.
+
+Two consequences:
+
+- **The save prompt asks.** It offers the profile's Spaces, defaulting to the
+  one the session ran in, plus "This profile — everywhere". A call you did not
+  set a Space for often turns out to belong to one, and that is usually clear
+  only once it has ended.
+- **`session:remember` files the session first.** Passing `packId` moves the
+  row before archiving or extracting, because doing it afterwards would leave
+  both attached to the old Space. `null` files it out of every Space; omitting
+  it leaves the session where it ran.
+
+Saved memory is grouped by Space in Library › Memory for the same reason. A
+flat list said nothing about scope, and reading them interleaved you cannot
+tell which of your Spaces actually knows something — the question that page
+exists to answer. Scope is editable there too: where a memory should be
+recalled is a judgement people usually make only after seeing it written down.
