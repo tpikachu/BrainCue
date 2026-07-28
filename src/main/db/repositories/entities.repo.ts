@@ -200,6 +200,19 @@ export const entitiesRepo = {
     db().insert(schema.memoryEntities).values({ memoryId, entityId, role }).run();
   },
 
+  /** The entity links a memory carries. Merge and split use this to carry the
+   *  structured path across: a memory rewritten by the user is still about the
+   *  same people, and losing that silently would make entity questions start
+   *  missing answers with nothing to point at. */
+  linksFor(memoryId: string): { entityId: string; role: 'subject' | 'mentioned' }[] {
+    return db()
+      .select()
+      .from(schema.memoryEntities)
+      .where(eq(schema.memoryEntities.memoryId, memoryId))
+      .all()
+      .map((l) => ({ entityId: l.entityId, role: l.role as 'subject' | 'mentioned' }));
+  },
+
   /** How many CURRENT memories each entity has — superseded and rejected rows
    *  are excluded so the count matches what recall can actually use. */
   memoryCounts(entityIds: string[]): Map<string, number> {

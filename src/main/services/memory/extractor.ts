@@ -1,12 +1,10 @@
 import { z } from 'zod';
 import { asc, eq } from 'drizzle-orm';
 import { db, schema } from '../../db';
-import { memoriesRepo } from '../../db/repositories/memories.repo';
-import { entitiesRepo } from '../../db/repositories/entities.repo';
 import { contextPacksRepo } from '../../db/repositories/jobs.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
 import { providerFor } from '../../providers/registry';
-import { checkSensitive } from './sensitiveFilter';
+import { persistCandidates } from './consolidate';
 
 /**
  * Post-session memory extraction — CONSERVATIVE by contract:
@@ -16,9 +14,13 @@ import { checkSensitive } from './sensitiveFilter';
  *    secrets/payment/health/sensitive-personal content is never stored;
  *  - everything lands as status 'pending': nothing is remembered until the
  *    user approves it in Library › Memory.
+ *
+ * Persistence, deduplication, and the privacy gate live in `consolidate.ts`,
+ * shared with document ingest — this module's job is to turn a transcript into
+ * proposed drafts, nothing more.
  */
 
-export const MEMORY_CONFIDENCE_FLOOR = 0.6;
+export { MEMORY_CONFIDENCE_FLOOR, normalize } from './consolidate';
 
 export const extractionSchema = z.object({
   candidates: z
@@ -61,18 +63,6 @@ export const extractionSchema = z.object({
     .max(5)
     .default([]),
 });
-
-/** Normalized for comparison: case, punctuation, and filler collapsed away so
- *  "We ship on May 3rd." and "we ship on may 3rd" are recognised as the same
- *  claim and the second one doesn't create a duplicate row. Shared with the
- *  import path, which dedupes against existing memory the same way. */
-export function normalize(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 const SYSTEM = `You extract AT MOST 5 durable memory candidates from a finished session transcript. Return STRICT JSON:
 {"candidates": [{"category": "preference"|"person"|"project"|"goal"|"decision"|"fact"|"workflow"|"custom", "content": string, "scope": "profile"|"space", "confidence": 0..1, "importance": 0..1}]}
@@ -130,57 +120,22 @@ export async function extractMemoryCandidates(sessionId: string): Promise<number
     return 0; // extraction failure → nothing (never a partial guess)
   }
 
-  let saved = 0;
-  for (const c of parsed.candidates) {
-    if (c.confidence < MEMORY_CONFIDENCE_FLOOR) continue;
-    if (checkSensitive(c.content).sensitive) continue; // hard privacy gate — never stored
-
-    const packId = c.scope === 'space' ? session.packId : null;
-
-    // ── Consolidation (docs/14-MEMORY.md §3.4) ────────────────────────────
-    // Before persisting, compare against what is already known:
-    //   identical  → drop, and mark the existing memory as freshly confirmed
-    //   contradicts→ keep as a pending candidate; approving it supersedes the
-    //                old value (the user decides, never the extractor)
-    //   new        → normal pending candidate
-    const current = c.factKey
-      ? memoriesRepo.currentByFactKey(session.profileId, packId, c.factKey)
-      : null;
-    if (current && normalize(current.content) === normalize(c.content)) {
-      memoriesRepo.markUsed([current.id], Date.now()); // re-confirmed, not re-stored
-      continue;
-    }
-
-    const memoryId = memoriesRepo.insertCandidate({
-      profileId: session.profileId,
-      packId,
+  // Consolidation (docs/14-MEMORY.md §3.4) decides what actually gets written:
+  // identical → dropped and re-confirmed, contradicting → kept as a candidate
+  // so approving it supersedes the old value (the user decides, never us).
+  const { saved } = persistCandidates({
+    profileId: session.profileId,
+    candidates: parsed.candidates.map((c) => ({
       category: c.category,
       content: c.content,
+      packId: c.scope === 'space' ? session.packId : null,
       confidence: c.confidence,
       importance: c.importance,
-      sourceRefs: [{ type: 'session', id: sessionId }],
       factKey: c.factKey ?? null,
-      sourceKind: 'extracted',
-    });
-
-    // Link what the memory is ABOUT. Entities are cheap and non-sensitive on
-    // their own (a name, a company), and linking at extraction time means the
-    // structured path works the moment the memory is approved. An unrecognised
-    // spelling becomes its own entity rather than being guessed into an
-    // existing one — over-splitting is recoverable, over-merging is not.
-    for (const e of c.entities) {
-      try {
-        const entity = entitiesRepo.upsertByName({
-          profileId: session.profileId,
-          name: e.name,
-          kind: e.kind,
-        });
-        entitiesRepo.link(memoryId, entity.id, 'mentioned');
-      } catch {
-        // An entity that fails to resolve must never cost us the memory.
-      }
-    }
-    saved += 1;
-  }
-  return saved;
+      entities: c.entities,
+    })),
+    sourceRefs: [{ type: 'session', id: sessionId }],
+    sourceKind: 'extracted',
+  });
+  return saved.length;
 }

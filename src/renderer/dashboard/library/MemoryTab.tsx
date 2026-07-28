@@ -2,23 +2,33 @@ import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { useProfileStore } from '../../store/useProfileStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
-import type { Job, MemoryItem } from '@shared/types';
-import { Badge, Button, Card, Field, SearchInput, Select, Switch, TextInput } from '../../components/ui';
+import type { Job, MemoryConflict, MemoryItem } from '@shared/types';
+import { Button, Card, Field, Select, Switch } from '../../components/ui';
+import { AddMemory } from './memory/AddMemory';
+import { EntityBrowser } from './memory/EntityBrowser';
+import { ReviewQueue } from './memory/ReviewQueue';
+import { SavedMemories } from './memory/SavedMemories';
 
-/** Library › Memory: the review-first memory surface. Nothing is captured
- *  before the consent switch is on; nothing is recalled until a candidate is
- *  explicitly approved here. Every item shows its provenance and scope, and
- *  delete removes the memory together with its embedding. */
+/** Library › Memory: the review-first memory manager (docs/14-MEMORY.md).
+ *  Nothing is captured before the consent switch is on, nothing is recalled
+ *  until it is explicitly approved here, every item shows where it came from,
+ *  and delete removes the memory together with its embedding. */
+
+type Tab = 'review' | 'saved' | 'people';
+
 export function MemoryTab() {
   const { profiles, load } = useProfileStore();
   const { settings, load: loadSettings } = useSettingsStore();
   const [profileId, setProfileId] = useState('');
+  const [tab, setTab] = useState<Tab>('review');
   const [pending, setPending] = useState<MemoryItem[]>([]);
   const [approved, setApproved] = useState<MemoryItem[]>([]);
+  const [conflicts, setConflicts] = useState<MemoryConflict[]>([]);
   const [query, setQuery] = useState('');
   const [spaces, setSpaces] = useState<Job[]>([]);
-  const [edits, setEdits] = useState<Record<string, string>>({}); // id → draft content
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     void load();
@@ -32,6 +42,7 @@ export function MemoryTab() {
     if (!pid) return;
     setPending(await api.memory.list(pid, { status: 'pending' }));
     setApproved(await api.memory.list(pid, { status: 'approved', query: query.trim() || undefined }));
+    setConflicts(await api.memory.conflicts(pid));
     const { items } = await api.jobs.page(pid, '', 100, 0);
     setSpaces(items as Job[]);
   };
@@ -49,12 +60,15 @@ export function MemoryTab() {
   };
 
   const act = async (fn: () => Promise<unknown>) => {
-    setError(null);
+    setBusy(true);
+    setError('');
     try {
       await fn();
       await refresh();
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -63,6 +77,31 @@ export function MemoryTab() {
     const s = spaces.find((x) => x.id === packId);
     return s ? s.company || s.title || 'Space' : 'Space';
   };
+
+  const exportMemory = () =>
+    void act(async () => {
+      const r = await api.memory.export(profileId);
+      setNote(r.saved ? `Saved ${r.count} memories to ${r.filePath}` : null);
+    });
+
+  const importMemory = () =>
+    void act(async () => {
+      const r = await api.memory.import(profileId, 'review');
+      if (r.cancelled) return;
+      const parts = [`${r.imported ?? 0} imported`];
+      if (r.duplicates) parts.push(`${r.duplicates} already known`);
+      if (r.blocked) parts.push(`${r.blocked} blocked as sensitive`);
+      if (r.unmatchedScopes?.length) {
+        parts.push(`${r.unmatchedScopes.length} Spaces not found here — imported as global`);
+      }
+      setNote(`${parts.join(' · ')}.`);
+    });
+
+  const tabs: { id: Tab; label: string; badge?: number }[] = [
+    { id: 'review', label: 'Review', badge: pending.length },
+    { id: 'saved', label: 'Saved', badge: approved.length },
+    { id: 'people', label: 'People & companies' },
+  ];
 
   return (
     <div>
@@ -79,140 +118,91 @@ export function MemoryTab() {
       </Card>
 
       <Card className="mb-5">
-        <Field label="Profile">
-          <Select value={profileId} onChange={(e) => setProfileId(e.target.value)}>
-            <option value="">Select a profile…</option>
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-                {p.targetRole ? ` · ${p.targetRole}` : ''}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="min-w-[16rem] flex-1">
+            <Field label="Profile">
+              <Select value={profileId} onChange={(e) => setProfileId(e.target.value)}>
+                <option value="">Select a profile…</option>
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {p.targetRole ? ` · ${p.targetRole}` : ''}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          {/* Portability sits next to the profile it belongs to. The file is
+              plain JSON so it can be read and edited; where it goes after that
+              is the user's decision, and nothing is uploaded. */}
+          <div className="flex items-center gap-2">
+            <Button variant="default" loading={busy} disabled={!profileId} onClick={exportMemory}>
+              Export…
+            </Button>
+            <Button variant="default" loading={busy} disabled={!profileId} onClick={importMemory}>
+              Import…
+            </Button>
+          </div>
+        </div>
       </Card>
 
       {error && (
-        <p className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300" role="alert">
+        <p
+          className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"
+          role="alert"
+        >
           ⚠ {error}
         </p>
       )}
+      {note && (
+        <p className="mb-4 rounded-lg border border-white/10 bg-neutral-900 px-3 py-2 text-sm text-neutral-300">
+          {note}
+        </p>
+      )}
 
-      {/* Review queue */}
       {profileId && (
         <>
-          <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-neutral-500">
-            To review {pending.length > 0 && <Badge tone="amber">{pending.length}</Badge>}
-          </h3>
-          {pending.length === 0 ? (
-            <p className="mb-6 text-sm text-neutral-500">
-              Nothing waiting. {memoryOn ? 'Candidates appear here after sessions.' : 'Turn memory on to start collecting suggestions.'}
-            </p>
-          ) : (
-            <div className="mb-6 space-y-2">
-              {pending.map((m) => (
-                <Card key={m.id} className="!py-3">
-                  <div className="mb-2 flex items-center gap-2 text-xs text-neutral-500">
-                    <Badge>{m.category}</Badge>
-                    <Badge tone="blue">{spaceTitle(m.packId)}</Badge>
-                    <span>confidence {(m.confidence * 100).toFixed(0)}%</span>
-                    {m.sourceRefs?.map((r) => (
-                      <span key={r.id} className="text-neutral-600">
-                        from {r.type}
-                      </span>
-                    ))}
-                  </div>
-                  <TextInput
-                    value={edits[m.id] ?? m.content}
-                    aria-label="Memory candidate text"
-                    onChange={(e) => setEdits((d) => ({ ...d, [m.id]: e.target.value }))}
-                  />
-                  <div className="mt-2 flex gap-2">
-                    <Button
-                      variant="success"
-                      onClick={() =>
-                        void act(() =>
-                          api.memory.review(m.id, 'approve', {
-                            content: edits[m.id] ?? m.content,
-                          }),
-                        )
-                      }
-                    >
-                      Approve
-                    </Button>
-                    <Button variant="ghost" onClick={() => void act(() => api.memory.review(m.id, 'reject'))}>
-                      Reject
-                    </Button>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )}
+          <AddMemory profileId={profileId} onDone={() => refresh()} onError={setError} />
 
-          {/* Approved memory */}
-          <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-neutral-500">
-            Saved memories
-          </h3>
-          <div className="mb-3">
-            <SearchInput
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search saved memories…"
-            />
+          <div className="mb-4 flex items-center gap-2 border-b border-white/5 pb-2">
+            {tabs.map((t) => (
+              <Button
+                key={t.id}
+                variant={tab === t.id ? 'primary' : 'ghost'}
+                onClick={() => setTab(t.id)}
+              >
+                {t.label}
+                {!!t.badge && <span className="text-xs opacity-70">{t.badge}</span>}
+              </Button>
+            ))}
           </div>
-          {approved.length === 0 ? (
-            <p className="mb-6 text-sm text-neutral-500">No saved memories{query ? ' match your search' : ' yet'}.</p>
-          ) : (
-            <div className="mb-6 space-y-2">
-              {approved.map((m) => (
-                <Card key={m.id} className="!py-3">
-                  <div className="mb-2 flex items-center gap-2 text-xs text-neutral-500">
-                    <Badge>{m.category}</Badge>
-                    <Badge tone="blue">{spaceTitle(m.packId)}</Badge>
-                    {m.lastUsedAt && (
-                      <span>last used {new Date(m.lastUsedAt).toLocaleDateString()}</span>
-                    )}
-                    {m.sourceRefs?.map((r) => (
-                      <span key={r.id} className="text-neutral-600">
-                        from {r.type}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <TextInput
-                      value={edits[m.id] ?? m.content}
-                      aria-label="Memory text"
-                      onChange={(e) => setEdits((d) => ({ ...d, [m.id]: e.target.value }))}
-                    />
-                    {edits[m.id] !== undefined && edits[m.id] !== m.content && (
-                      <Button
-                        variant="primary"
-                        onClick={() => void act(() => api.memory.update(m.id, { content: edits[m.id] }))}
-                      >
-                        Save
-                      </Button>
-                    )}
-                    <Button variant="ghost" onClick={() => void act(() => api.memory.archive(m.id))}>
-                      Archive
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      className="text-red-300"
-                      title="Delete this memory and its embedding permanently"
-                      onClick={() => void act(() => api.memory.delete(m.id))}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </Card>
-              ))}
-            </div>
+
+          {tab === 'review' && (
+            <ReviewQueue
+              pending={pending}
+              conflicts={conflicts}
+              spaceTitle={spaceTitle}
+              onRefresh={() => refresh()}
+              onError={setError}
+            />
           )}
+          {tab === 'saved' && (
+            <SavedMemories
+              approved={approved}
+              query={query}
+              onQuery={setQuery}
+              spaceTitle={spaceTitle}
+              profileId={profileId}
+              onRefresh={() => refresh()}
+              onError={setError}
+            />
+          )}
+          {tab === 'people' && <EntityBrowser profileId={profileId} onError={setError} />}
 
           {/* Per-Space opt-out */}
           {spaces.length > 0 && (
             <>
-              <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-neutral-500">
+              <h3 className="mb-2 mt-6 text-xs font-medium uppercase tracking-wider text-neutral-500">
                 Per-Space memory
               </h3>
               <Card>
@@ -226,7 +216,6 @@ export function MemoryTab() {
                       <Switch
                         checked={s.memoryEnabled}
                         onChange={(v) => void act(() => api.memory.setPackEnabled(s.id, v))}
-                       
                       />
                     </li>
                   ))}

@@ -174,11 +174,43 @@ A **session archive** is written per call regardless: the transcript stays in
 ### 3.5 The user is the editor (answers G6)
 
 New IPC (following the 4-step contract): `memory:create`, `memory:import`,
-`memory:merge`, `memory:split`, `memory:resolveConflict`, `entity:*`.
+`memory:ingest`, `memory:review-many`, `memory:merge`, `memory:split`,
+`memory:conflicts`, `memory:history`, `memory:entit*`.
 The Library › Memory surface grows into a manager: create a memory by hand,
 paste or drop a document as "things to know about me" (chunk → propose →
 approve in bulk), browse by entity, see conflicts, and view a fact's history
 chain. Nothing bypasses the approval gate — imported items land `pending` too.
+
+**Ingest is deliberately less timid than session extraction.** A transcript is
+something the app overheard, so the ≤ 5 cap and the 0.6 floor are the price of
+not being creepy. A document is something the user *handed over*: the intent is
+explicit, so ingest reads the whole thing at up to 8 facts per ~2.4k-character
+window. Everything else is unchanged — the sensitive filter still rejects
+before persistence, consolidation still drops what is already known, and every
+candidate still lands `pending`. `chunkText` keeps an over-long paragraph
+whole, which is correct for a résumé and wrong for extracted PDF text with no
+blank lines in it, so ingest re-splits anything over the window on a sentence
+boundary. A document longer than 40 windows is read from the start and the
+result **says so** rather than passing a partial read off as complete.
+
+**Merge and split are the two edits a text field cannot express.** Merge folds
+several memories into one sentence the user writes; split breaks a candidate
+that bundled three facts into three. Both **archive** their sources instead of
+deleting them, so the judgement stays reversible and readable. Both produce
+approved rows only when every input was already approved — the approval gate
+exists so nothing the *model* wrote is remembered unreviewed, and a human who
+approved every input and typed the output has reviewed it. Split does **not**
+copy `factKey` onto the parts: a single-valued fact broken into several
+statements is no longer single-valued, and several current rows under one key
+is precisely what §3.1 exists to prevent.
+
+**Consolidation is shared by every producer** (`consolidate.ts`). Session
+extraction, document ingest, and anything added later go through one function,
+so invariants 1 and 2 are structural rather than a rule each new caller has to
+remember. Deduplication now matches on normalized *content* within the scope a
+candidate would land in, not only on `factKey` — previously a plain sentence
+could be re-proposed after every session forever, and re-proposing something
+the user rejected quietly ignores their answer.
 
 ## 4. Invariants (unchanged, and they bind the new code too)
 
@@ -287,7 +319,7 @@ is that module's interface rather than its callers.
 | **M1 · Truthfulness** ✅ | Additive migration (§3.1), supersession + conflict review, consolidation stage 2, `memory:create` / `memory:conflicts` / `memory:history`. The twin cannot be built before this — it is the "don't state a stale fact" guarantee. |
 | **M2 · Recall quality** ✅ | IDF-weighted lexical scoring (`lexical.ts`), the semantic ∪ lexical surfacing contract (§3.3), and the scale benchmark. FTS5 was evaluated and rejected — see §6. |
 | **M3 · Entities** ✅ | `entities` + `memory_entities` (migration 0014), exact name/alias resolution, the entity retrieval path in recall, non-destructive user-driven merge, and the `memory:entit*` IPC. Entity-browse UI remains. |
-| **M4 · Authoring** | Ingest a document as "things to know about me", bulk approve, merge/split, history view |
+| **M4 · Authoring** ✅ | Document ingest (`ingest.ts`), shared consolidation (`consolidate.ts`), bulk review, merge/split, and the Library › Memory manager — conflicts, history, entity browse, and export/import all reachable at last. |
 | **M6 · Portability** ✅ | Export/import a profile's memory as inspectable JSON (§5). Shipped alongside M1 — a store the user cannot get their data out of is not one they should trust with more of it. |
 | **M5 · Scale** | Worker-side scoring, `sqlite-vec` behind the interface if the benchmark says so |
 

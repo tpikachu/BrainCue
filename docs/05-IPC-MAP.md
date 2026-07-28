@@ -230,7 +230,7 @@ Channel constants live in `EVENTS` (`src/shared/ipc.ts`); payload types are in
 | `contribution:done` | `{ contributionId }` | overlay (stream finished — completed or aborted) |
 | `contribution:reset` | `{ contributionId }` | overlay (regenerate: clear that card's body, keep the card) |
 
-Memory additions (Prompt 8): `memory:list` / `memory:review` (approve with
+Memory: `memory:list` / `memory:review` (approve with
 optional edits, or reject) / `memory:update` / `memory:archive` /
 `memory:delete` (removes the row AND its embedding) /
 `memory:set-pack-enabled` (per-Space opt-out); `settings:set` accepts
@@ -262,6 +262,19 @@ summarise), and `memory:entity-merge` (fold one into another). Merging is a
 USER action by design — automatic merging of similar names corrupts memory
 invisibly — and it is non-destructive: the losing entity keeps a pointer to
 the winner so stale references still resolve.
+
+Authoring ([14 · Memory](14-MEMORY.md) §3.5): `memory:ingest` (read a document
+as "things to know about me" — pass `text` for a paste or `filePath` for a
+pdf/docx/txt/md that main extracts locally; returns
+`{chunks, chunksRead, chunksFailed, truncated, proposed, duplicates, blocked, belowFloor}`
+so a partial or truncated read is visible rather than reported as a clean
+success), `memory:review-many` (approve/reject a selection; returns
+`{approved, rejected, failed}` with per-id errors, because one bad candidate
+must not strand the rest of the batch), `memory:merge` (fold several memories
+into one the user writes) and `memory:split` (break one into several). Merge
+and split archive their sources rather than deleting them, and produce approved
+rows only when every input was already approved; split does not copy `factKey`
+onto the parts.
 
 Meeting Copilot additions (Prompt 7): `session:start` now accepts `mode`
 (SessionMode, default `interview`) and `presence`

@@ -1,14 +1,24 @@
 import { z } from 'zod';
 import { dialog } from 'electron';
 import { readFile, writeFile } from 'fs/promises';
+import { basename } from 'path';
 import { IPC } from '@shared/ipc';
 import { handle } from './helpers';
 import { memoriesRepo } from '../db/repositories/memories.repo';
 import { contextPacksRepo } from '../db/repositories/jobs.repo';
 import { entitiesRepo } from '../db/repositories/entities.repo';
 import { getMainWindow } from '../windows/mainWindow';
+import { extractText } from '../services/documents/extract';
 import { buildMemoryExport, importMemories } from '../services/memory/portability';
-import { approveMemory, createMemory, updateMemory } from '../services/memory/memoryService';
+import { ingestDocument } from '../services/memory/ingest';
+import {
+  approveMemory,
+  createMemory,
+  mergeMemories,
+  reviewMany,
+  splitMemory,
+  updateMemory,
+} from '../services/memory/memoryService';
 
 /** "domain:subject/attribute", lowercase kebab — mirrors the extractor's
  *  schema so hand-authored and extracted facts share one key space. */
@@ -160,6 +170,66 @@ export function registerMemoryIpc(): void {
       // keeping them distinct so neither can shadow the other.
       return { cancelled: false as const, ...(await importMemories(profileId, payload, mode)) };
     },
+  );
+
+  // ── Authoring (docs/14-MEMORY.md §3.5) ─────────────────────────────────
+  // The user is the editor of their own memory: hand it a document, approve a
+  // batch, fold duplicates together, break a bundled sentence apart. Every one
+  // of these still goes through the sensitive filter and the review lifecycle.
+  handle(
+    IPC.memory.ingest,
+    z
+      .object({
+        profileId: z.string().min(1),
+        packId: z.string().nullable().default(null),
+        // Either paste the text or point at a file — the file is read and
+        // parsed locally, and only the extracted text goes to the model.
+        text: z.string().optional(),
+        filePath: z.string().optional(),
+      })
+      .refine((v) => !!v.text?.trim() || !!v.filePath, {
+        message: 'Provide text to import or a file to read.',
+      }),
+    async ({ profileId, packId, text, filePath }) => {
+      let body = text ?? '';
+      let label = 'Pasted text';
+      if (filePath) {
+        const extracted = await extractText(filePath);
+        body = extracted.text;
+        label = basename(filePath);
+      }
+      return ingestDocument({ profileId, packId, text: body, label });
+    },
+  );
+
+  handle(
+    IPC.memory.reviewMany,
+    z.object({
+      ids: z.array(z.string().min(1)).min(1).max(200),
+      action: z.enum(['approve', 'reject']),
+    }),
+    ({ ids, action }) => reviewMany(ids, action),
+  );
+
+  handle(
+    IPC.memory.merge,
+    z.object({
+      ids: z.array(z.string().min(1)).min(2).max(20),
+      content: z.string().min(3).max(1000),
+      category: zCategory.optional(),
+      packId: z.string().nullable().optional(),
+      factKey: zFactKey.nullable().optional(),
+    }),
+    (args) => mergeMemories(args),
+  );
+
+  handle(
+    IPC.memory.split,
+    z.object({
+      id: z.string().min(1),
+      parts: z.array(z.string().min(3).max(1000)).min(2).max(10),
+    }),
+    ({ id, parts }) => splitMemory({ id, parts }),
   );
 
   // ── Entities (docs/14-MEMORY.md §3.2) ──────────────────────────────────

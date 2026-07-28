@@ -115,6 +115,11 @@ export const IPC = {
     history: 'memory:history', // a fact's revision chain, newest first
     export: 'memory:export', // write the profile's memory to a JSON file (save dialog)
     import: 'memory:import', // merge a memory export back in (open dialog)
+    // Authoring (docs/14-MEMORY.md §3.5): the user is the editor of their memory
+    ingest: 'memory:ingest', // read a document as "things to know about me"
+    reviewMany: 'memory:review-many', // approve/reject a selection in one action
+    merge: 'memory:merge', // fold several memories into one the user writes
+    split: 'memory:split', // break one bundled memory into separate facts
     // Entities: the people/orgs/projects memory is ABOUT (docs/14-MEMORY.md §3.2)
     entities: 'memory:entities', // list, with current-memory counts
     entity: 'memory:entity', // one entity + every current memory about it

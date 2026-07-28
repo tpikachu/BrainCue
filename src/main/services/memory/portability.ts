@@ -7,7 +7,7 @@ import { profilesRepo } from '../../db/repositories/profiles.repo';
 import { providerFor } from '../../providers/registry';
 import { bufferToVector, vectorToBuffer } from '../rag/vectorMath';
 import { checkSensitive } from './sensitiveFilter';
-import { normalize } from './extractor';
+import { normalize } from './consolidate';
 import type { MemoryCategory } from '@shared/types';
 
 /** The running app's version, without importing electron into the test path —

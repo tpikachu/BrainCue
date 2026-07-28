@@ -288,11 +288,50 @@ const api = {
         reEmbedded?: number;
         unmatchedScopes?: string[];
       }>(IPC.memory.import, { profileId, mode }),
+    /** Read a document as "things to know about me". Pass `text` to import a
+     *  paste, or `filePath` to have main extract a pdf/docx/txt/md locally.
+     *  Everything it proposes lands pending, like every other capture path. */
+    ingest: (args: {
+      profileId: string;
+      packId?: string | null;
+      text?: string;
+      filePath?: string;
+    }) =>
+      invoke<{
+        chunks: number;
+        chunksRead: number;
+        chunksFailed: number;
+        truncated: boolean;
+        proposed: number;
+        duplicates: number;
+        blocked: number;
+        belowFloor: number;
+      }>(IPC.memory.ingest, args),
     review: (
       id: string,
       action: 'approve' | 'reject',
       edits: { content?: string; category?: string; packId?: string | null } = {},
     ) => invoke<MemoryItem>(IPC.memory.review, { id, action, ...edits }),
+    /** Approve/reject a selection. Failures come back per id rather than
+     *  aborting the batch — one bad candidate must not strand the rest. */
+    reviewMany: (ids: string[], action: 'approve' | 'reject') =>
+      invoke<{ approved: string[]; rejected: string[]; failed: { id: string; error: string }[] }>(
+        IPC.memory.reviewMany,
+        { ids, action },
+      ),
+    /** Fold several memories into one you write. The sources are archived, not
+     *  deleted, so the merge stays reversible. */
+    merge: (args: {
+      ids: string[];
+      content: string;
+      category?: string;
+      packId?: string | null;
+      factKey?: string | null;
+    }) => invoke<MemoryItem>(IPC.memory.merge, args),
+    /** Break one bundled memory into separate facts. Parts do not inherit the
+     *  fact key — re-key the one that still owns it. */
+    split: (id: string, parts: string[]) =>
+      invoke<MemoryItem[]>(IPC.memory.split, { id, parts }),
     update: (
       id: string,
       patch: {

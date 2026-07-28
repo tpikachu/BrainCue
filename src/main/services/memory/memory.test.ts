@@ -69,7 +69,15 @@ import { memoriesRepo } from '../../db/repositories/memories.repo';
 import { entitiesRepo } from '../../db/repositories/entities.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
 import { extractMemoryCandidates, extractionSchema } from './extractor';
-import { approveMemory, createMemory, updateMemory } from './memoryService';
+import { INGEST_CHUNK_CHARS, INGEST_MAX_CHUNKS, ingestDocument, toWindows } from './ingest';
+import {
+  approveMemory,
+  createMemory,
+  mergeMemories,
+  reviewMany,
+  splitMemory,
+  updateMemory,
+} from './memoryService';
 import { buildMemoryExport, importMemories, inspectMemoryExport } from './portability';
 import { buildIndex, hasExactAnchor, lexicalScore, tokenize } from './lexical';
 import { MEMORY_MIN_SCORE, recallMemories } from './recall';
@@ -902,5 +910,353 @@ describe('consolidation + authoring', () => {
         content: 'My password is hunter2 for the staging box.',
       }),
     ).toThrow();
+  });
+});
+
+// ── M4 · Authoring (docs/14-MEMORY.md §3.5) ────────────────────────────────
+
+/** ~1.3k chars per paragraph, so `chunkText` at a 2.4k window yields one
+ *  excerpt per seed and the chunk boundaries are predictable. */
+const doc = (...seeds: string[]) =>
+  seeds.map((s) => `${s} ${'filler words to pad this paragraph out. '.repeat(32)}`).join('\n\n');
+const excerptNo = (user: string) => Number(/Excerpt (\d+) of/.exec(user)?.[1] ?? 0);
+
+describe('document ingest', () => {
+  it('refuses before consent — the document is never sent anywhere', async () => {
+    settingsRepo.set(SETTINGS_KEYS.memoryEnabled, '0');
+    const pid = seedProfile();
+    await expect(
+      ingestDocument({ profileId: pid, packId: null, text: doc('alpha'), label: 'bio.md' }),
+    ).rejects.toThrow(/memory on/i);
+    expect(h.chatCalls).toBe(0);
+  });
+
+  it('refuses for a Space that opted out', async () => {
+    const pid = seedProfile();
+    const packId = seedPack(pid, 0);
+    await expect(
+      ingestDocument({ profileId: pid, packId, text: doc('alpha'), label: 'bio.md' }),
+    ).rejects.toThrow(/turned off/i);
+    expect(h.chatCalls).toBe(0);
+  });
+
+  it('reads every excerpt and lands candidates PENDING with document provenance', async () => {
+    const pid = seedProfile();
+    h.chatJson = async ({ user }) => ({
+      candidates: [
+        {
+          category: 'fact',
+          content: `Runs workstream number ${excerptNo(user)} at Acme.`,
+          confidence: 0.9,
+          importance: 0.5,
+          entities: [{ name: 'Acme', kind: 'org' }],
+        },
+      ],
+    });
+    const res = await ingestDocument({
+      profileId: pid,
+      packId: null,
+      text: doc('alpha', 'beta', 'gamma'),
+      label: 'about-me.md',
+    });
+
+    expect(res.chunks).toBe(3);
+    expect(res.chunksRead).toBe(3);
+    expect(res.chunksFailed).toBe(0);
+    expect(res.proposed).toBe(3);
+
+    const rows = memoriesRepo.list({ profileId: pid });
+    expect(rows).toHaveLength(3);
+    expect(rows.every((r) => r.status === 'pending')).toBe(true); // never a bypass of review
+    expect(rows.every((r) => r.sourceKind === 'imported')).toBe(true);
+    expect(rows[0].sourceRefs).toEqual([{ type: 'document', id: 'about-me.md' }]);
+    // The structured path is wired on this producer too, not just sessions.
+    expect(entitiesRepo.list(pid).map((e) => e.canonicalName)).toContain('Acme');
+  });
+
+  it('blocks sensitive lines before persistence and reports the count', async () => {
+    const pid = seedProfile();
+    h.chatJson = async () => ({
+      candidates: [
+        { category: 'fact', content: 'Leads the Atlas rollout.', confidence: 0.9, importance: 0.5 },
+        {
+          category: 'fact',
+          content: 'My password is hunter2 for the staging box.',
+          confidence: 0.95,
+          importance: 0.9,
+        },
+      ],
+    });
+    const res = await ingestDocument({
+      profileId: pid,
+      packId: null,
+      text: doc('alpha'),
+      label: 'notes.md',
+    });
+    expect(res.proposed).toBe(1);
+    expect(res.blocked).toBe(1);
+    expect(memoriesRepo.list({ profileId: pid }).map((m) => m.content)).toEqual([
+      'Leads the Atlas rollout.',
+    ]);
+  });
+
+  it('drops the repetition a long document is full of instead of proposing it twice', async () => {
+    const pid = seedProfile();
+    h.chatJson = async () => ({
+      candidates: [
+        { category: 'fact', content: 'Leads the Atlas rollout.', confidence: 0.9, importance: 0.5 },
+      ],
+    });
+    const res = await ingestDocument({
+      profileId: pid,
+      packId: null,
+      text: doc('alpha', 'beta', 'gamma'),
+      label: 'notes.md',
+    });
+    expect(res.chunksRead).toBe(3);
+    expect(res.proposed).toBe(1);
+    expect(res.duplicates).toBe(2);
+    expect(memoriesRepo.list({ profileId: pid })).toHaveLength(1);
+  });
+
+  it('counts a failed excerpt rather than passing a partial read off as complete', async () => {
+    const pid = seedProfile();
+    h.chatJson = async ({ user }) => {
+      if (excerptNo(user) === 2) throw new Error('provider exploded');
+      return {
+        candidates: [
+          {
+            category: 'fact',
+            content: `Owns initiative ${excerptNo(user)}.`,
+            confidence: 0.9,
+            importance: 0.5,
+          },
+        ],
+      };
+    };
+    const res = await ingestDocument({
+      profileId: pid,
+      packId: null,
+      text: doc('alpha', 'beta', 'gamma'),
+      label: 'notes.md',
+    });
+    expect(res.chunksRead).toBe(2);
+    expect(res.chunksFailed).toBe(1);
+    expect(res.proposed).toBe(2); // what survived is still worth reviewing
+  });
+
+  it('reports truncation instead of quietly reading only the beginning', async () => {
+    const pid = seedProfile();
+    h.chatJson = async () => ({ candidates: [] });
+    const seeds = Array.from({ length: INGEST_MAX_CHUNKS + 5 }, (_, i) => `section${i}`);
+    const res = await ingestDocument({
+      profileId: pid,
+      packId: null,
+      text: doc(...seeds),
+      label: 'huge.pdf',
+    });
+    expect(res.truncated).toBe(true);
+    expect(res.chunks).toBe(INGEST_MAX_CHUNKS);
+    expect(h.chatCalls).toBe(INGEST_MAX_CHUNKS);
+  });
+
+  it('splits a paragraph longer than the window — extracted PDF text has no blank lines', () => {
+    // One 17k-character "paragraph", which is exactly what pdf-parse hands back.
+    const wall = 'This is a sentence about the Atlas project. '.repeat(400);
+    const windows = toWindows(wall);
+    expect(windows.length).toBeGreaterThan(5);
+    expect(Math.max(...windows.map((w) => w.length))).toBeLessThanOrEqual(INGEST_CHUNK_CHARS);
+    expect(windows[0].endsWith('.')).toBe(true); // cut on a sentence, not mid-word
+  });
+});
+
+describe('consolidation across producers (§3.4)', () => {
+  const oneCandidate = (content: string, scope = 'profile') => async () => ({
+    candidates: [{ category: 'fact', content, scope, confidence: 0.9, importance: 0.5 }],
+  });
+
+  it('does not re-propose a sentence the user already rejected', async () => {
+    const pid = seedProfile();
+    h.chatJson = oneCandidate('Ships releases on Fridays only.');
+    expect(await extractMemoryCandidates(seedSession(pid, null, ['a', 'b']))).toBe(1);
+    const [row] = memoriesRepo.list({ profileId: pid, status: 'pending' });
+    memoriesRepo.setStatus(row.id, 'rejected');
+
+    // A later session says the same thing. The user's "no" has to stick.
+    expect(await extractMemoryCandidates(seedSession(pid, null, ['a', 'b']))).toBe(0);
+    expect(memoriesRepo.list({ profileId: pid })).toHaveLength(1);
+  });
+
+  it('re-confirms an approved duplicate rather than storing it again', async () => {
+    const pid = seedProfile();
+    const mid = seedApproved(pid, 'Prefers concise bullet answers.', { lastUsedAt: null });
+    h.chatJson = oneCandidate('prefers concise bullet answers!'); // same claim, different spelling
+    expect(await extractMemoryCandidates(seedSession(pid, null, ['a', 'b']))).toBe(0);
+    expect(memoriesRepo.get(mid)!.lastUsedAt).toBeGreaterThan(0);
+  });
+
+  it('another Space’s memory does not deduplicate a candidate for this one', async () => {
+    const pid = seedProfile();
+    const packA = seedPack(pid);
+    const packB = seedPack(pid);
+    seedApproved(pid, 'The renewal call is quarterly.', { packId: packA });
+    h.chatJson = oneCandidate('The renewal call is quarterly.', 'space');
+    // Space B cannot see Space A's memory, so it must learn this for itself.
+    expect(await extractMemoryCandidates(seedSession(pid, packB, ['a', 'b']))).toBe(1);
+  });
+});
+
+describe('bulk review', () => {
+  it('approves a selection and returns per-item failures instead of aborting', async () => {
+    const pid = seedProfile();
+    const a = createMemory({
+      profileId: pid,
+      packId: null,
+      category: 'fact',
+      content: 'Ships on Fridays.',
+    });
+    const b = createMemory({
+      profileId: pid,
+      packId: null,
+      category: 'fact',
+      content: 'Uses Linear for tracking.',
+    });
+
+    const res = await reviewMany([a.id, 'no-such-id', b.id], 'approve');
+    expect(res.approved).toEqual([a.id, b.id]);
+    expect(res.failed.map((f) => f.id)).toEqual(['no-such-id']);
+    // the failure in the middle must not have stranded what came after it
+    expect(memoriesRepo.get(b.id)!.status).toBe('approved');
+  });
+
+  it('rejects a selection in one action', async () => {
+    const pid = seedProfile();
+    const a = createMemory({
+      profileId: pid,
+      packId: null,
+      category: 'fact',
+      content: 'Something noisy.',
+    });
+    const b = createMemory({
+      profileId: pid,
+      packId: null,
+      category: 'fact',
+      content: 'Something else noisy.',
+    });
+    const res = await reviewMany([a.id, b.id], 'reject');
+    expect(res.rejected).toHaveLength(2);
+    expect(memoriesRepo.list({ profileId: pid, status: 'rejected' })).toHaveLength(2);
+  });
+});
+
+describe('merge and split', () => {
+  it('merges approved memories into one approved memory and archives the sources', async () => {
+    const pid = seedProfile();
+    const a = seedApproved(pid, 'Prefers concise answers.');
+    const b = seedApproved(pid, 'Prefers bullet points.');
+    const acme = entitiesRepo.upsertByName({ profileId: pid, name: 'Acme', kind: 'org' });
+    entitiesRepo.link(a, acme.id, 'mentioned');
+
+    const merged = await mergeMemories({
+      ids: [a, b],
+      content: 'Prefers concise, bulleted answers.',
+    });
+
+    expect(merged.status).toBe('approved');
+    expect(merged.sourceKind).toBe('derived');
+    expect(merged.sourceRefs).toEqual([
+      { type: 'memory', id: a },
+      { type: 'memory', id: b },
+    ]);
+    // Archived, not deleted — a merge is a judgement call and stays reversible.
+    expect(memoriesRepo.get(a)!.status).toBe('archived');
+    expect(memoriesRepo.get(b)!.status).toBe('archived');
+    expect(memoriesRepo.get(a)!.content).toBe('Prefers concise answers.');
+    // The structured path survives the rewrite.
+    expect(entitiesRepo.linksFor(merged.id).map((l) => l.entityId)).toContain(acme.id);
+  });
+
+  it('a merge that includes a pending source lands pending', async () => {
+    const pid = seedProfile();
+    const approved = seedApproved(pid, 'Runs the Atlas rollout.');
+    const pending = createMemory({
+      profileId: pid,
+      packId: null,
+      category: 'fact',
+      content: 'Atlas is behind schedule.',
+    });
+    const merged = await mergeMemories({
+      ids: [approved, pending.id],
+      content: 'Runs the Atlas rollout, which is behind schedule.',
+    });
+    expect(merged.status).toBe('pending'); // review still owed on the un-reviewed input
+  });
+
+  it('a merge that replaces a fact retires the old value', async () => {
+    const pid = seedProfile();
+    const old = seedApproved(pid, 'Atlas ships in March.', {
+      factKey: 'project:atlas/launch-date',
+    });
+    const note = seedApproved(pid, 'Atlas slipped by a quarter.');
+    const merged = await mergeMemories({
+      ids: [old, note],
+      content: 'Atlas ships in June.',
+      factKey: 'project:atlas/launch-date',
+    });
+    expect(memoriesRepo.get(old)!.supersededBy).toBe(merged.id);
+    expect(memoriesRepo.get(merged.id)!.revision).toBe(2);
+  });
+
+  it('refuses to merge sensitive text, leaving the sources untouched', async () => {
+    const pid = seedProfile();
+    const a = seedApproved(pid, 'Prefers concise answers.');
+    const b = seedApproved(pid, 'Prefers bullet points.');
+    await expect(
+      mergeMemories({ ids: [a, b], content: 'My password is hunter2 for the staging box.' }),
+    ).rejects.toThrow();
+    expect(memoriesRepo.get(a)!.status).toBe('approved');
+    expect(memoriesRepo.get(b)!.status).toBe('approved');
+  });
+
+  it('splits an approved memory into approved parts and archives the original', async () => {
+    const pid = seedProfile();
+    const src = seedApproved(
+      pid,
+      'Prefers concise answers, uses Linear, and reports to Sarah Chen.',
+      { factKey: 'profile:user/working-style' },
+    );
+    const sarah = entitiesRepo.upsertByName({ profileId: pid, name: 'Sarah Chen', kind: 'person' });
+    entitiesRepo.link(src, sarah.id, 'mentioned');
+
+    const parts = await splitMemory({
+      id: src,
+      parts: [
+        'Prefers concise answers.',
+        'Uses Linear for issue tracking.',
+        'Reports to Sarah Chen.',
+      ],
+    });
+
+    expect(parts).toHaveLength(3);
+    expect(parts.every((p) => p.status === 'approved')).toBe(true);
+    // The key is NOT copied: three current rows under one key would break the
+    // one-truth invariant supersession exists to hold (§3.1).
+    expect(parts.every((p) => p.factKey === null)).toBe(true);
+    expect(memoriesRepo.get(src)!.status).toBe('archived');
+    expect(entitiesRepo.linksFor(parts[0].id).map((l) => l.entityId)).toContain(sarah.id);
+  });
+
+  it('one sensitive part rejects the whole split — nothing is written', async () => {
+    const pid = seedProfile();
+    const src = seedApproved(pid, 'Prefers concise answers and uses the staging box.');
+    const before = memoriesRepo.list({ profileId: pid }).length;
+    await expect(
+      splitMemory({
+        id: src,
+        parts: ['Prefers concise answers.', 'My password is hunter2 for the staging box.'],
+      }),
+    ).rejects.toThrow();
+    expect(memoriesRepo.list({ profileId: pid })).toHaveLength(before);
+    expect(memoriesRepo.get(src)!.status).toBe('approved');
   });
 });
