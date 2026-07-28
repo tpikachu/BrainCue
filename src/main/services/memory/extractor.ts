@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { asc, eq } from 'drizzle-orm';
 import { db, schema } from '../../db';
 import { memoriesRepo } from '../../db/repositories/memories.repo';
+import { entitiesRepo } from '../../db/repositories/entities.repo';
 import { contextPacksRepo } from '../../db/repositories/jobs.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
 import { providerFor } from '../../providers/registry';
@@ -44,6 +45,17 @@ export const extractionSchema = z.object({
           .regex(/^[a-z0-9]+:[a-z0-9-]+\/[a-z0-9-]+$/)
           .max(80)
           .nullish(),
+        /** The people/companies/projects this memory is ABOUT, so account and
+         *  person questions can be answered structurally (§3.2). */
+        entities: z
+          .array(
+            z.object({
+              name: z.string().min(2).max(80),
+              kind: z.enum(['person', 'org', 'project', 'product', 'place', 'topic']),
+            }),
+          )
+          .max(6)
+          .default([]),
       }),
     )
     .max(5)
@@ -74,7 +86,9 @@ BE CONSERVATIVE:
 - confidence reflects how explicitly the transcript supports it. When in doubt, lower.
 
 SET "factKey" ONLY for a fact that can have exactly ONE current value, so a later value replaces this one rather than sitting beside it. Format: "domain:subject/attribute", lowercase kebab — e.g. "project:atlas/launch-date", "person:sarah-chen/role", "profile:user/job-title". Same fact = same key across sessions, so choose the obvious slug and reuse it.
-OMIT "factKey" (or null) for anything multi-valued or narrative: preferences, stories, workflows, observations. A wrong key silently retires a good memory, so when unsure, omit it.`;
+OMIT "factKey" (or null) for anything multi-valued or narrative: preferences, stories, workflows, observations. A wrong key silently retires a good memory, so when unsure, omit it.
+
+LIST "entities" — the people, companies, projects, or products the memory is ABOUT (not every noun in it). Use the fullest name the transcript gives ("Sarah Chen", not "Sarah"); the store matches spellings itself. Omit generic references ("the client", "our team") — an entity nobody can name is not an entity.`;
 
 /** Extract + persist pending candidates for a finished session. Returns how
  *  many were saved (0 when consent is off, the Space opted out, the session
@@ -137,7 +151,7 @@ export async function extractMemoryCandidates(sessionId: string): Promise<number
       continue;
     }
 
-    memoriesRepo.insertCandidate({
+    const memoryId = memoriesRepo.insertCandidate({
       profileId: session.profileId,
       packId,
       category: c.category,
@@ -148,6 +162,24 @@ export async function extractMemoryCandidates(sessionId: string): Promise<number
       factKey: c.factKey ?? null,
       sourceKind: 'extracted',
     });
+
+    // Link what the memory is ABOUT. Entities are cheap and non-sensitive on
+    // their own (a name, a company), and linking at extraction time means the
+    // structured path works the moment the memory is approved. An unrecognised
+    // spelling becomes its own entity rather than being guessed into an
+    // existing one — over-splitting is recoverable, over-merging is not.
+    for (const e of c.entities) {
+      try {
+        const entity = entitiesRepo.upsertByName({
+          profileId: session.profileId,
+          name: e.name,
+          kind: e.kind,
+        });
+        entitiesRepo.link(memoryId, entity.id, 'mentioned');
+      } catch {
+        // An entity that fails to resolve must never cost us the memory.
+      }
+    }
     saved += 1;
   }
   return saved;

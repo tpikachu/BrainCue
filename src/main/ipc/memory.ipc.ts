@@ -5,6 +5,7 @@ import { IPC } from '@shared/ipc';
 import { handle } from './helpers';
 import { memoriesRepo } from '../db/repositories/memories.repo';
 import { contextPacksRepo } from '../db/repositories/jobs.repo';
+import { entitiesRepo } from '../db/repositories/entities.repo';
 import { getMainWindow } from '../windows/mainWindow';
 import { buildMemoryExport, importMemories } from '../services/memory/portability';
 import { approveMemory, createMemory, updateMemory } from '../services/memory/memoryService';
@@ -159,6 +160,45 @@ export function registerMemoryIpc(): void {
       // keeping them distinct so neither can shadow the other.
       return { cancelled: false as const, ...(await importMemories(profileId, payload, mode)) };
     },
+  );
+
+  // ── Entities (docs/14-MEMORY.md §3.2) ──────────────────────────────────
+  handle(IPC.memory.entities, z.object({ profileId: z.string().min(1) }), ({ profileId }) =>
+    entitiesRepo.list(profileId),
+  );
+
+  handle(
+    IPC.memory.entity,
+    z.object({ profileId: z.string().min(1), entityId: z.string().min(1) }),
+    ({ profileId, entityId }) => {
+      const entity = entitiesRepo.resolve(entityId);
+      if (!entity) throw new Error('Entity not found');
+      const memories = entitiesRepo.memoriesFor(
+        entity.id,
+        memoriesRepo.list({ profileId, status: 'approved' }),
+      );
+      return { entity, memories };
+    },
+  );
+
+  handle(
+    IPC.memory.entityUpdate,
+    z.object({
+      entityId: z.string().min(1),
+      canonicalName: z.string().min(1).max(120).optional(),
+      kind: z.enum(['person', 'org', 'project', 'product', 'place', 'topic']).optional(),
+      summary: z.string().max(2000).nullable().optional(),
+      importance: z.number().min(0).max(1).optional(),
+    }),
+    ({ entityId, ...patch }) => entitiesRepo.update(entityId, patch),
+  );
+
+  // Merging is deliberately a USER action: automatic merging of similar names
+  // corrupts memory invisibly and cannot be undone from the merged rows.
+  handle(
+    IPC.memory.entityMerge,
+    z.object({ loserId: z.string().min(1), winnerId: z.string().min(1) }),
+    ({ loserId, winnerId }) => entitiesRepo.merge(loserId, winnerId),
   );
 
   handle(

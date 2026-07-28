@@ -255,6 +255,14 @@ Import takes `mode: 'review' | 'restore'` — `review` lands everything pending,
 sensitive filter runs in both, and nothing is ever uploaded: the user picks
 the path and owns the file.
 
+Entities ([14 · Memory](14-MEMORY.md) §3.2): `memory:entities` (live entities
+with their current-memory counts), `memory:entity` (one entity plus every
+current memory about it), `memory:entity-update` (rename / re-kind /
+summarise), and `memory:entity-merge` (fold one into another). Merging is a
+USER action by design — automatic merging of similar names corrupts memory
+invisibly — and it is non-destructive: the losing entity keeps a pointer to
+the winner so stale references still resolve.
+
 Meeting Copilot additions (Prompt 7): `session:start` now accepts `mode`
 (SessionMode, default `interview`) and `presence`
 (summoned|quiet|balanced|active) for ambient modes; `session:meeting-report`

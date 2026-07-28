@@ -109,8 +109,20 @@ memory_entities(memory_id, entity_id, role)   -- many-to-many
 
 Deliberately a *light* graph — a join table, not a triple store. It buys the
 two queries similarity cannot do: "everything about Acme" and "who was in the
-room when we decided this". Entity resolution is alias-matching plus an LLM
-merge proposal that the user approves; never automatic silent merges.
+room when we decided this".
+
+**Resolution is exact** on a normalized match key (case- and
+punctuation-insensitive) or a registered alias. An unrecognised spelling
+becomes its *own* entity rather than being guessed into an existing one:
+over-splitting is visible and recoverable in one click, whereas silently
+folding two different people called Sarah into one corrupts memory in a way
+that is nearly impossible to notice and worse to unpick. Merging is therefore
+a user action, and it is non-destructive — the losing entity is tombstoned
+with a pointer to the winner, so stale references still resolve and the
+loser's spelling starts finding the survivor.
+
+Entity counts and the retrieval path both filter to **current** memories, so a
+superseded fact never inflates what the app claims to know about an account.
 
 ### 3.3 Retrieval: four signals, one gate
 
@@ -274,7 +286,7 @@ is that module's interface rather than its callers.
 | --- | --- |
 | **M1 · Truthfulness** ✅ | Additive migration (§3.1), supersession + conflict review, consolidation stage 2, `memory:create` / `memory:conflicts` / `memory:history`. The twin cannot be built before this — it is the "don't state a stale fact" guarantee. |
 | **M2 · Recall quality** ✅ | IDF-weighted lexical scoring (`lexical.ts`), the semantic ∪ lexical surfacing contract (§3.3), and the scale benchmark. FTS5 was evaluated and rejected — see §6. |
-| **M3 · Entities** | `entities` + `memory_entities`, alias resolution with approval, entity-browse UI |
+| **M3 · Entities** ✅ | `entities` + `memory_entities` (migration 0014), exact name/alias resolution, the entity retrieval path in recall, non-destructive user-driven merge, and the `memory:entit*` IPC. Entity-browse UI remains. |
 | **M4 · Authoring** | Ingest a document as "things to know about me", bulk approve, merge/split, history view |
 | **M6 · Portability** ✅ | Export/import a profile's memory as inspectable JSON (§5). Shipped alongside M1 — a store the user cannot get their data out of is not one they should trust with more of it. |
 | **M5 · Scale** | Worker-side scoring, `sqlite-vec` behind the interface if the benchmark says so |

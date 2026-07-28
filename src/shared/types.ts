@@ -129,6 +129,27 @@ export interface MemoryConflict {
   current: MemoryItem;
 }
 
+/** What a memory can be ABOUT. Kept small on purpose — a taxonomy nobody can
+ *  hold in their head produces inconsistent extraction. */
+export type EntityKind = 'person' | 'org' | 'project' | 'product' | 'place' | 'topic';
+
+export interface Entity {
+  id: string;
+  profileId: string;
+  kind: EntityKind;
+  canonicalName: string;
+  /** Lowercased spellings that resolve to this entity. */
+  aliases: string[];
+  summary: string | null;
+  importance: number;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  /** Set when merged into another entity; null = live. */
+  mergedInto: string | null;
+  /** How many current memories point here (filled by list/get). */
+  memoryCount?: number;
+}
+
 /** A memory recalled for grounding — cited separately from documents ([M1]…). */
 export interface RetrievedMemory {
   id: string;

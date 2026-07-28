@@ -4,7 +4,8 @@ import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo
 import { providerFor } from '../../providers/registry';
 import { bufferToVector, cosineSimilarity } from '../rag/vectorMath';
 import { buildIndex, hasExactAnchor, lexicalScore, tokenize } from './lexical';
-import type { MemoryCategory, RetrievedMemory } from '@shared/types';
+import { entitiesRepo, matchKey } from '../../db/repositories/entities.repo';
+import type { Entity, MemoryCategory, RetrievedMemory } from '@shared/types';
 
 /**
  * Memory recall for grounding — hybrid (semantic ∪ lexical), scope-aware,
@@ -36,7 +37,26 @@ export const MEMORY_MIN_LEXICAL = 0.34;
 const LEXICAL_WEIGHT = 0.45; // a real ranking signal now, not a tiebreak
 const IMPORTANCE_WEIGHT = 0.05;
 const RECENCY_WEIGHT = 0.03;
+const ENTITY_WEIGHT = 0.2; // naming the subject is strong evidence of relevance
 const RECENCY_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Entities the query names, by longest match first so "Sarah Chen" wins over a
+ * separate "Sarah". Matching is exact on canonical name or alias — the same
+ * conservative rule the store uses everywhere, so recall can never invent a
+ * connection the user has not accepted.
+ */
+function entitiesInQuery(profileId: string, query: string): Entity[] {
+  const haystack = ` ${matchKey(query)} `;
+  const hits = entitiesRepo
+    .list(profileId)
+    .filter((e) =>
+      [matchKey(e.canonicalName), ...e.aliases].some(
+        (name) => name.length >= 3 && haystack.includes(` ${name} `),
+      ),
+    );
+  return hits.sort((a, b) => b.canonicalName.length - a.canonicalName.length).slice(0, 4);
+}
 
 export async function recallMemories(
   profileId: string,
@@ -70,28 +90,43 @@ export async function recallMemories(
     // actually stores, so a word common in their corpus stops being a signal.
     const index = buildIndex(usable.map((r) => r.content));
 
+    // Structured path (§3.2): if the query names an entity we know, every
+    // current memory about it is a candidate — including ones phrased so
+    // differently that neither cosine nor token overlap would find them.
+    const named = entitiesInQuery(profileId, query);
+    const aboutNamed = named.length
+      ? entitiesRepo.currentMemoryIds(
+          named.map((e) => e.id),
+          now,
+        )
+      : new Set<string>();
+
     const scored = usable
       .map((r) => {
         const semantic = cosineSimilarity(queryVector, bufferToVector(r.embedVector as Buffer));
         const lexical = lexicalScore(queryTokens, r.content, index);
         const recent =
           (r.lastUsedAt ?? r.updatedAt) >= now - RECENCY_WINDOW_MS ? RECENCY_WEIGHT : 0;
+        const aboutEntity = aboutNamed.has(r.id);
         return {
           row: r,
           semantic,
           lexical,
+          aboutEntity,
           // Both signals contribute, with lexical weighted heavily enough that
           // an exact identifier match outranks a merely topical neighbour.
           blended:
             semantic +
             LEXICAL_WEIGHT * lexical +
             IMPORTANCE_WEIGHT * r.importance +
+            (aboutEntity ? ENTITY_WEIGHT : 0) +
             recent,
         };
       })
       .filter(
         (s) =>
           s.semantic >= MEMORY_MIN_SCORE ||
+          s.aboutEntity ||
           (s.lexical >= MEMORY_MIN_LEXICAL &&
             hasExactAnchor(queryTokens, s.row.content, index)),
       )

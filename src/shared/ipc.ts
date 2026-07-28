@@ -115,6 +115,11 @@ export const IPC = {
     history: 'memory:history', // a fact's revision chain, newest first
     export: 'memory:export', // write the profile's memory to a JSON file (save dialog)
     import: 'memory:import', // merge a memory export back in (open dialog)
+    // Entities: the people/orgs/projects memory is ABOUT (docs/14-MEMORY.md §3.2)
+    entities: 'memory:entities', // list, with current-memory counts
+    entity: 'memory:entity', // one entity + every current memory about it
+    entityUpdate: 'memory:entity-update', // rename / re-kind / summarise
+    entityMerge: 'memory:entity-merge', // fold one entity into another (user action)
     review: 'memory:review', // approve (optionally with edits) or reject a candidate
     update: 'memory:update', // edit an item (content/category/importance/scope/expiry)
     archive: 'memory:archive',

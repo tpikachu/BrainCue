@@ -66,6 +66,7 @@ vi.mock('../../providers/registry', () => ({
 import * as schema from '../../db/schema';
 import { createTestDb } from '../../test/dbHarness';
 import { memoriesRepo } from '../../db/repositories/memories.repo';
+import { entitiesRepo } from '../../db/repositories/entities.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
 import { extractMemoryCandidates, extractionSchema } from './extractor';
 import { approveMemory, createMemory, updateMemory } from './memoryService';
@@ -418,6 +419,130 @@ describe('hybrid recall', () => {
     // No rare shared token, and the topic words differ → neither path fires.
     const out = await recallMemories(pid, 'quarterly budget spreadsheet', null, T0);
     expect(out).toEqual([]);
+  });
+});
+
+/**
+ * Entities (M3) — the structured path similarity search cannot provide.
+ * "What do we know about Acme?" is a join, not a cosine.
+ */
+describe('entities', () => {
+  const approvedAbout = (profileId: string, content: string, names: [string, 'person' | 'org'][]) => {
+    const id = seedApproved(profileId, content);
+    for (const [name, kind] of names) {
+      const e = entitiesRepo.upsertByName({ profileId, name, kind });
+      entitiesRepo.link(id, e.id);
+    }
+    return id;
+  };
+
+  it('resolves spellings to one entity without fuzzy guessing', () => {
+    const pid = seedProfile();
+    const a = entitiesRepo.upsertByName({ profileId: pid, name: 'Acme Corp', kind: 'org' });
+    const b = entitiesRepo.upsertByName({ profileId: pid, name: 'acme corp.', kind: 'org' });
+    expect(b.id).toBe(a.id); // case + punctuation are not different companies
+
+    // A genuinely different spelling is NOT guessed into the existing one:
+    // over-splitting is recoverable, over-merging is not.
+    const c = entitiesRepo.upsertByName({ profileId: pid, name: 'Acme Industries', kind: 'org' });
+    expect(c.id).not.toBe(a.id);
+  });
+
+  it('recalls memories about a named entity that neither cosine nor tokens would find', async () => {
+    const pid = seedProfile();
+    // Phrased so it shares no query token beyond the name, and its topic
+    // vector points elsewhere entirely.
+    approvedAbout(pid, 'They pushed the stripe api rollout to the next quarter.', [
+      ['Acme Corp', 'org'],
+    ]);
+    seedApproved(pid, 'The deadline for the internal report is Friday.');
+
+    const out = await recallMemories(pid, 'where are we with Acme Corp', null, T0);
+    expect(out).toHaveLength(1);
+    expect(out[0].content).toContain('rollout');
+  });
+
+  it('counts only CURRENT memories against an entity', async () => {
+    const pid = seedProfile();
+    const KEY = 'project:atlas/launch-date';
+    const oldId = seedApproved(pid, 'The launch deadline is March 3.', { factKey: KEY });
+    const acme = entitiesRepo.upsertByName({ profileId: pid, name: 'Acme Corp', kind: 'org' });
+    entitiesRepo.link(oldId, acme.id);
+    expect(entitiesRepo.list(pid)[0].memoryCount).toBe(1);
+
+    const newId = memoriesRepo.insertCandidate({
+      profileId: pid,
+      packId: null,
+      category: 'fact',
+      content: 'The launch deadline moved to May 9.',
+      confidence: 0.9,
+      importance: 0.7,
+      sourceRefs: [],
+      factKey: KEY,
+    });
+    entitiesRepo.link(newId, acme.id);
+    await approveMemory(newId);
+
+    // Two links, but only one current memory — a superseded fact must not
+    // inflate what we claim to know about the account.
+    expect(entitiesRepo.list(pid)[0].memoryCount).toBe(1);
+  });
+
+  it('merges non-destructively: links move, aliases combine, the loser resolves', () => {
+    const pid = seedProfile();
+    const m1 = approvedAbout(pid, 'Acme wants the stripe api integration first.', [
+      ['Acme Corp', 'org'],
+    ]);
+    const m2 = approvedAbout(pid, 'Acme asked about the deadline for onboarding.', [
+      ['Acme Industries', 'org'],
+    ]);
+    const winner = entitiesRepo.findByName(pid, 'Acme Corp')!;
+    const loser = entitiesRepo.findByName(pid, 'Acme Industries')!;
+
+    entitiesRepo.merge(loser.id, winner.id);
+
+    const live = entitiesRepo.list(pid);
+    expect(live).toHaveLength(1);
+    expect(live[0].id).toBe(winner.id);
+    expect(live[0].memoryCount).toBe(2); // both memories followed the merge
+    // A stale reference to the loser still resolves to the survivor.
+    expect(entitiesRepo.resolve(loser.id)!.id).toBe(winner.id);
+    // …and the loser's spelling now finds the winner.
+    expect(entitiesRepo.findByName(pid, 'Acme Industries')!.id).toBe(winner.id);
+    expect(entitiesRepo.currentMemoryIds([winner.id])).toEqual(new Set([m1, m2]));
+  });
+
+  it('refuses to merge an entity into itself or across profiles', () => {
+    const a = seedProfile();
+    const b = seedProfile();
+    const ea = entitiesRepo.upsertByName({ profileId: a, name: 'Acme Corp', kind: 'org' });
+    const eb = entitiesRepo.upsertByName({ profileId: b, name: 'Acme Corp', kind: 'org' });
+    expect(() => entitiesRepo.merge(ea.id, ea.id)).toThrow();
+    expect(() => entitiesRepo.merge(ea.id, eb.id)).toThrow();
+  });
+
+  it('links entities named by extraction', async () => {
+    const pid = seedProfile();
+    const sid = seedSession(pid, null, ['Sarah owns the Acme account.', 'Understood.']);
+    h.chatJson = async () => ({
+      candidates: [
+        {
+          category: 'person',
+          content: 'Sarah Chen owns the Acme Corp relationship.',
+          scope: 'profile',
+          confidence: 0.9,
+          importance: 0.7,
+          entities: [
+            { name: 'Sarah Chen', kind: 'person' },
+            { name: 'Acme Corp', kind: 'org' },
+          ],
+        },
+      ],
+    });
+
+    expect(await extractMemoryCandidates(sid)).toBe(1);
+    const names = entitiesRepo.list(pid).map((e) => e.canonicalName).sort();
+    expect(names).toEqual(['Acme Corp', 'Sarah Chen']);
   });
 });
 

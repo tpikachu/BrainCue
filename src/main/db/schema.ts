@@ -362,6 +362,62 @@ export const memories = sqliteTable(
   }),
 );
 
+/**
+ * The people, companies, and projects a profile's memory is ABOUT
+ * (docs/14-MEMORY.md §3.2).
+ *
+ * Deliberately a light graph — a table plus a join table, not a triple store.
+ * It buys exactly the two queries cosine similarity cannot answer: "everything
+ * we know about Acme" and "who was involved in this decision". Resolution is
+ * by exact name/alias match; anything fuzzier is proposed to the user, because
+ * silently merging two different people named Sarah corrupts memory in a way
+ * that is very hard to notice and worse to undo.
+ */
+export const entities = sqliteTable(
+  'entities',
+  {
+    id: text('id').primaryKey(),
+    profileId: text('profile_id')
+      .notNull()
+      .references(() => profiles.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(), // EntityKind: person | org | project | product | place | topic
+    canonicalName: text('canonical_name').notNull(),
+    /** Lowercased match keys (json[]) — every spelling that resolves here. */
+    aliases: text('aliases'),
+    summary: text('summary'),
+    importance: real('importance').notNull().default(0.5),
+    firstSeenAt: integer('first_seen_at').notNull().default(now),
+    lastSeenAt: integer('last_seen_at').notNull().default(now),
+    /** Set when this entity was merged INTO another; null = live. Merges are
+     *  never destructive: the loser keeps pointing at the winner. */
+    mergedInto: text('merged_into'),
+    createdAt: integer('created_at').notNull().default(now),
+    updatedAt: integer('updated_at').notNull().default(now),
+  },
+  (t) => ({
+    byProfile: index('entities_profile_idx').on(t.profileId),
+    byName: index('entities_name_idx').on(t.profileId, t.canonicalName),
+  }),
+);
+
+export const memoryEntities = sqliteTable(
+  'memory_entities',
+  {
+    memoryId: text('memory_id')
+      .notNull()
+      .references(() => memories.id, { onDelete: 'cascade' }),
+    entityId: text('entity_id')
+      .notNull()
+      .references(() => entities.id, { onDelete: 'cascade' }),
+    /** How the entity figures in the memory: subject | mentioned. */
+    role: text('role').notNull().default('mentioned'),
+  },
+  (t) => ({
+    byMemory: index('memory_entities_memory_idx').on(t.memoryId),
+    byEntity: index('memory_entities_entity_idx').on(t.entityId),
+  }),
+);
+
 export const contributions = sqliteTable(
   'contributions',
   {

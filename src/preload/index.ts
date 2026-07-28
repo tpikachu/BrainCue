@@ -14,6 +14,7 @@ import type {
   ContributionResetEvent,
   InterviewBrief,
   MeetingReport,
+  Entity,
   MemoryConflict,
   MemoryItem,
   Presence,
@@ -302,6 +303,26 @@ const api = {
         expiresAt?: number | null;
       },
     ) => invoke<MemoryItem>(IPC.memory.update, { id, ...patch }),
+    /** The people/orgs/projects this profile's memory is about. */
+    entities: (profileId: string) => invoke<Entity[]>(IPC.memory.entities, { profileId }),
+    entity: (profileId: string, entityId: string) =>
+      invoke<{ entity: Entity; memories: MemoryItem[] }>(IPC.memory.entity, {
+        profileId,
+        entityId,
+      }),
+    entityUpdate: (
+      entityId: string,
+      patch: {
+        canonicalName?: string;
+        kind?: string;
+        summary?: string | null;
+        importance?: number;
+      },
+    ) => invoke<Entity>(IPC.memory.entityUpdate, { entityId, ...patch }),
+    /** Fold one entity into another. Non-destructive: the loser keeps
+     *  pointing at the winner so stale references still resolve. */
+    entityMerge: (loserId: string, winnerId: string) =>
+      invoke<Entity>(IPC.memory.entityMerge, { loserId, winnerId }),
     archive: (id: string) => invoke<MemoryItem>(IPC.memory.archive, { id }),
     delete: (id: string) => invoke<{ deleted: true }>(IPC.memory.delete, { id }),
     setPackEnabled: (packId: string, enabled: boolean) =>
