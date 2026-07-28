@@ -320,8 +320,9 @@ is that module's interface rather than its callers.
 | **M2 · Recall quality** ✅ | IDF-weighted lexical scoring (`lexical.ts`), the semantic ∪ lexical surfacing contract (§3.3), and the scale benchmark. FTS5 was evaluated and rejected — see §6. |
 | **M3 · Entities** ✅ | `entities` + `memory_entities` (migration 0014), exact name/alias resolution, the entity retrieval path in recall, non-destructive user-driven merge, and the `memory:entit*` IPC. Entity-browse UI remains. |
 | **M4 · Authoring** ✅ | Document ingest (`ingest.ts`), shared consolidation (`consolidate.ts`), bulk review, merge/split, and the Library › Memory manager — conflicts, history, entity browse, and export/import all reachable at last. |
-| **M6 · Portability** ✅ | Export/import a profile's memory as inspectable JSON (§5). Shipped alongside M1 — a store the user cannot get their data out of is not one they should trust with more of it. |
-| **M5 · Scale** | Worker-side scoring, `sqlite-vec` behind the interface if the benchmark says so |
+| **M5 · Scale** — *the only one left* | Cache the lexical index per profile (the dominant cost, §6), then worker-side scoring, then `sqlite-vec` behind the same interface. Each step is gated on a measured trigger, not a guess. |
+| **M6 · Portability** ✅ | Export/import a profile's memory as inspectable JSON (§5). Shipped early, alongside M1 — a store the user cannot get their data out of is not one they should trust with more of it. |
 
 M1 is the dependency for [15 · Delegate](15-DELEGATE.md); M2–M4 improve it but
-do not block it.
+do not block it. **M5 blocks nothing**: at today's volumes recall costs 24 ms,
+and the first trigger (§6) is ~4k embedded rows in a single profile.
