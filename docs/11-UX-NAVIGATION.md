@@ -191,3 +191,9 @@ not a sidebar item).
 > Practice, which never started a session, is a link under the Interview
 > activity. See [18-ACTIVITIES.md](./18-ACTIVITIES.md) — where this file says
 > "mode card" or "mode launcher", read "activity".
+
+> **Also superseded (2026-07-28): the profile is picked in the sidebar.**
+> Seven surfaces each carried their own profile `<Select>` and defaulted
+> independently, so "whose dashboard is this?" had seven answers free to
+> disagree. There is one switcher now, above the nav, and every page under it
+> reads the active profile. See [19-ACTIVE-PROFILE.md](./19-ACTIVE-PROFILE.md).

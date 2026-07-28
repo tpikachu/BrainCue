@@ -214,6 +214,11 @@ Known keys (see `SETTINGS_KEYS` in `settings.repo.ts`):
 - `companion_prefs` — json CompanionPrefs (personality name/tone/brevity/humor,
   default presence, DND windows, default session budget). Per-Space overrides
   live on `jobs.companion_prefs` (0012).
+- `active_profile_id` — which profile the dashboard is scoped to
+  ([19-ACTIVE-PROFILE.md](./19-ACTIVE-PROFILE.md)). Validated against the real
+  rows on every read, so a deleted profile falls back to one that exists rather
+  than blanking every list; absent/dangling with no profiles at all is the
+  signal the first-run gate keys off.
 - `tour_done` — `'1'` once the first-run guided tour is completed/skipped.
 
 ## Deletion semantics

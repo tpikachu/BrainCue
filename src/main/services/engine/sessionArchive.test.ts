@@ -66,7 +66,7 @@ import { createTestDb } from '../../test/dbHarness';
 import { sessionsRepo } from '../../db/repositories/sessions.repo';
 import { memoriesRepo } from '../../db/repositories/memories.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
-import { archiveSession, renderArchive } from './sessionArchive';
+import { archiveSession, attributeQuotes, renderArchive } from './sessionArchive';
 import { SESSION_ARCHIVE_MAX, capSource, retrieve } from '../rag/retriever';
 import { ground } from './grounding';
 import type { RetrievedChunk } from '@shared/types';
@@ -89,7 +89,7 @@ function seedPack(profileId: string, memoryEnabled = 1): string {
 function seedSession(
   profileId: string,
   packId: string | null,
-  turns: string[],
+  turns: (string | { speaker: string; text: string })[],
   over: Partial<typeof schema.sessions.$inferInsert> = {},
 ): string {
   const id = `arc-s${++seq}`;
@@ -107,9 +107,10 @@ function seedSession(
     })
     .run();
   for (const t of turns) {
+    const turn = typeof t === 'string' ? { speaker: 'them', text: t } : t;
     h.db
       .insert(schema.transcriptChunks)
-      .values({ id: crypto.randomUUID(), sessionId: id, speaker: 'them', text: t, isFinal: 1 })
+      .values({ id: crypto.randomUUID(), sessionId: id, ...turn, isFinal: 1 })
       .run();
   }
   return id;
@@ -156,6 +157,7 @@ const GOOD_ARCHIVE = {
   actionItems: ['Sarah Chen — confirm the two-year commitment by Friday'],
   openQuestions: [],
   participants: ['Acme', 'Sarah Chen'],
+  keyQuotes: ['We can hold the current rate if you commit to two years.'],
 };
 
 beforeAll(async () => {
@@ -268,6 +270,82 @@ describe('archiving a finished conversation', () => {
     expect(text).toContain('Acme renewal pricing');
     expect(text).toContain('Sarah Chen — confirm');
     expect(text).not.toContain('Still open'); // empty sections are omitted
+  });
+});
+
+/**
+ * A summary says what a call was about. Quoting it says what was SAID — the
+ * difference between "we discussed pricing" and being able to answer "what
+ * exactly did they offer?" three calls later. That is only worth having if a
+ * quote can be trusted, so nothing the model returns is taken on faith.
+ */
+describe('the words themselves', () => {
+  const TURNS = [
+    { speaker: 'them', text: 'We can hold the current rate if you commit to two years.' },
+    { speaker: 'you', text: 'Let me take that back to the team and confirm by Friday.' },
+  ];
+
+  it('keeps a line that was said', () => {
+    expect(attributeQuotes(['We can hold the current rate if you commit to two years.'], TURNS))
+      .toEqual([
+        { speaker: 'They', text: 'We can hold the current rate if you commit to two years.' },
+      ]);
+  });
+
+  it('DROPS a line that was not — a fabricated quote is worse than no quote', () => {
+    expect(attributeQuotes(['We can hold the current rate indefinitely.'], TURNS)).toEqual([]);
+    // Including a plausible paraphrase of something that WAS said.
+    expect(attributeQuotes(['They offered to hold the rate for two years.'], TURNS)).toEqual([]);
+  });
+
+  it('attributes from the transcript row, never from the model', () => {
+    // Both quotes are real; they were said by different people. Attribution is
+    // looked up, so the model cannot put words in the wrong mouth.
+    const out = attributeQuotes(
+      ['Let me take that back to the team', 'We can hold the current rate'],
+      TURNS,
+    );
+    expect(out.map((q) => q.speaker)).toEqual(['You', 'They']);
+  });
+
+  it('matches on the words, not on whitespace or case', () => {
+    expect(attributeQuotes(['  we can HOLD the current   rate  '], TURNS)).toHaveLength(1);
+  });
+
+  it('passes an unrecognised speaker label through rather than flattening it', () => {
+    // Diarisation would put a real name here; it must survive unchanged.
+    const out = attributeQuotes(['Hello there'], [{ speaker: 'Priya', text: 'Hello there.' }]);
+    expect(out[0].speaker).toBe('Priya');
+  });
+
+  it('never repeats the same line twice', () => {
+    const out = attributeQuotes(
+      ['We can hold the current rate', 'we can hold THE CURRENT rate'],
+      TURNS,
+    );
+    expect(out).toHaveLength(1);
+  });
+
+  it('indexes the verified quote, attributed, into the archive', async () => {
+    const pid = seedProfile();
+    h.chatJson = async () => ({
+      ...GOOD_ARCHIVE,
+      keyQuotes: [
+        'We can hold the current rate if you commit to two years.', // real
+        'And we will throw in onboarding for free.', // never said
+      ],
+    });
+    const sid = seedSession(pid, null, [
+      ...FOUR_TURNS.slice(0, 3),
+      { speaker: 'you', text: FOUR_TURNS[3] },
+    ]);
+    await archiveSession(sid);
+
+    const text = archiveChunks(pid)
+      .map((c) => c.content)
+      .join('\n');
+    expect(text).toContain('They: “We can hold the current rate if you commit to two years.”');
+    expect(text).not.toContain('onboarding for free');
   });
 });
 

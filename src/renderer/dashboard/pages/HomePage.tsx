@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { FLAGS } from '@shared/flags';
 import { ACTIVITIES, DEFAULT_ACTIVITY, activity as activityConfig } from '@shared/activities';
+import { useActiveProfile } from '../../store/useProfileStore';
 import type { ContextPackKind, Job, SessionListItem } from '@shared/types';
 import { Badge, Page } from '../../components/ui';
 import { useSettingsStore } from '../../store/useSettingsStore';
@@ -25,6 +26,10 @@ import {
 
 type IconType = (p: React.SVGProps<SVGSVGElement>) => React.JSX.Element;
 
+/** "Jordan Lee" → "Jordan". A greeting uses the name someone is called, and a
+ *  single-word name is left exactly as it is. */
+const firstName = (name: string): string => name.trim().split(/\s+/)[0] || name;
+
 /** Home (docs/11-UX-NAVIGATION.md): one companion, not an interview app with
  *  disabled cards. Primary actions up top, an honest permission/status row,
  *  recent activity, and the activity cards as secondary presets — each opens
@@ -35,6 +40,7 @@ export default function HomePage() {
   const navigate = useNavigate();
   const { settings } = useSettingsStore();
   const { session } = useLiveSession();
+  const profile = useActiveProfile();
   const [startOpen, setStartOpen] = useState(false);
   const [startActivity, setStartActivity] = useState<ContextPackKind>(DEFAULT_ACTIVITY);
   const [recent, setRecent] = useState<SessionListItem[]>([]);
@@ -82,9 +88,11 @@ export default function HomePage() {
     { label: 'Talk to BrainCue', on: FLAGS.voice, Icon: MicIcon },
   ].filter((l) => !l.on); // shipped ones graduate to real cards/actions below
 
+  // Greeting the person by name is not decoration: it is the visible proof of
+  // which profile the whole page is scoped to.
   return (
     <Page
-      title="How can BrainCue help right now?"
+      title={profile ? `Hi ${firstName(profile.name)} — how can I help right now?` : 'How can BrainCue help right now?'}
       subtitle="It listens, grounds itself in your documents, and cues you in real time."
       width="max-w-5xl"
     >

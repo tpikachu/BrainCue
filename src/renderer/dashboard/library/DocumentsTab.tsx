@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { useProfileStore } from '../../store/useProfileStore';
+import { useActiveProfile } from '../../store/useProfileStore';
 import type { Job, Story } from '@shared/types';
-import { Badge, Card, Field, Select } from '../../components/ui';
+import { Badge, Card } from '../../components/ui';
 import { FLAGS } from '@shared/flags';
 
 /** Library › Documents: everything BrainCue has ingested for a profile —
@@ -11,17 +11,11 @@ import { FLAGS } from '@shared/flags';
  *  inventory with pointers to where each document is edited; the editing
  *  surfaces themselves stay where they are (Profile editor, Space detail). */
 export function DocumentsTab() {
-  const { profiles, load } = useProfileStore();
-  const [profileId, setProfileId] = useState('');
+  // Whose documents these are is decided once, in the sidebar switcher.
+  const profile = useActiveProfile();
+  const profileId = profile?.id ?? '';
   const [stories, setStories] = useState<Story[]>([]);
   const [spaces, setSpaces] = useState<Job[]>([]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-  useEffect(() => {
-    if (!profileId && profiles.length > 0) setProfileId(profiles[0].id);
-  }, [profiles, profileId]);
 
   useEffect(() => {
     if (!profileId) {
@@ -36,28 +30,12 @@ export function DocumentsTab() {
       .catch(() => setSpaces([]));
   }, [profileId]);
 
-  const profile = profiles.find((p) => p.id === profileId);
-
   return (
     <div>
       <p className="mb-4 text-sm text-neutral-400">
         Everything BrainCue has ingested for this profile. Documents are parsed and indexed locally;
         only retrieved snippets are ever sent per question.
       </p>
-
-      <Card className="mb-5">
-        <Field label="Profile">
-          <Select value={profileId} onChange={(e) => setProfileId(e.target.value)}>
-            <option value="">Select a profile…</option>
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-                {p.targetRole ? ` · ${p.targetRole}` : ''}
-              </option>
-            ))}
-          </Select>
-        </Field>
-      </Card>
 
       {profile && (
         <div className="space-y-3">

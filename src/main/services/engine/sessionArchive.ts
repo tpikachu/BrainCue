@@ -41,6 +41,9 @@ const MIN_TURNS = 4;
  *  where the decisions are, so we keep the END, not the beginning. */
 const MAX_TRANSCRIPT_CHARS = 24_000;
 const ARCHIVE_CHUNK_CHARS = 700;
+/** Verbatim lines kept alongside the summary. A handful: enough that the
+ *  archive can be quoted back, few enough that it stays a summary. */
+const MAX_QUOTES = 6;
 
 export const archiveSchema = z.object({
   /** One line naming what this conversation was, for retrieval to match on. */
@@ -53,6 +56,13 @@ export const archiveSchema = z.object({
   openQuestions: z.array(z.string().min(3).max(300)).max(6).default([]),
   /** People/companies/projects the conversation was about. */
   participants: z.array(z.string().min(2).max(80)).max(10).default([]),
+  /**
+   * Lines copied VERBATIM out of the transcript — the actual words, not the
+   * model's reading of them. Text only: who said each one is looked up from
+   * the transcript row it matches (`attributeQuotes`), so a quote can never be
+   * put in the wrong person's mouth.
+   */
+  keyQuotes: z.array(z.string().min(8).max(400)).max(MAX_QUOTES).default([]),
 });
 
 export type SessionArchive = z.infer<typeof archiveSchema>;
@@ -68,18 +78,75 @@ RULES:
 - "decisions" are things that were SETTLED. "actionItems" are commitments someone made — lead with the owner when the transcript names one ("Sarah Chen — send the revised quote by Friday"). "openQuestions" are things raised and left unresolved.
 - Empty arrays are a correct answer. Do not manufacture decisions or action items that were not made; an archive that invents commitments is worse than no archive.
 - NEVER include secrets, credentials, payment data, government IDs, health details, or sensitive personal attributes — not even paraphrased.
-- "participants" are the named people, companies, projects, or products the conversation was about. Omit generic references ("the client", "our team").`;
+- "participants" are the named people, companies, projects, or products the conversation was about. Omit generic references ("the client", "our team").
+- "keyQuotes" are up to 6 lines COPIED CHARACTER-FOR-CHARACTER from the transcript — the sentences that carry the commitment, the number, the decision, or the objection. Do not paraphrase, correct, translate, merge, or trim them; do not include the speaker label. A line that is not present verbatim in the transcript will be discarded. Prefer few and exact over many and approximate.`;
+
+const norm = (t: string): string => t.toLowerCase().replace(/\s+/g, ' ').trim();
+
+/** Transcript speaker labels are engine vocabulary; an archive read weeks later
+ *  is prose. An unknown label passes through rather than being flattened, so a
+ *  future speaker id (diarisation) needs no change here. */
+const SPEAKER_LABEL: Record<string, string> = {
+  you: 'You',
+  them: 'They',
+  candidate: 'You',
+  interviewer: 'Interviewer',
+  agent: 'BrainCue',
+  unknown: 'Someone',
+};
+
+export interface AttributedQuote {
+  speaker: string;
+  text: string;
+}
+
+/**
+ * Keep only the "quotes" that are genuinely in the transcript, and attribute
+ * each from the row it matched.
+ *
+ * A summariser asked for verbatim lines will still occasionally smooth one, and
+ * an archive that fabricates a quote is worse than one with no quotes at all —
+ * the entire point of keeping the words is that they can be trusted as the
+ * words. Attribution comes from the matched ROW rather than from the model, so
+ * a quote cannot be put in the wrong person's mouth even when the model is
+ * confused about who was speaking.
+ */
+export function attributeQuotes(
+  quotes: string[],
+  turns: { speaker: string; text: string }[],
+): AttributedQuote[] {
+  const haystack = turns.map((t) => ({ speaker: t.speaker, norm: norm(t.text) }));
+  const out: AttributedQuote[] = [];
+  const seen = new Set<string>();
+  for (const quote of quotes) {
+    const needle = norm(quote);
+    if (!needle || seen.has(needle)) continue;
+    const row = haystack.find((h) => h.norm.includes(needle));
+    if (!row) continue; // not actually said — drop it
+    seen.add(needle);
+    out.push({ speaker: SPEAKER_LABEL[row.speaker] ?? row.speaker, text: quote.trim() });
+  }
+  return out;
+}
 
 /** The archive rendered as retrievable text. One coherent block, because the
  *  pieces only make sense together — a bare action item retrieved without its
- *  topic is not usable context. */
-export function renderArchive(a: SessionArchive, when: number): string {
+ *  topic is not usable context. The verified verbatim lines ride along, so a
+ *  later conversation can quote what was actually said and not only what the
+ *  call was about. */
+export function renderArchive(
+  a: SessionArchive,
+  when: number,
+  quotes: AttributedQuote[] = [],
+): string {
   const date = new Date(when).toISOString().slice(0, 10);
   const lines = [`Conversation on ${date} — ${a.topic}.`, a.summary];
   if (a.participants.length) lines.push(`Who: ${a.participants.join(', ')}.`);
   if (a.decisions.length) lines.push(`Decided: ${a.decisions.join('; ')}.`);
   if (a.actionItems.length) lines.push(`Action items: ${a.actionItems.join('; ')}.`);
   if (a.openQuestions.length) lines.push(`Still open: ${a.openQuestions.join('; ')}.`);
+  if (quotes.length)
+    lines.push(['In their own words:', ...quotes.map((q) => `${q.speaker}: “${q.text}”`)].join('\n'));
   return lines.join('\n\n');
 }
 
@@ -133,7 +200,8 @@ export async function archiveSession(sessionId: string): Promise<number> {
     const parsed = archiveSchema.safeParse(raw);
     if (!parsed.success) return 0; // unusable shape → archive nothing
 
-    const text = renderArchive(parsed.data, session.endedAt ?? session.createdAt);
+    const quotes = attributeQuotes(parsed.data.keyQuotes, turns);
+    const text = renderArchive(parsed.data, session.endedAt ?? session.createdAt, quotes);
     // The privacy gate applies here exactly as it does to memory: a summary can
     // repeat a credential someone read aloud, and an archive is retrievable.
     if (checkSensitive(text).sensitive) return 0;

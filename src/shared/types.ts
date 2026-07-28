@@ -635,6 +635,10 @@ export interface AppSettings {
    *  already stored locally, rather than extracting standing claims about
    *  them. Respects the same per-Space opt-out. */
   sessionArchiveEnabled: boolean;
+  /** Whose dashboard this is — every profile-scoped surface reads it instead of
+   *  asking again. Resolved in main against the real rows, so a deleted profile
+   *  falls back to one that exists; null only when there are no profiles. */
+  activeProfileId: string | null;
   /** Global companion configuration (personality, default presence, DND,
    *  default budget). */
   companionPrefs: CompanionPrefs;

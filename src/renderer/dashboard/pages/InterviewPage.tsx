@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { useProfileStore } from '../../store/useProfileStore';
+import { useActiveProfile } from '../../store/useProfileStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useLiveSession, type Line } from '../../store/useLiveSession';
 import type { Job, SessionDetail, SessionListItem } from '@shared/types';
@@ -15,7 +15,6 @@ import { PlayIcon, PlusIcon } from '../../components/icons';
 const JOBS_PER_PAGE = 5;
 
 export default function InterviewPage() {
-  const { profiles, load } = useProfileStore();
   const { settings, load: loadSettings } = useSettingsStore();
   // The live session lives in a global store so it survives navigating between
   // pages (and keeps the mic running). This page registers/selects interviews and
@@ -24,7 +23,9 @@ export default function InterviewPage() {
   const live = useLiveSession();
   const { session } = live;
 
-  const [profileId, setProfileId] = useState('');
+  // Whose interview this is was decided in the sidebar switcher.
+  const selectedProfile = useActiveProfile();
+  const profileId = selectedProfile?.id ?? '';
   const [jobId, setJobId] = useState(''); // selected row (for highlight)
 
   // Jobs table (server-paginated + searchable — never loads the full list).
@@ -46,9 +47,8 @@ export default function InterviewPage() {
   const { pendingSave } = live;
 
   useEffect(() => {
-    void load();
     void loadSettings();
-  }, [load, loadSettings]);
+  }, [loadSettings]);
 
   // Fetch the current page of jobs. Server-paginated + searchable, so we never
   // load the whole list — stays fast even with thousands of jobs.
@@ -107,7 +107,6 @@ export default function InterviewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileId, jobQuery, jobPage]);
 
-  const selectedProfile = profiles.find((p) => p.id === profileId);
   // Can a round start at all (profile + key + parsed resume). Per-row Start also
   // requires no other session to be live (single live session at a time).
   const canStartBase = !!profileId && !!settings?.apiKeyPresent && !!selectedProfile?.parsedResume;
@@ -297,19 +296,9 @@ export default function InterviewPage() {
       )}
 
       <div className="space-y-5">
-        {/* Profile */}
+        {/* Résumé readiness for whoever the sidebar has active — the profile
+            itself is no longer chosen here. */}
         <Card>
-          <Field label="Profile">
-            <Select value={profileId} onChange={(e) => setProfileId(e.target.value)}>
-              <option value="">Select a profile…</option>
-              {profiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {p.targetRole ? ` · ${p.targetRole}` : ''}
-                </option>
-              ))}
-            </Select>
-          </Field>
           {selectedProfile && !selectedProfile.parsedResume && (
             <p className="mt-2 text-xs text-amber-400">
               ⚠ This profile has no parsed resume —{' '}

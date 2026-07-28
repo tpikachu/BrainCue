@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Interviews are one activity, not the product.** Interview Copilot and Practice are still fully shipped, but meetings and solo sessions are the daily cases — when you touch a shared path (prompts, retrieval, session defaults), check that it doesn't assume an interview. See [docs/00-VISION.md](docs/00-VISION.md) and [docs/16-CONTINUITY.md](docs/16-CONTINUITY.md).
 
+**One profile at a time.** The dashboard is scoped by `AppSettings.activeProfileId`, chosen in the sidebar switcher and resolved in main (`shared/activeProfile.ts`) so every window agrees. Profile-scoped surfaces read it — never add another profile `<Select>` to a page. See [docs/19-ACTIVE-PROFILE.md](docs/19-ACTIVE-PROFILE.md).
+
 **The user picks an activity, never a mode.** `shared/activities.ts` is the one catalog: what a call IS (meeting/project/job/subject/personal/game/solo/custom), what a Space is a saved instance of, and which `SessionMode` the engine derives from it. There used to be two lists answering the same question and they could disagree. Never add a mode picker back to a start surface; add an activity. See [docs/18-ACTIVITIES.md](docs/18-ACTIVITIES.md).
 
 ## Commands

@@ -3,16 +3,16 @@ import { api } from '../../lib/api';
 import { useProfileStore } from '../../store/useProfileStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import type { Job, MemoryItem } from '@shared/types';
-import { Badge, Button, Card, Field, SearchInput, Select, Switch, TextInput } from '../../components/ui';
+import { Badge, Button, Card, SearchInput, Switch, TextInput } from '../../components/ui';
 
 /** Library › Memory: the review-first memory surface. Nothing is captured
  *  before the consent switch is on; nothing is recalled until a candidate is
  *  explicitly approved here. Every item shows its provenance and scope, and
  *  delete removes the memory together with its embedding. */
 export function MemoryTab() {
-  const { profiles, load } = useProfileStore();
+  // Whose memory this is is decided once, in the sidebar switcher.
+  const profileId = useProfileStore((s) => s.activeId) ?? '';
   const { settings, load: loadSettings } = useSettingsStore();
-  const [profileId, setProfileId] = useState('');
   const [pending, setPending] = useState<MemoryItem[]>([]);
   const [approved, setApproved] = useState<MemoryItem[]>([]);
   const [query, setQuery] = useState('');
@@ -21,12 +21,8 @@ export function MemoryTab() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void load();
     void loadSettings();
-  }, [load, loadSettings]);
-  useEffect(() => {
-    if (!profileId && profiles.length > 0) setProfileId(profiles[0].id);
-  }, [profiles, profileId]);
+  }, [loadSettings]);
 
   const refresh = async (pid = profileId) => {
     if (!pid) return;
@@ -76,20 +72,6 @@ export function MemoryTab() {
           </p>
         </div>
         <Switch checked={memoryOn} onChange={(v) => void setConsent(v)} />
-      </Card>
-
-      <Card className="mb-5">
-        <Field label="Profile">
-          <Select value={profileId} onChange={(e) => setProfileId(e.target.value)}>
-            <option value="">Select a profile…</option>
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-                {p.targetRole ? ` · ${p.targetRole}` : ''}
-              </option>
-            ))}
-          </Select>
-        </Field>
       </Card>
 
       {error && (

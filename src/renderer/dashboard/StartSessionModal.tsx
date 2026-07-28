@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { useProfileStore } from '../store/useProfileStore';
+import { useActiveProfile } from '../store/useProfileStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useLiveSession } from '../store/useLiveSession';
 import { ACTIVITIES, DEFAULT_ACTIVITY } from '@shared/activities';
 import type { CompanionPresence, ContextPackKind, Job, Presence } from '@shared/types';
 import { COMPANION_TO_ENGINE_PRESENCE } from '@shared/types';
-import { Button, Field, Modal, Select } from '../components/ui';
+import { Button, Dropdown, Field, Modal, Select } from '../components/ui';
 import {
   BUDGET_OPTIONS,
   COMPANION_PRESENCE_OPTIONS,
@@ -32,17 +32,17 @@ import {
 export function StartSessionModal(props: {
   open: boolean;
   onClose: () => void;
-  initialProfileId?: string;
   initialSpaceId?: string;
   initialActivity?: ContextPackKind;
 }) {
   const navigate = useNavigate();
-  const { profiles, load: loadProfiles } = useProfileStore();
+  // Whose session this is was decided in the sidebar — the modal no longer asks.
+  const profile = useActiveProfile();
+  const profileId = profile?.id ?? '';
   const { settings, load: loadSettings } = useSettingsStore();
   const live = useLiveSession();
 
   const [activity, setActivity] = useState<ContextPackKind>(DEFAULT_ACTIVITY);
-  const [profileId, setProfileId] = useState(props.initialProfileId ?? '');
   const [spaceId, setSpaceId] = useState(props.initialSpaceId ?? '');
   const [spaces, setSpaces] = useState<Job[]>([]);
   const [source, setSource] = useState<'system' | 'mic'>('system');
@@ -57,21 +57,12 @@ export function StartSessionModal(props: {
 
   useEffect(() => {
     if (!props.open) return;
-    void loadProfiles();
     void loadSettings();
     setActivity(props.initialActivity ?? DEFAULT_ACTIVITY);
-    setProfileId(props.initialProfileId ?? '');
     setSpaceId(props.initialSpaceId ?? '');
     setPresence('quiet');
     setError(null);
-  }, [
-    props.open,
-    props.initialProfileId,
-    props.initialSpaceId,
-    props.initialActivity,
-    loadProfiles,
-    loadSettings,
-  ]);
+  }, [props.open, props.initialSpaceId, props.initialActivity, loadSettings]);
 
   // Companion defaults (posture + budget) come from the global companion config.
   useEffect(() => {
@@ -111,7 +102,6 @@ export function StartSessionModal(props: {
     }
   }, [spaces, spaceId]);
 
-  const profile = profiles.find((p) => p.id === profileId);
   const space = spaces.find((s) => s.id === spaceId);
   const spaceTitle = space ? space.company || space.title : null;
   const blocker = startBlocker({
@@ -169,33 +159,21 @@ export function StartSessionModal(props: {
   return (
     <Modal open={props.open} onClose={props.onClose} title="Start a session" width="max-w-lg">
       <div className="space-y-5 text-sm">
-        {/* 1 · What is this? The only question about what BrainCue will be. */}
-        <fieldset>
-          <legend className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
-            What’s this call?
-          </legend>
-          <div className="grid grid-cols-2 gap-2">
-            {START_ACTIVITIES.map((a) => (
-              <button
-                key={a.id}
-                type="button"
-                aria-pressed={activity === a.id}
-                onClick={() => setActivity(a.id)}
-                className={`rounded-xl border p-3 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400 ${
-                  activity === a.id
-                    ? 'border-indigo-400/50 bg-indigo-500/10'
-                    : 'border-white/5 bg-neutral-900/60 hover:bg-neutral-900'
-                }`}
-              >
-                <span className="block font-medium text-neutral-100">{a.label}</span>
-                <span className="mt-0.5 block text-xs leading-snug text-neutral-400">{a.hint}</span>
-              </button>
-            ))}
-          </div>
-          {/* What that choice MEANS — the behaviour a mode used to advertise,
-              shown as a consequence rather than a second question. */}
-          <p className="mt-2 text-xs leading-snug text-neutral-400">{config.does}</p>
-        </fieldset>
+        {/* 1 · What is this? The only question about what BrainCue will be.
+            A dropdown, not a card grid: eight tiles pushed the Space, the audio
+            source, and the privacy summary below the fold, and the choice is
+            one word — it does not need a card each. What the choice MEANS is
+            printed underneath, so nothing the cards said is lost. */}
+        <Field label="What’s this call?">
+          <Dropdown
+            value={activity}
+            options={START_ACTIVITIES.map((a) => ({ value: a.id, label: a.label }))}
+            onChange={(v) => setActivity(v as ContextPackKind)}
+          />
+          <p className="mt-1.5 text-xs leading-snug text-neutral-400">
+            {config.hint} <span className="text-neutral-500">{config.does}</span>
+          </p>
+        </Field>
 
         {/* 1b · Practice is preparation FOR an interview, not a kind of call. */}
         {activity === 'job' && (
@@ -209,34 +187,18 @@ export function StartSessionModal(props: {
           </div>
         )}
 
-        {/* 2 · Who + which Space grounds the answers */}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Profile">
-            <Select value={profileId} onChange={(e) => setProfileId(e.target.value)}>
-              <option value="">Select a profile…</option>
-              {profiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Space (optional)">
-            <Select
-              value={spaceId}
-              onChange={(e) => setSpaceId(e.target.value)}
-              disabled={!profileId}
-            >
-              <option value="">No Space — profile only</option>
-              {spaces.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.title || 'Untitled'}
-                  {s.company ? ` · ${s.company}` : ''}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        </div>
+        {/* 2 · Which Space grounds the answers. The profile is the sidebar's. */}
+        <Field label={`Space (optional) · ${profile?.name ?? 'no profile'}`}>
+          <Select value={spaceId} onChange={(e) => setSpaceId(e.target.value)} disabled={!profileId}>
+            <option value="">No Space — profile only</option>
+            {spaces.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.title || 'Untitled'}
+                {s.company ? ` · ${s.company}` : ''}
+              </option>
+            ))}
+          </Select>
+        </Field>
 
         {/* 3 · Input source. Defaulted by the activity, still yours to change. */}
         <fieldset>

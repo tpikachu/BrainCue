@@ -17,10 +17,10 @@ const INTERVIEW_TYPES: InterviewType[] = [
 ];
 
 export default function MockPage() {
-  const { profiles, load } = useProfileStore();
   const { settings, load: loadSettings } = useSettingsStore();
 
-  const [profileId, setProfileId] = useState('');
+  // Whose rehearsal this is was decided in the sidebar switcher.
+  const profileId = useProfileStore((st) => st.activeId) ?? '';
   const [jobs, setJobs] = useState<Job[]>([]);
   const [jobId, setJobId] = useState('');
   const [voice, setVoice] = useState('alloy');
@@ -37,9 +37,8 @@ export default function MockPage() {
   const sessionIdRef = useRef<string | null>(null); // latest id, for the unmount cleanup
 
   useEffect(() => {
-    void load();
     void loadSettings();
-  }, [load, loadSettings]);
+  }, [loadSettings]);
 
   // Keep a ref to the live mock id so the unmount cleanup ends it without a stale closure.
   useEffect(() => {
@@ -153,19 +152,7 @@ export default function MockPage() {
 
       {!sessionId && (
         <Card className="mb-5">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="sm:col-span-2">
-              <span className="mb-1 block text-xs font-medium text-neutral-400">Profile</span>
-              <Select value={profileId} onChange={(e) => setProfileId(e.target.value)}>
-                <option value="">Select a profile…</option>
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                    {p.targetRole ? ` · ${p.targetRole}` : ''}
-                  </option>
-                ))}
-              </Select>
-            </div>
+          <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <span className="mb-1 block text-xs font-medium text-neutral-400">Interviewer voice</span>
               <Select value={voice} onChange={(e) => setVoice(e.target.value)}>

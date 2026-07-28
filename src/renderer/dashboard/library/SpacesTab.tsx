@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useProfileStore } from '../../store/useProfileStore';
 import type { Job } from '@shared/types';
-import { Badge, Button, Card, Field, Select } from '../../components/ui';
+import { Badge, Button, Card } from '../../components/ui';
 import { DataTable, type Column } from '../../components/DataTable';
 import { JobFormModal } from '../JobFormModal';
 import { BriefModal } from '../BriefModal';
@@ -21,8 +21,8 @@ const PER_PAGE = 8;
  *  job-Space action (not a universal top-level concept). */
 export function SpacesTab() {
   const navigate = useNavigate();
-  const { profiles, load } = useProfileStore();
-  const [profileId, setProfileId] = useState('');
+  // Whose Spaces these are is decided once, in the sidebar switcher.
+  const profileId = useProfileStore((s) => s.activeId) ?? '';
 
   const [rows, setRows] = useState<Job[]>([]);
   const [total, setTotal] = useState(0);
@@ -33,15 +33,6 @@ export function SpacesTab() {
   const [editJob, setEditJob] = useState<Job | null>(null); // null => create
   const [briefJob, setBriefJob] = useState<Job | null>(null);
   const [startSpaceId, setStartSpaceId] = useState<string | null>(null); // open => start flow
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  // Default to the first profile so the list isn't empty behind a hidden picker.
-  useEffect(() => {
-    if (!profileId && profiles.length > 0) setProfileId(profiles[0].id);
-  }, [profiles, profileId]);
 
   useEffect(() => {
     setPage(0);
@@ -161,20 +152,6 @@ export function SpacesTab() {
         Space.
       </p>
 
-      <Card className="mb-5">
-        <Field label="Profile">
-          <Select value={profileId} onChange={(e) => setProfileId(e.target.value)}>
-            <option value="">Select a profile…</option>
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-                {p.targetRole ? ` · ${p.targetRole}` : ''}
-              </option>
-            ))}
-          </Select>
-        </Field>
-      </Card>
-
       {profileId && (
         <Card>
           <DataTable<Job>
@@ -227,7 +204,6 @@ export function SpacesTab() {
       <StartSessionModal
         open={!!startSpaceId}
         onClose={() => setStartSpaceId(null)}
-        initialProfileId={profileId}
         initialSpaceId={startSpaceId ?? undefined}
       />
     </div>

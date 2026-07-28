@@ -190,3 +190,28 @@ repositories, and pages are intact and user data is untouched; one flag brings
 the surface back. They belong to the interview-copilot product, and Home leading
 with résumé tailoring misrepresents what BrainCue is — but deleting shipped
 features from a released version needs a deprecation path, not a delete key.
+
+## 10 · The words themselves (2026-07-28)
+
+An archive said what a call was *about*. It could not say what was *said* — the
+verbatim transcript stayed in `transcript_chunks`, which nothing retrieves. So
+"we discussed pricing" was answerable three calls later and "what exactly did
+they offer?" was not.
+
+The archive now carries `keyQuotes`: up to six lines the summariser copies
+character-for-character out of the transcript, rendered into the indexed text
+under *In their own words*.
+
+Two rules make them trustworthy, and both are deterministic rather than asked
+of the model:
+
+- **A quote that is not in the transcript is dropped.** Each candidate is
+  normalised (case, whitespace) and must appear inside a real turn. A summariser
+  told to copy verbatim will still occasionally smooth a line, and a fabricated
+  quote is worse than no quote — the entire point of keeping the words is that
+  they can be trusted as the words.
+- **Attribution comes from the matched ROW, not the model.** The model returns
+  text only; the speaker is read off the transcript turn the quote was found
+  in. A quote therefore cannot be put in the wrong person's mouth even when the
+  model is confused about who was speaking. Unrecognised speaker labels pass
+  through unflattened, so diarisation can land here without a change.

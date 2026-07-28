@@ -61,6 +61,7 @@ export const SETTINGS_KEYS = {
   sessionArchiveEnabled: 'session_archive_enabled', // conversation continuity ('1'/'0'; absent = ON)
   voicePrefs: 'voice_prefs', // json VoicePrefs (TTS voice, mute, output device, quick-ask opts)
   companionPrefs: 'companion_prefs', // json CompanionPrefs (personality, presence, DND, budget)
+  activeProfileId: 'active_profile_id', // whose dashboard this is (see docs/19-ACTIVE-PROFILE.md)
 } as const;
 
 /** Non-secret settings cleared by a factory reset (everything except the API key). */

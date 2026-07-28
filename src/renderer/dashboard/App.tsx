@@ -20,6 +20,9 @@ import { Titlebar } from './Titlebar';
 import { SidebarStatus } from './SidebarStatus';
 import { UpdateBanner } from './UpdateBanner';
 import { SavePromptModal } from './SavePromptModal';
+import { ProfileSwitcher } from './ProfileSwitcher';
+import { NewProfileModal } from './NewProfileModal';
+import { useProfileStore } from '../store/useProfileStore';
 import {
   ChevronLeftIcon,
   ClockIcon,
@@ -61,6 +64,7 @@ const HOME_LAUNCHED: Record<string, string> = {
 
 export default function App() {
   const { settings, load: loadSettings } = useSettingsStore();
+  const { profiles, loaded: profilesLoaded, load: loadProfiles } = useProfileStore();
   const { running, start, stop } = useTourStore();
   const navigate = useNavigate();
   const location = useLocation();
@@ -74,6 +78,12 @@ export default function App() {
   useEffect(() => {
     void loadSettings();
   }, [loadSettings]);
+
+  // The shell owns the profile list, because the sidebar switcher scopes every
+  // page under it — pages read the active profile, they no longer fetch to ask.
+  useEffect(() => {
+    void loadProfiles();
+  }, [loadProfiles]);
 
   // Let the tray "Settings" item route the dashboard here.
   useEffect(() => {
@@ -117,6 +127,8 @@ export default function App() {
             </div>
           </div>
         </Link>
+        <ProfileSwitcher />
+
         <nav className="space-y-1">
           {navItems.map((n) => (
             <NavLink
@@ -199,6 +211,15 @@ export default function App() {
       {/* Global: sessions can be started from several pages and stopped from the
           Cue Card — the save-or-discard prompt must appear wherever the user is. */}
       <SavePromptModal />
+      {/* First run: BrainCue works for one person, and nothing below can do
+          anything without knowing who. Not dismissable — there is no dashboard
+          behind it to go back to, and an app of empty lists reads as broken
+          rather than as "start here". */}
+      <NewProfileModal
+        open={profilesLoaded && profiles.length === 0}
+        dismissable={false}
+        onClose={() => {}}
+      />
 
       {running && <Tour steps={TOUR_STEPS} onClose={finishTour} />}
     </div>
