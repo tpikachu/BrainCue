@@ -29,6 +29,8 @@ the fact.
 | Doc | What it covers |
 | --- | --- |
 | [04 · Database](04-DATABASE.md) | Schema, context packs, and the migration story. |
+| [14 · Memory](14-MEMORY.md) | Persistent per-profile memory: the record model, supersession, entities, hybrid recall, and the user's editing surface. |
+| [15 · Delegate](15-DELEGATE.md) | The disclosed stand-in that joins a call in the user's place — invariants, architecture, and delivery stages. |
 | [05 · IPC map](05-IPC-MAP.md) | Every channel and event across the renderer/main bridge. |
 | [06 · Provider services](06-OPENAI-SERVICE.md) | Transcription, answers, embeddings, and speech behind the provider seam. |
 | [07 · API key security](07-API-KEY-SECURITY.md) | Where the key lives, and why it never reaches the renderer. |
