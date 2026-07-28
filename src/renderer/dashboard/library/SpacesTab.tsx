@@ -10,7 +10,7 @@ import { BriefModal } from '../BriefModal';
 import { StartSessionModal } from '../StartSessionModal';
 import { PlayIcon, PlusIcon } from '../../components/icons';
 import { FLAGS } from '@shared/flags';
-import { isInterviewSpace, spaceKind } from '@shared/spaceKinds';
+import { activity, isInterviewSpace } from '@shared/activities';
 
 const PER_PAGE = 8;
 
@@ -93,7 +93,7 @@ export function SpacesTab() {
       className: 'w-36',
       render: (j) => (
         <div className="flex flex-wrap gap-1.5">
-          <Badge>{spaceKind(j.kind).label}</Badge>
+          <Badge>{activity(j.kind).label}</Badge>
           {/* "Parsed" is only meaningful for an interview; other kinds index
               their document as plain text, so show whether there IS one. */}
           {isInterviewSpace(j.kind) ? (

@@ -16,6 +16,7 @@ const toSession = (r: typeof schema.sessions.$inferSelect): Session => ({
   id: r.id,
   profileId: r.profileId,
   jobId: r.packId, // shared field name kept for IPC compatibility
+  activity: r.activity as Session['activity'],
   mode: r.mode as Session['mode'],
   kind: r.kind as Session['kind'],
   interviewType: r.interviewType as Session['interviewType'],
@@ -55,6 +56,7 @@ export const sessionsRepo = {
         id: schema.sessions.id,
         profileId: schema.sessions.profileId,
         jobId: schema.sessions.packId,
+        activity: schema.sessions.activity,
         mode: schema.sessions.mode,
         kind: schema.sessions.kind,
         interviewType: schema.sessions.interviewType,
@@ -94,6 +96,7 @@ export const sessionsRepo = {
       id: r.id,
       profileId: r.profileId,
       jobId: r.jobId,
+      activity: r.activity as Session['activity'],
       mode: r.mode as Session['mode'],
       kind: r.kind as Session['kind'],
       interviewType: r.interviewType as Session['interviewType'],

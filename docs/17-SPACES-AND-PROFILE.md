@@ -50,6 +50,12 @@ creation**: the Space's documents are already indexed under it, and quietly
 re-interpreting an indexed corpus is worse than asking the user to make a new
 Space.
 
+> **Since (2026-07-28):** a kind is now called an **activity**, and it is also
+> what the start flow asks for — a Space is a *saved* activity. The catalog
+> moved to `shared/activities.ts` and gained the engine mode, the default audio
+> source, and the résumé requirement per activity, plus a `solo` activity for
+> working alone. See [18-ACTIVITIES.md](./18-ACTIVITIES.md).
+
 ## 2. A profile is not a résumé
 
 Onboarding asked for a target role, a target company, an interview type, and a

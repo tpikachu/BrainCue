@@ -150,8 +150,13 @@ export type SessionMode =
   | 'tutor'
   | 'companion';
 
-/** What a Context Pack ("Space" in the UI) is about. v1 jobs are packs of
- *  kind 'job'; other kinds arrive with their modes. */
+/**
+ * An **activity** — what a conversation IS. The one thing the user picks when
+ * starting a session, and what a Space is a saved instance of (hence the
+ * Context Pack name: v1 jobs are packs of kind 'job'). The engine `SessionMode`
+ * is derived from it, never chosen separately — see shared/activities.ts for
+ * why there used to be two lists and now there is one.
+ */
 export type ContextPackKind =
   | 'job'
   | 'subject'
@@ -159,6 +164,8 @@ export type ContextPackKind =
   | 'meeting'
   | 'personal'
   | 'game'
+  /** No call at all — thinking out loud while you work. */
+  | 'solo'
   | 'custom';
 
 /** Every engine output is a Contribution of one of these kinds (the overlay
@@ -489,6 +496,13 @@ export interface Session {
   id: string;
   profileId: string;
   jobId: string | null; // context-pack id (field name kept for IPC compatibility)
+  /**
+   * What the user said this conversation was. Recorded because it is the
+   * CHOICE, while `mode` is only what we derived from it — and because a
+   * session started without a Space has no kind stored anywhere else. Null on
+   * v1 rows and on rehearsals.
+   */
+  activity: ContextPackKind | null;
   mode: SessionMode;
   /** @deprecated superseded by `mode`; kept for v1 compatibility. */
   kind: SessionKind;

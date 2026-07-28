@@ -135,7 +135,8 @@ re-index).
 | id | text PK | |
 | profile_id | text FK | cascade |
 | job_id | text FK | nullable, on delete set null — TS: `packId` |
-| mode | text | **SessionMode** (0008): interview/practice/interviewer_assist/meeting/tutor/companion. Backfilled live→interview, mock/sparring→practice |
+| activity | text | **ContextPackKind** (0014, nullable): what the user said this call WAS — meeting/project/job/subject/personal/game/solo/custom. The choice; `mode` below is only what we derived from it. Null on v1 rows and rehearsals. See [18-ACTIVITIES.md](./18-ACTIVITIES.md) |
+| mode | text | **SessionMode** (0008): interview/practice/interviewer_assist/meeting/tutor/companion. Derived from `activity` at start — never picked by the user. Backfilled live→interview, mock/sparring→practice |
 | kind | text | **deprecated** v1 discriminator: live/mock/sparring (kept for compatibility) |
 | interview_type | text | behavioral/technical/coding/system_design/general |
 | status | text | idle/live/stopped |

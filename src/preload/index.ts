@@ -111,7 +111,7 @@ const api = {
     save: (input: {
       id?: string;
       profileId: string;
-      /** What this Space is about (see shared/spaceKinds.ts). Absent on an edit
+      /** What this Space is about (see shared/activities.ts). Absent on an edit
        *  leaves the stored kind alone; absent on create defaults to 'job'. */
       kind?: string;
       title: string;
@@ -189,7 +189,9 @@ const api = {
       interviewType: string | undefined,
       jobId: string | null = null,
       answerFormat = 'key_points',
-      mode = 'interview',
+      /** What this call IS (shared/activities.ts). The engine derives the mode
+       *  from it — the renderer never picks one. */
+      activity?: string,
       presence?: Presence,
       budgetCents?: number | null,
       companionPresence?: string,
@@ -199,7 +201,7 @@ const api = {
         interviewType: interviewType ?? 'general',
         jobId,
         answerFormat,
-        mode,
+        activity,
         presence,
         budgetCents,
         companionPresence,

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../lib/api';
+import { activity as activityConfig } from '@shared/activities';
 import type { SessionListItem, SessionReport } from '@shared/types';
 import { durationMs, fmtDur, fmtHours } from '../../lib/format';
 import { Badge, Button, Modal, Page, Spinner } from '../../components/ui';
@@ -116,7 +117,13 @@ export default function SessionsPage() {
         return (
           <div className="flex flex-col gap-0.5" title={breakdown}>
             <span className="flex items-center gap-1">
-              {s.mode === 'meeting' ? (
+              {/* What the user said it was. The mode is only what we derived
+                  from it, and several activities share one. */}
+              {s.activity ? (
+                <Badge tone={s.mode === 'meeting' ? 'blue' : s.mode === 'companion' ? 'green' : undefined}>
+                  {activityConfig(s.activity).label}
+                </Badge>
+              ) : s.mode === 'meeting' ? (
                 <Badge tone="blue">Meeting</Badge>
               ) : s.mode === 'companion' ? (
                 <Badge tone="green">Companion</Badge>

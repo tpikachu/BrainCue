@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc';
-import { handle, zId } from './helpers';
-import { zAnswerFormat, zInterviewType, zPresence, zSessionMode } from './schemas';
+import { handle, zId, zSpaceKind } from './helpers';
+import { zAnswerFormat, zInterviewType, zPresence } from './schemas';
 import { sessionManager } from '../services/session/sessionManager';
 import { engine } from '../services/engine/engine';
 import { sessionsRepo } from '../db/repositories/sessions.repo';
@@ -24,9 +24,11 @@ export function registerSessionIpc(): void {
       interviewType,
       jobId: z.string().nullable().default(null),
       answerFormat: answerFormat.default('key_points'),
-      // v2: which engine mode runs the session (default keeps v1 semantics)
-      // and, for ambient modes, how present the companion should be.
-      mode: zSessionMode.default('interview'),
+      // What the user said this call IS (shared/activities.ts). The engine mode
+      // is derived from it — the renderer no longer picks one, because that was
+      // the same question asked twice. Absent for rehearsals, which have no
+      // activity; the engine then falls back to the interview pipeline.
+      activity: zSpaceKind.optional(),
       presence: zPresence.optional(),
       // Companion cost governance: hard session budget in cents (null = none;
       // absent = the companion prefs default).
@@ -39,12 +41,17 @@ export function registerSessionIpc(): void {
       interviewType: t,
       jobId,
       answerFormat: f,
-      mode,
+      activity,
       presence,
       budgetCents,
       companionPresence,
     }) =>
-      sessionManager.start(profileId, t, jobId, f, { mode, presence, budgetCents, companionPresence }),
+      sessionManager.start(profileId, t, jobId, f, {
+        activity,
+        presence,
+        budgetCents,
+        companionPresence,
+      }),
   );
 
   // Live posture change for the active ambient session (companion presence

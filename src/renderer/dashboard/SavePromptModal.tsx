@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useLiveSession } from '../store/useLiveSession';
+import { ACTIVITIES } from '@shared/activities';
 import type { InterviewType, SessionMode } from '@shared/types';
 import { Button, Field, Modal, Select } from '../components/ui';
 
@@ -12,11 +13,20 @@ const INTERVIEW_TYPES: { value: InterviewType; label: string }[] = [
   { value: 'system_design', label: 'System design' },
 ];
 
+/** Fallback only — for rehearsals and v1 rows, which carry no activity. When
+ *  there is one, the prompt names the thing that ended ("Game ended") rather
+ *  than the pipeline it happened to run through. */
 const TITLE: Partial<Record<SessionMode, string>> = {
   interview: 'Interview ended',
   practice: 'Practice ended',
   meeting: 'Conversation ended',
   companion: 'Session ended',
+};
+
+const endedTitle = (p: { activity?: string | null; mode?: SessionMode } | null): string => {
+  const label = p?.activity ? ACTIVITIES[p.activity as keyof typeof ACTIVITIES]?.label : null;
+  if (label) return `${label} ended`;
+  return TITLE[p?.mode ?? 'interview'] ?? 'Session ended';
 };
 
 /**
@@ -82,7 +92,7 @@ export function SavePromptModal() {
     <Modal
       open={!!pendingSave}
       onClose={clearPendingSave}
-      title={TITLE[pendingSave?.mode ?? 'interview'] ?? 'Session ended'}
+      title={endedTitle(pendingSave)}
       width="max-w-md"
     >
       <div className="space-y-4">

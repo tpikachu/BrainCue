@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { IPC } from '@shared/ipc';
-import { isInterviewSpace } from '@shared/spaceKinds';
+import { isInterviewSpace } from '@shared/activities';
 import { handle, zId, zSpaceKind } from './helpers';
 import { jobsRepo } from '../db/repositories/jobs.repo';
 import { profilesRepo } from '../db/repositories/profiles.repo';

@@ -1,6 +1,6 @@
 // Single source of truth for IPC channel names. See docs/05-IPC-MAP.md.
 
-import type { AnswerFormat, InterviewType, SessionMode } from './types';
+import type { AnswerFormat, ContextPackKind, InterviewType, SessionMode } from './types';
 
 /** Request/response channels (ipcRenderer.invoke <-> ipcMain.handle). */
 export const IPC = {
@@ -242,6 +242,9 @@ export interface SavePrompt {
   sessionId: string;
   /** Which mode ran, so the prompt asks the right question. */
   mode: SessionMode;
+  /** What the user said this call was — the prompt names the thing that ended
+   *  rather than the pipeline it ran through. Null on rehearsals and v1 rows. */
+  activity: ContextPackKind | null;
   interviewType: InterviewType;
   /** The Space it was grounded in, if any. */
   jobTitle: string | null;

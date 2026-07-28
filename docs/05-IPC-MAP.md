@@ -130,7 +130,7 @@ résumé, persisted, and indexed as `story` chunks so they ground live answers.
 ### session
 | Channel | Request | Response |
 |---|---|---|
-| `session:start` | `{ profileId, interviewType, jobId, answerFormat }` | `Session` (`answerFormat` = key_points\|explanation\|detailed — the single answer control) |
+| `session:start` | `{ profileId, interviewType, jobId, answerFormat, activity? }` | `Session` (`answerFormat` = key_points\|explanation\|detailed — the single answer control; `activity` is the ContextPackKind the user picked and the engine derives the mode from it) |
 | `session:resume` | `{ sessionId, answerFormat? }` | `Session` (re-activate an existing session row and continue it; interview type is restored from the row — one session per interview, type is dynamic) |
 | `session:stop` | `{ sessionId }` | `Session` |
 | `session:toggle-pause` | `{ sessionId }` | `{ paused }` |
@@ -242,8 +242,7 @@ optional edits, or reject) / `memory:update` / `memory:archive` /
 ride the `session:context` / `contribution:patch` payloads as a separate
 `memories` array so "data sent" always shows every memory used.
 
-Meeting Copilot additions (Prompt 7): `session:start` now accepts `mode`
-(SessionMode, default `interview`) and `presence`
+Meeting Copilot additions (Prompt 7): `session:start` accepts `presence`
 (summoned|quiet|balanced|active) for ambient modes; `session:meeting-report`
 returns `{ contributionId, report: MeetingReport }` (get-or-generate);
 `contributions:update` edits a persisted contribution's
@@ -265,6 +264,14 @@ segment, in `seq` order; an empty `last:true` marker ends the reply). An
 in-session summon is a normal engine direct ask (dual-emitted events, v1
 persistence); a no-session quick ask streams GENERIC-only `contribution:*`
 events like ambient cards.
+
+**Activities superseded the `mode` argument** ([18-ACTIVITIES.md](./18-ACTIVITIES.md)).
+`session:start` takes `activity` (ContextPackKind) instead of `mode`
+(SessionMode): the renderer says what the call IS and the engine derives which
+mode runs it, so the two lists that used to answer the same question cannot
+disagree. Sessions started without an activity (mock and sparring rehearsals)
+fall back to the interview pipeline. The `session:save-prompt` broadcast carries
+`activity` alongside `mode` so the prompt names the thing that ended.
 
 Companion additions (Prompt 10): `session:start` gains `companionPresence`
 (off|on_demand|assistive|proactive — the InterjectionPolicy posture; the

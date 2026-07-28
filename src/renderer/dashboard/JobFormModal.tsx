@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { FLAGS } from '@shared/flags';
-import { SPACE_KINDS, SPACE_KIND_ORDER, isInterviewSpace, spaceKind } from '@shared/spaceKinds';
+import { ACTIVITIES, ACTIVITY_ORDER, DEFAULT_ACTIVITY, activity, isInterviewSpace } from '@shared/activities';
 import type { CompanionSpaceOverrides, ContextPackKind, Job } from '@shared/types';
 import { Button, Field, Modal, Select, TextArea, TextInput } from '../components/ui';
 import { UploadIcon } from '../components/icons';
@@ -12,8 +12,9 @@ type Notice = { tone: 'ok' | 'err'; text: string } | null;
  *
  *  Every field here used to be named for a job interview, so setting one up for
  *  a standup meant filling in a "job description". The shape was always general;
- *  only the words were not. The kind picked at the top supplies the vocabulary
- *  (shared/spaceKinds.ts) over exactly the same storage. */
+ *  only the words were not. The activity picked at the top supplies the
+ *  vocabulary (shared/activities.ts) over exactly the same storage — and it is
+ *  the same list the start flow uses, because a Space IS a saved activity. */
 export function JobFormModal({
   open,
   profileId,
@@ -32,10 +33,10 @@ export function JobFormModal({
   const editing = !!job;
   const empty = { title: '', company: '', jdUrl: '', jdText: '', companyUrl: '', notes: '' };
   const [form, setForm] = useState(empty);
-  // New Spaces default to 'meeting' — the daily case. Editing keeps whatever
-  // the Space already is, so v1 job rows stay jobs.
-  const [kind, setKind] = useState<ContextPackKind>('meeting');
-  const copy = spaceKind(kind);
+  // New Spaces default to the daily case. Editing keeps whatever the Space
+  // already is, so v1 job rows stay jobs.
+  const [kind, setKind] = useState<ContextPackKind>(DEFAULT_ACTIVITY);
+  const copy = activity(kind);
   const [companion, setCompanion] = useState<CompanionSpaceOverrides>({});
   const [saving, setSaving] = useState(false);
   const [fetching, setFetching] = useState(false);
@@ -53,7 +54,7 @@ export function JobFormModal({
       companyUrl: job?.companyUrl ?? '',
       notes: job?.notes ?? '',
     });
-    setKind((job?.kind as ContextPackKind) ?? 'meeting');
+    setKind((job?.kind as ContextPackKind) ?? DEFAULT_ACTIVITY);
     setCompanion(job?.companionPrefs ?? {});
     setJdNotice(null);
     setNotice(null);
@@ -146,9 +147,9 @@ export function JobFormModal({
             onChange={(e) => setKind(e.target.value as ContextPackKind)}
             disabled={editing}
           >
-            {SPACE_KIND_ORDER.map((k) => (
+            {ACTIVITY_ORDER.map((k) => (
               <option key={k} value={k}>
-                {SPACE_KINDS[k].label}
+                {ACTIVITIES[k].label}
               </option>
             ))}
           </Select>

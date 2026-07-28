@@ -16,15 +16,39 @@ import { companionMode } from './modes/companion.mode';
 import { getOrGenerateMeetingReport } from './meetingReport';
 import { enginePersistence } from './persistence/enginePersistence';
 import { createRealtimeSource, pcmLevel } from './sourceAdapter';
-import type { AnswerFormat, InterviewType, Presence, Session, SessionMode } from '@shared/types';
+import { activity as activityConfig, modeFor } from '@shared/activities';
+import type {
+  AnswerFormat,
+  ContextPackKind,
+  InterviewType,
+  Presence,
+  Session,
+  SessionMode,
+} from '@shared/types';
 import type { ModeDefinition } from './modeDefinition';
 
 /** Mode registry: SessionMode → definition. Practice/mock rehearse through
  *  the interview pipeline; the flagged-off modes land with their prompts. */
-function modeFor(mode: SessionMode | undefined): ModeDefinition {
+function definitionFor(mode: SessionMode | undefined): ModeDefinition {
   if (mode === 'meeting') return meetingMode;
   if (mode === 'companion') return companionMode;
   return interviewMode;
+}
+
+/**
+ * The mode a session runs, from what the user actually chose.
+ *
+ * The user picks an ACTIVITY ("what's this call?") and nothing else — see
+ * shared/activities.ts. `modeFor` is the one mapping, shared with the start
+ * flow, so what was shown and what runs cannot drift apart. An explicit `mode`
+ * still wins for the callers that have no activity to speak of: mock and
+ * sparring rehearsals, and `resume`, which restores the mode already recorded
+ * on the row.
+ */
+function resolveMode(opts: { activity?: ContextPackKind | null; mode?: SessionMode }): SessionMode {
+  if (opts.mode) return opts.mode;
+  if (opts.activity) return modeFor(opts.activity);
+  return 'interview';
 }
 
 function toSession(r: typeof schema.sessions.$inferSelect): Session {
@@ -32,6 +56,7 @@ function toSession(r: typeof schema.sessions.$inferSelect): Session {
     id: r.id,
     profileId: r.profileId,
     jobId: r.packId, // shared field name kept for IPC compatibility
+    activity: r.activity as Session['activity'],
     mode: r.mode as Session['mode'],
     kind: r.kind as Session['kind'],
     interviewType: r.interviewType as Session['interviewType'],
@@ -62,13 +87,16 @@ class Engine {
     answerFormat: AnswerFormat;
     language: string;
     ephemeral?: boolean;
+    /** What the user said this call is. Resolves the mode. */
+    activity?: ContextPackKind | null;
+    /** Explicit mode — rehearsals and `resume`, which have no activity. */
     mode?: SessionMode;
     presence?: Presence;
     budgetCents?: number | null;
     companionPresence?: string;
   }): void {
     this.current?.teardown(); // cancel any prior in-flight answer; never leak a socket
-    const modeDef = modeFor(opts.mode);
+    const modeDef = definitionFor(resolveMode(opts));
     const session = new EngineSession({
       sessionId: opts.sessionId,
       profileId: opts.profileId,
@@ -135,7 +163,9 @@ class Engine {
       EVENTS.clientInfo,
       {
         company: pack?.company ?? null,
-        title: pack?.title ?? (modeDef.id === 'meeting' ? 'Meeting' : 'Interview'),
+        // Without a Space there is no title, so the Cue Card says what the call
+        // IS — the user's own word for it. Rehearsals have no activity.
+        title: pack?.title ?? (opts.activity ? activityConfig(opts.activity).label : 'Interview'),
         notes: pack?.notes ?? null,
         profileName: profile?.name ?? null,
         hasResume: !!profile?.parsedResume,
@@ -152,6 +182,7 @@ class Engine {
     packId: string | null = null,
     answerFormat: AnswerFormat = 'key_points',
     opts: {
+      activity?: ContextPackKind | null;
       mode?: SessionMode;
       presence?: Presence;
       budgetCents?: number | null;
@@ -167,7 +198,11 @@ class Engine {
         id,
         profileId,
         packId,
-        mode: opts.mode ?? 'interview',
+        // Both: the activity is what was chosen, the mode is what we derived.
+        // Keeping only the mode would lose the difference between a standup and
+        // a project call, and lose the activity entirely on Space-less sessions.
+        activity: opts.activity ?? null,
+        mode: resolveMode(opts),
         kind: 'live',
         interviewType,
         status: 'live',
@@ -181,6 +216,7 @@ class Engine {
       interviewType,
       answerFormat,
       language: profile.language,
+      activity: opts.activity,
       mode: opts.mode,
       presence: opts.presence,
       budgetCents: opts.budgetCents,
@@ -210,6 +246,7 @@ class Engine {
       interviewType: row.interviewType as InterviewType,
       answerFormat,
       language: profile.language,
+      activity: row.activity as ContextPackKind | null,
       mode: row.mode as SessionMode, // a meeting resumes as a meeting
     });
     return toSession(
@@ -276,6 +313,7 @@ class Engine {
       const wasEphemeral = s.ephemeral;
       const wasMeeting = s.mode.id === 'meeting';
       const packTitle = s.packId ? (contextPacksRepo.get(s.packId)?.title ?? null) : null;
+      const wasActivity = row.activity as ContextPackKind | null;
       s.teardown(); // stop any in-flight answer stream + the transcriber
       this.current = null;
       broadcast(EVENTS.sessionState, { status: 'stopped', paused: false });
@@ -291,6 +329,7 @@ class Engine {
           {
             sessionId,
             mode: s.mode.id,
+            activity: wasActivity,
             interviewType,
             jobTitle: packTitle,
             questionCount: sessionsRepo.questionCount(sessionId),

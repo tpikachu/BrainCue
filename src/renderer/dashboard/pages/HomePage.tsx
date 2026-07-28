@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { FLAGS } from '@shared/flags';
-import type { Job, SessionListItem } from '@shared/types';
+import { ACTIVITIES, DEFAULT_ACTIVITY, activity as activityConfig } from '@shared/activities';
+import type { ContextPackKind, Job, SessionListItem } from '@shared/types';
 import { Badge, Page } from '../../components/ui';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useLiveSession } from '../../store/useLiveSession';
@@ -26,14 +27,16 @@ type IconType = (p: React.SVGProps<SVGSVGElement>) => React.JSX.Element;
 
 /** Home (docs/11-UX-NAVIGATION.md): one companion, not an interview app with
  *  disabled cards. Primary actions up top, an honest permission/status row,
- *  recent activity, and the mode cards as secondary presets. Planned modes are
- *  flag-gated into a compact Labs strip — never dead-looking cards. */
+ *  recent activity, and the activity cards as secondary presets — each opens
+ *  the one start flow with that activity preselected (docs/18-ACTIVITIES.md).
+ *  Planned modes are flag-gated into a compact Labs strip — never dead-looking
+ *  cards. */
 export default function HomePage() {
   const navigate = useNavigate();
   const { settings } = useSettingsStore();
   const { session } = useLiveSession();
   const [startOpen, setStartOpen] = useState(false);
-  const [startMode, setStartMode] = useState<'interview' | 'meeting' | 'companion'>('interview');
+  const [startActivity, setStartActivity] = useState<ContextPackKind>(DEFAULT_ACTIVITY);
   const [recent, setRecent] = useState<SessionListItem[]>([]);
   const [micState, setMicState] = useState<'granted' | 'prompt' | 'denied' | 'unknown'>('unknown');
   const [activeSpace, setActiveSpace] = useState<string | null>(null);
@@ -96,7 +99,11 @@ export default function HomePage() {
                 <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-400" />
               </span>
               <span className="text-sm font-medium text-green-200">
-                {session.mode === 'meeting' ? 'Meeting Copilot is live' : 'Companion is live'}
+                {session.activity
+                  ? `${activityConfig(session.activity).label} is live`
+                  : session.mode === 'meeting'
+                    ? 'Meeting Copilot is live'
+                    : 'Companion is live'}
               </span>
             </span>
             <span className="text-sm text-green-300">Cards stream to the Cue Card</span>
@@ -142,7 +149,7 @@ export default function HomePage() {
           title="Start listening"
           desc="Live cues for the conversation you're in"
           onClick={() => {
-            setStartMode('interview');
+            setStartActivity(DEFAULT_ACTIVITY);
             setStartOpen(true);
           }}
           tour="action-start"
@@ -217,11 +224,15 @@ export default function HomePage() {
                 <span className="min-w-0 truncate text-sm text-neutral-200">
                   {s.jobCompany || s.jobTitle || 'General session'}
                   <span className="ml-2 text-xs text-neutral-500">
-                    {s.mode === 'meeting'
-                      ? 'meeting'
-                      : s.mode === 'companion'
-                        ? 'companion'
-                        : s.interviewType.replace(/_/g, ' ')}
+                    {/* What the user SAID it was, not the mode we derived —
+                        a project call and a standup both run 'meeting'. */}
+                    {s.activity
+                      ? activityConfig(s.activity).label.toLowerCase()
+                      : s.mode === 'meeting'
+                        ? 'meeting'
+                        : s.mode === 'companion'
+                          ? 'companion'
+                          : s.interviewType.replace(/_/g, ' ')}
                     {s.kind === 'sparring' ? ' · practice' : ''}
                   </span>
                 </span>
@@ -234,22 +245,24 @@ export default function HomePage() {
         </>
       )}
 
-      {/* Modes. Ordered by what BrainCue IS now: the conversations someone has
-          every day come first, and the interview modes — still fully shipped —
-          sit after them rather than defining the product. */}
+      {/* What it can sit in on. These are shortcuts INTO the one start flow
+          with an activity preselected — not a second catalog to choose from.
+          Ordered by what BrainCue IS now: the conversations someone has every
+          day come first, and interviews — still fully shipped — sit after them
+          rather than defining the product. */}
       <h3 className="mb-3 mt-8 text-xs font-medium uppercase tracking-wider text-neutral-500">
-        Modes
+        What it can sit in on
       </h3>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {FLAGS.meeting && (
           <ModeCard
             Icon={UsersIcon}
-            title="Meeting Copilot"
+            title={ACTIVITIES.meeting.label}
             desc="Sits in quietly and surfaces context, open questions, action items, and decisions — only when confident. Remembers each call, so the next one starts where this one ended."
             labs
             tour="mode-meeting"
             onClick={() => {
-              setStartMode('meeting');
+              setStartActivity('meeting');
               setStartOpen(true);
             }}
           />
@@ -257,22 +270,25 @@ export default function HomePage() {
         {FLAGS.companion && (
           <ModeCard
             Icon={SparklesIcon}
-            title="Companion"
-            desc="An ambient presence while you work: remembers what you saved, flags tasks, offers context — only through deterministic gates you control."
+            title={`${ACTIVITIES.solo.label} · ${ACTIVITIES.game.label}`}
+            desc="An ambient presence while you work or play: remembers what you saved, flags tasks, offers context — only through deterministic gates you control."
             labs
             tour="mode-companion"
             onClick={() => {
-              setStartMode('companion');
+              setStartActivity('solo');
               setStartOpen(true);
             }}
           />
         )}
         <ModeCard
-          to="/interview"
           Icon={MicIcon}
-          title="Interview Copilot"
+          title={ACTIVITIES.job.label}
           desc="You're the candidate. BrainCue hears the questions and streams grounded answer cues into the Cue Card."
           tour="mode-interview"
+          onClick={() => {
+            setStartActivity('job');
+            setStartOpen(true);
+          }}
         />
         <ModeCard
           Icon={MockIcon}
@@ -316,7 +332,7 @@ export default function HomePage() {
       <StartSessionModal
         open={startOpen}
         onClose={() => setStartOpen(false)}
-        initialMode={startMode}
+        initialActivity={startActivity}
       />
     </Page>
   );

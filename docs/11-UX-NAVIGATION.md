@@ -129,7 +129,7 @@ window, not window/layout work.
 > Library merged Profiles/Spaces/Documents under `/library` tabs (jobs UI
 > lives in the Spaces tab; Tailor is a Space action), the sidebar is
 > Home/Library/Sessions/Insights/Settings, and the Tour was rewritten. The
-> shared start flow shipped as `StartSessionModal` (mode → Space → source →
+> shared start flow shipped as `StartSessionModal` (activity → Space → source →
 > transparency summary → explicit start); flags live in `src/shared/flags.ts`.
 > Step 3 (full SessionView extraction from InterviewPage) is deferred — the
 > interview workspace stays intact partly because the privacy hard test pins
@@ -180,3 +180,14 @@ not a sidebar item).
 - Where does the readiness strip live long-term — Home only, or persistent in
   the sidebar footer as today (`SidebarStatus`)? Current lean: both, same
   component.
+
+> **Superseded (2026-07-28): the mode picker is gone.**
+> This document is written mode-first, and the start flow's first step is no
+> longer a mode. Choosing a mode AND a Space kind was the same question asked
+> twice — the two lists overlapped item-for-item and their defaults
+> contradicted each other. The user now picks an **activity** ("What's this
+> call?") and the engine derives the mode from it; Home's cards are shortcuts
+> INTO that one flow with an activity preselected, not a second catalog.
+> Practice, which never started a session, is a link under the Interview
+> activity. See [18-ACTIVITIES.md](./18-ACTIVITIES.md) — where this file says
+> "mode card" or "mode launcher", read "activity".

@@ -192,8 +192,15 @@ export const sessions = sqliteTable(
       .notNull()
       .references(() => profiles.id, { onDelete: 'cascade' }),
     packId: text('job_id').references(() => contextPacks.id, { onDelete: 'set null' }),
+    // The ACTIVITY the user chose: meeting | project | job | … (ContextPackKind).
+    // This is the choice; `mode` below is only what we derived from it. Stored
+    // separately because several activities share one mode (a project call and
+    // a standup both run 'meeting'), and because a session started WITHOUT a
+    // Space has no kind anywhere else. Null on v1 rows and on rehearsals.
+    activity: text('activity'),
     // The MODE this session ran in (v2): interview | practice | … (SessionMode).
-    // Migration 0008 backfills live→interview, mock/sparring→practice.
+    // Derived from `activity` at start — never picked by the user. Migration
+    // 0008 backfills live→interview, mock/sparring→practice.
     mode: text('mode').notNull().default('interview'),
     // What produced this session: a real interview ('live'), a mock rehearsal
     // ('mock' — deleted at stop, only ever transient), or a Sparring practice

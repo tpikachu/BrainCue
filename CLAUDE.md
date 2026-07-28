@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **BrainCue** — a local-first desktop AI companion for live conversations (Electron + React + TypeScript). It transcribes what it hears in real time (with consent), decides when it can help, and streams grounded cues into a floating, screen-share-invisible overlay ("Cue Card"). It archives each conversation so the next one starts where the last ended, and holds reviewed long-term memory per profile. Data stays on the user's machine; only retrieved context + the current question go to OpenAI (BYO key).
 
-**Interviews are one mode, not the product.** Interview Copilot and Practice are still fully shipped, but meeting/companion are the daily modes — when you touch a shared path (prompts, retrieval, session defaults), check that it doesn't assume an interview. See [docs/00-VISION.md](docs/00-VISION.md) and [docs/16-CONTINUITY.md](docs/16-CONTINUITY.md).
+**Interviews are one activity, not the product.** Interview Copilot and Practice are still fully shipped, but meetings and solo sessions are the daily cases — when you touch a shared path (prompts, retrieval, session defaults), check that it doesn't assume an interview. See [docs/00-VISION.md](docs/00-VISION.md) and [docs/16-CONTINUITY.md](docs/16-CONTINUITY.md).
+
+**The user picks an activity, never a mode.** `shared/activities.ts` is the one catalog: what a call IS (meeting/project/job/subject/personal/game/solo/custom), what a Space is a saved instance of, and which `SessionMode` the engine derives from it. There used to be two lists answering the same question and they could disagree. Never add a mode picker back to a start surface; add an activity. See [docs/18-ACTIVITIES.md](docs/18-ACTIVITIES.md).
 
 ## Commands
 
