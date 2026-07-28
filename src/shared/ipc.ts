@@ -1,6 +1,6 @@
 // Single source of truth for IPC channel names. See docs/05-IPC-MAP.md.
 
-import type { AnswerFormat, InterviewType } from './types';
+import type { AnswerFormat, InterviewType, SessionMode } from './types';
 
 /** Request/response channels (ipcRenderer.invoke <-> ipcMain.handle). */
 export const IPC = {
@@ -95,6 +95,9 @@ export const IPC = {
     practiceStats: 'session:practice-stats', // Practice Loop aggregates (Reports)
     ask: 'session:ask',
     askActive: 'session:ask-active',
+    // Keep a finished conversation: archive it for retrieval + extract memory
+    // candidates. The user's answer to the save prompt, not an automatic step.
+    remember: 'session:remember',
     setInterviewType: 'session:set-interview-type',
     setAnswerPrefs: 'session:set-answer-prefs',
     setAnswering: 'session:set-answering', // coding: toggle auto-answering the interviewer
@@ -228,12 +231,24 @@ export const EVENTS = {
   companionStatus: 'companion:status', // live companion posture + cost snapshot (CompanionStatusEvent)
 } as const;
 
-/** Pushed to the dashboard when a session stops, to prompt save-or-discard. */
+/**
+ * Pushed to the dashboard when a session stops, to prompt save-or-discard.
+ *
+ * This is the gate on remembering (docs/16-CONTINUITY.md §9): a conversation is
+ * archived, and its memory candidates extracted, only after the user says to
+ * keep it. Nothing about the session leaves the transcript until then.
+ */
 export interface SavePrompt {
   sessionId: string;
+  /** Which mode ran, so the prompt asks the right question. */
+  mode: SessionMode;
   interviewType: InterviewType;
+  /** The Space it was grounded in, if any. */
   jobTitle: string | null;
   questionCount: number;
+  /** Transcript turns captured — "nothing was said" is worth telling the user
+   *  before they decide. */
+  turnCount: number;
 }
 
 /** A main-initiated confirm, shown INSIDE a protected window (not a native OS

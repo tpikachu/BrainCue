@@ -215,6 +215,11 @@ const api = {
       ),
     askActive: (questionText: string) =>
       invoke<{ ok: boolean }>(IPC.session.askActive, { questionText }),
+    /** Keep this conversation: archive it for retrieval and extract memory
+     *  candidates. Both stay gated by the user's own settings, so the counts
+     *  can legitimately come back as zero. */
+    remember: (id: string) =>
+      invoke<{ archived: number; memories: number }>(IPC.session.remember, { id }),
     setInterviewType: (sessionId: string, interviewType: string) =>
       invoke<{ ok: true }>(IPC.session.setInterviewType, { sessionId, interviewType }),
     setAnswering: (enabled: boolean) =>

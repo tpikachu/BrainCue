@@ -36,7 +36,7 @@ The distinction from memory is deliberate and load-bearing:
 | | Memory ([14](./14-MEMORY.md)) | Archive (here) |
 | --- | --- | --- |
 | What it holds | standing claims about the *person* ("prefers concise answers") | what happened in *one conversation* |
-| Consent | OFF by default, every item reviewed | ON by default, nothing to review |
+| Consent | OFF by default, every item reviewed | ON by default, but written only when the user keeps the session (§3) |
 | Lifetime | until superseded or deleted | deleted with its session |
 | Scope | profile, or a Space | the Space the conversation happened in |
 
@@ -48,9 +48,40 @@ from a transcript already stored on their disk, and never becomes a claim about
 them. Requiring opt-in for it would mean the product's core promise — *it was
 there last time* — is off until discovered. It stays honest by being visible
 (Settings → Privacy → "Remember conversations"), by naming exactly what it keeps,
-and by carrying the same guarantees below.
+by asking before it keeps anything (§3), and by carrying the same guarantees
+below.
 
-## 3. Guarantees
+## 3. The user decides what is remembered
+
+Archiving does **not** happen when a session stops. It happens when the user
+answers the save prompt with *Keep it*.
+
+That prompt already existed (save-or-discard, so a stray session did not clutter
+Reports); it now carries the weight of the whole feature. "Keep this
+conversation?" is a question about the conversation, and running the summariser
+before it is answered would mean Discard had to *undo* work that should never
+have started — and would have sent the transcript to a model the user was about
+to say no to.
+
+So `session:remember` does both halves of remembering, and only it does:
+
+| Answer | What happens |
+| --- | --- |
+| **Keep it** | Archive written + indexed; memory candidates extracted for review |
+| **Discard** | Session, transcript, archive, and the *pending* candidates it suggested are all deleted |
+| **Decide later** | Session kept, nothing remembered |
+
+Discard deliberately spares **approved** memories. The user read those, said
+yes, and may have edited them; taking one back because its origin was later
+discarded would reverse a decision they made deliberately. Pending candidates
+are different — they are the session's suggestions, and a rejected conversation
+should not leave suggestions behind with nothing to trace them to.
+
+Both halves stay gated by the user's own settings underneath (the global switch,
+the per-Space opt-out, memory consent), so *Keep it* is intent, never an
+override — and the counts it reports back can legitimately be zero.
+
+## 4. Guarantees
 
 1. **Same privacy gate as memory.** `checkSensitive` runs over the rendered
    archive before persistence. A summary can repeat a credential someone read
@@ -65,13 +96,14 @@ and by carrying the same guarantees below.
 4. **Practice is never archived.** A mock interview or sparring drill is a
    rehearsal against an AI, not something that happened; archiving it would
    ground future answers in invented scenarios.
-5. **Never breaks a session.** Archiving is fire-and-forget after stop and
-   swallows its own failures. A session that ended fine must not report an error
-   because its summary failed.
+5. **Never breaks a session.** Archiving swallows its own failures. A session
+   the user chose to keep must stay kept even if summarising or extraction
+   fails, so `session:remember` reports the counts as they are rather than
+   throwing.
 6. **Embed before write.** A provider failure leaves no half-indexed archive, and
    re-archiving replaces rather than duplicates.
 
-## 4. Retrieval — the cap that matters
+## 5. Retrieval — the cap that matters
 
 Archives compete with the corpus for the same top-k grounding slots, and they
 *accumulate*. After a few hundred calls a profile has far more `session` chunks
@@ -88,7 +120,7 @@ over-fetching first so the freed slots go to real alternatives rather than
 shrinking the result. Two is enough for "we agreed X last week" while leaving
 the majority of grounding on source material.
 
-## 5. Scoping
+## 6. Scoping
 
 An archive carries its session's `packId`:
 
@@ -98,7 +130,7 @@ An archive carries its session's `packId`:
 - **No Space** → global to the profile, which is what makes a personal companion
   continuous across the day.
 
-## 6. What this unblocks
+## 7. What this unblocks
 
 - The **delegate** ([15](./15-DELEGATE.md)) cannot stand in for someone while
   forgetting every previous call; D0's status update is written *from* archives.
@@ -107,7 +139,7 @@ An archive carries its session's `packId`:
 - **Speaker identity**, once transcripts carry it, upgrades `participants` from
   names in a summary to real [14 · Memory](./14-MEMORY.md) §3.2 entity links.
 
-## 7. Not in this milestone
+## 8. Not in this milestone
 
 - **Cross-session synthesis** ("what did Sarah commit to this month?") — needs
   the archive corpus to exist first; retrieval over it is the next step.
@@ -116,7 +148,7 @@ An archive carries its session's `packId`:
   six-person standup yields "them" and participants come from the summariser's
   reading rather than from diarization.
 
-## 8. De-interviewing the shared defaults
+## 9. De-interviewing the shared defaults
 
 Continuity fixed what BrainCue *remembered*. The same review found the other
 half of the mismatch: what it *assumed*. Three shared defaults were still

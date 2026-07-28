@@ -8,6 +8,9 @@ import { engine } from '../services/engine/engine';
 import { sessionsRepo } from '../db/repositories/sessions.repo';
 import { generateReport } from '../services/session/report';
 import { getOrGenerateMeetingReport } from '../services/engine/meetingReport';
+import { archiveSession } from '../services/engine/sessionArchive';
+import { extractMemoryCandidates } from '../services/memory/extractor';
+import { memoriesRepo } from '../db/repositories/memories.repo';
 import { voiceService } from '../services/voice/voiceService';
 
 const interviewType = zInterviewType;
@@ -167,7 +170,32 @@ export function registerSessionIpc(): void {
     return detail;
   });
 
+  /**
+   * Keep a finished conversation (docs/16-CONTINUITY.md §9).
+   *
+   * Both halves of "remembering" happen here, and only here: the retrievable
+   * archive, and the memory candidates the user will review. Each is gated
+   * again internally (global switch, per-Space opt-out, consent), so this is
+   * the user's intent, not an override of their settings.
+   *
+   * Neither failure is fatal. A session the user chose to keep must stay kept
+   * even if summarising or extraction fails, so the counts come back as they
+   * are and the UI can say what actually happened.
+   */
+  handle(IPC.session.remember, zId, async ({ id }) => {
+    if (!sessionsRepo.detail(id)) throw new Error('Session not found');
+    const [archived, memories] = await Promise.all([
+      archiveSession(id).catch(() => 0),
+      extractMemoryCandidates(id).catch(() => 0),
+    ]);
+    return { archived, memories };
+  });
+
   handle(IPC.session.delete, zId, ({ id }) => {
+    // Discard means discard: the session, its transcript, its archive, and any
+    // memory candidates it produced. A rejected conversation must not leave
+    // suggestions behind in the review queue with nothing to trace them to.
+    memoriesRepo.deleteBySession(id);
     sessionsRepo.delete(id);
     return { deleted: true as const };
   });

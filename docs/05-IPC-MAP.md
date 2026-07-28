@@ -79,17 +79,20 @@ validates input with zod via the `handle()` helper. Errors are returned as
 | `documents:save-resume` | `{ profileId, resumeText }` | `{ keyMissing, parsed, embedded }` (saves resume, parses + reindexes profile base when a key exists) |
 | `documents:reindex-profile` | `{ profileId }` | `{ chunks, embedded }` |
 
-### jobs
-A profile can target multiple jobs; each holds its own JD and is parsed/indexed
-independently.
+### jobs (Spaces)
+A profile can hold many Spaces; each carries its own defining document and is
+parsed/indexed independently. `kind` says what the Space is about — see
+[17 · Spaces and the person](17-SPACES-AND-PROFILE.md) — and drives the field
+labels plus which interview-only steps run (structured JD parsing, the prep
+brief). Physical table/column names stay `jobs`/`job_id`; the rename is logical.
 | Channel | Request | Response |
 |---|---|---|
 | `jobs:list` | `{ profileId }` | `Job[]` |
 | `jobs:page` | `{ profileId, query?, limit=5, offset=0 }` | `{ items: Job[], total }` (server-side pagination + search — `LIKE` on title/company, sorted by `updatedAt` desc. Backs the searchable jobs table) |
 | `jobs:get` | `{ id }` | `Job` |
-| `jobs:save` | `{ id?, profileId, title, company, jdUrl, jdText, companyUrl, notes }` | `{ job, keyMissing, embedded, companyResearched, companyError }` (create or update; parses JD + indexes when a key exists. `jdUrl` is reference-only. If `companyUrl` is set, best-effort scrapes + parses the company site into `parsed_company` and indexes it as `company` chunks; failures surface in `companyError`, not as an error) |
+| `jobs:save` | `{ id?, profileId, kind?, title, company, jdUrl, jdText, companyUrl, notes }` | `{ job, keyMissing, embedded, companyResearched, companyError }` (create or update; parses JD + indexes when a key exists. `jdUrl` is reference-only. If `companyUrl` is set, best-effort scrapes + parses the company site into `parsed_company` and indexes it as `company` chunks; failures surface in `companyError`, not as an error) |
 | `jobs:set-notes` | `{ id, notes }` | `{ job }` (updates the free-form client notes) |
-| `jobs:brief` | `{ id }` | `InterviewBrief` (grounded pre-interview prep brief from the profile's parsed résumé × the job's parsed JD × parsed company research — likely questions, coverage gaps, strengths, company angles. Not persisted; regenerated on demand. Throws a guidance error if the key, parsed résumé, or parsed JD is missing) |
+| `jobs:brief` | `{ id }` (refuses for non-`job` Spaces — a prep brief predicts interview questions) | `InterviewBrief` (grounded pre-interview prep brief from the profile's parsed résumé × the job's parsed JD × parsed company research — likely questions, coverage gaps, strengths, company angles. Not persisted; regenerated on demand. Throws a guidance error if the key, parsed résumé, or parsed JD is missing) |
 | `jobs:delete` | `{ id }` | `{ deleted: true }` |
 
 ### notes
@@ -142,6 +145,7 @@ résumé, persisted, and indexed as `story` chunks so they ground live answers.
 | `session:get-report` | `{ sessionId }` | `SessionReport` |
 | `session:ask` | `{ sessionId, questionText }` | `{ questionId }` (manual ask; answer streams) |
 | `session:ask-active` | `{ questionText }` | `{ ok }` (Cue Card "Ask" box — manual ask for the active session, no id) |
+| `session:remember` | `{ id }` | `{ archived, memories }` (KEEP this conversation: writes its retrievable archive and extracts memory candidates. Called by the save prompt, never automatically — stopping a session remembers nothing. Both halves stay gated by the user's settings, so zeros are legitimate; failures come back as counts, not errors) |
 | `session:set-interview-type` | `{ sessionId, interviewType }` | `{ ok }` (set the session-level type — chosen by the user in the save prompt at stop) |
 | `session:set-answer-prefs` | `{ interviewType?, format?, pronunciation? }` | `{ interviewType, format, pronunciation }` (live Cue Card controls; acts on the active session. Switching `interviewType` is dynamic — it persists onto the session row + reframes later answers) |
 | `session:set-answering` | `{ enabled }` | `{ enabled, answered }` (coding "listen-only" toggle: when disabled, the interviewer is still transcribed but not auto-answered; enabling it also answers the question they just asked) |

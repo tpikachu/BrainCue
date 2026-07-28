@@ -64,6 +64,7 @@ vi.mock('../../providers/registry', () => ({
 import * as schema from '../../db/schema';
 import { createTestDb } from '../../test/dbHarness';
 import { sessionsRepo } from '../../db/repositories/sessions.repo';
+import { memoriesRepo } from '../../db/repositories/memories.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
 import { archiveSession, renderArchive } from './sessionArchive';
 import { SESSION_ARCHIVE_MAX, capSource, retrieve } from '../rag/retriever';
@@ -297,6 +298,67 @@ describe('an archive never outlives its session', () => {
     sessionsRepo.deleteAll();
 
     expect(archiveChunks(pid)).toHaveLength(0);
+  });
+});
+
+describe('discarding a conversation leaves nothing behind', () => {
+  const seedMemory = (
+    profileId: string,
+    sessionId: string | null,
+    status: 'pending' | 'approved',
+  ) => {
+    const id = `arc-m${++seq}`;
+    h.db
+      .insert(schema.memories)
+      .values({
+        id,
+        profileId,
+        category: 'fact',
+        content: `memory ${id}`,
+        status,
+        confidence: 0.9,
+        importance: 0.5,
+        sourceRefs: sessionId ? JSON.stringify([{ type: 'session', id: sessionId }]) : null,
+      })
+      .run();
+    return id;
+  };
+  const statusOf = (id: string) =>
+    h.db
+      .select()
+      .from(schema.memories)
+      .all()
+      .find((m) => m.id === id)?.status ?? null;
+
+  it('deletes the candidates it suggested', async () => {
+    const pid = seedProfile();
+    const sid = seedSession(pid, null, FOUR_TURNS);
+    const mine = seedMemory(pid, sid, 'pending');
+    const other = seedMemory(pid, `arc-other${++seq}`, 'pending');
+
+    expect(memoriesRepo.deleteBySession(sid)).toBe(1);
+    expect(statusOf(mine)).toBeNull();
+    expect(statusOf(other)).toBe('pending'); // another session's queue is untouched
+  });
+
+  it('keeps memories the user already approved — that decision was theirs', async () => {
+    const pid = seedProfile();
+    const sid = seedSession(pid, null, FOUR_TURNS);
+    const approved = seedMemory(pid, sid, 'approved');
+
+    memoriesRepo.deleteBySession(sid);
+
+    // They read it, said yes, possibly edited it. Discarding the conversation
+    // it came from must not take that back.
+    expect(statusOf(approved)).toBe('approved');
+  });
+
+  it('ignores memories with no provenance rather than guessing', async () => {
+    const pid = seedProfile();
+    const sid = seedSession(pid, null, FOUR_TURNS);
+    const orphan = seedMemory(pid, null, 'pending');
+    memoriesRepo.deleteBySession(sid);
+    expect(statusOf(orphan)).toBe('pending');
   });
 });
 

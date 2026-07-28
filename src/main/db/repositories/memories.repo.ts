@@ -163,6 +163,37 @@ export const memoriesRepo = {
     db().delete(schema.memories).where(eq(schema.memories.id, id)).run();
   },
 
+  /**
+   * Delete the PENDING candidates a session produced — what "discard this
+   * conversation" has to mean for memory.
+   *
+   * Only pending ones: an APPROVED memory is the user's, not the session's.
+   * They read it, said yes, and may have edited it; deleting it because its
+   * origin was later discarded would take back a decision they made
+   * deliberately. Provenance lives in `source_refs` JSON rather than a column,
+   * so this filters in JS — the candidate set is tiny.
+   */
+  deleteBySession(sessionId: string): number {
+    const doomed = db()
+      .select({ id: schema.memories.id, sourceRefs: schema.memories.sourceRefs })
+      .from(schema.memories)
+      .where(eq(schema.memories.status, 'pending'))
+      .all()
+      .filter((r) => {
+        if (!r.sourceRefs) return false;
+        try {
+          const refs = JSON.parse(r.sourceRefs) as { type: string; id: string }[];
+          return refs.some((ref) => ref.type === 'session' && ref.id === sessionId);
+        } catch {
+          return false; // unparseable provenance is not evidence of anything
+        }
+      })
+      .map((r) => r.id);
+    if (doomed.length === 0) return 0;
+    db().delete(schema.memories).where(inArray(schema.memories.id, doomed)).run();
+    return doomed.length;
+  },
+
   /** Recall inputs: approved, in-scope (global + this Space), unexpired,
    *  embedded. Raw rows — the recall service scores them. */
   recallRows(profileId: string, packId: string | null, now: number): Row[] {

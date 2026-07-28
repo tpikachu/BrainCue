@@ -36,9 +36,10 @@ profiles 1───* documents 1───* chunks ──* embeddings
 settings (singleton-ish key/value, incl. encrypted API key)
 ```
 
-A **profile** is the user (name, role, resume). Each **context pack** bundles
-what a session is about — every v1 pack is `kind='job'` (its own JD + company
-research); other kinds (`subject`, `project`, …) arrive with their modes.
+A **profile** is the user — name, résumé, and `about`: who they are now. Each
+**context pack** bundles what a session is about; `kind` says which sort of thing
+it is (meeting, project, job, subject, …) and drives both the field labels and
+which interview-only steps run. v1 packs are all `kind='job'`.
 
 ## Tables
 
@@ -54,6 +55,7 @@ research); other kinds (`subject`, `project`, …) arrive with their modes.
 | resume_text | text | extracted raw text (nullable) |
 | jd_text / parsed_jd | text / text(json) | **legacy** — single-JD fields kept for back-compat; JDs live on packs |
 | parsed_resume | text(json) | structured candidate JSON |
+| about | text(json) | 0013 — `ProfileAbout`: who they are now (role, org, location, current projects, the people around them, how they work). Indexed as `profile` chunks; see [17 · Spaces and the person](./17-SPACES-AND-PROFILE.md) |
 | created_at / updated_at | int | |
 
 `answer_style` was dead (never read or written) and was dropped in 0008.
@@ -100,7 +102,7 @@ they can ground live answers.
 
 ### `chunks`
 Chunked text from documents/notes/profile fields/stories/tailored resumes for RAG.
-| id | profile_id FK | job_id FK (nullable) — TS: `packId` | source_type (resume/jd/note/company/story/tailored/session) | source_id | ord | content | token_count | created_at |
+| id | profile_id FK | job_id FK (nullable) — TS: `packId` | source_type (resume/jd/note/company/story/tailored/session/profile) | source_id | ord | content | token_count | created_at |
 
 `source_type='session'` is a finished conversation's archive
 ([16 · Continuity](./16-CONTINUITY.md)); `source_id` is the session id and
@@ -113,6 +115,9 @@ foreign key, so deleting a session cannot cascade — `sessionsRepo.delete` /
 pack delete); resume/note/story chunks have `job_id` null. `story` chunks are managed
 by `indexStories` (one chunk per story) and are deliberately **excluded** from the
 résumé/notes re-index, so re-saving a résumé doesn't wipe the curated story bank.
+`session` chunks are excluded from it too: unscoped archives also have `job_id`
+null, so without that exclusion editing a profile would erase every archive the
+user has.
 `tailored` chunks (an application's tailored resume, indexed by `indexJob`) REPLACE the
 base `resume` chunks in retrieval whenever the selected pack has them — that's how
 "Start interview" on an application grounds in the tailored resume instead of the base.

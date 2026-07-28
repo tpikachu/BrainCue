@@ -239,6 +239,18 @@ export const sessionsRepo = {
     );
   },
 
+  /** How many transcript turns were captured — the save prompt says so, because
+   *  "keep this conversation?" deserves an answer to "was there one?". */
+  turnCount(id: string): number {
+    return (
+      db()
+        .select({ c: sql<number>`count(*)` })
+        .from(schema.transcriptChunks)
+        .where(eq(schema.transcriptChunks.sessionId, id))
+        .get()?.c ?? 0
+    );
+  },
+
   /** Practice Loop aggregates over every sparring drill's per-answer coaching
    *  (answer_feedback ⨝ sessions kind='sparring'). Small local data — computed
    *  in one pass, no pagination needed. */

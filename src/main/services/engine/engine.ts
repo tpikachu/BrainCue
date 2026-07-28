@@ -14,8 +14,6 @@ import { interviewMode } from './modes/interview.mode';
 import { meetingMode } from './modes/meeting.mode';
 import { companionMode } from './modes/companion.mode';
 import { getOrGenerateMeetingReport } from './meetingReport';
-import { extractMemoryCandidates } from '../memory/extractor';
-import { archiveSession } from './sessionArchive';
 import { enginePersistence } from './persistence/enginePersistence';
 import { createRealtimeSource, pcmLevel } from './sourceAdapter';
 import type { AnswerFormat, InterviewType, Presence, Session, SessionMode } from '@shared/types';
@@ -292,9 +290,11 @@ class Engine {
           EVENTS.savePrompt,
           {
             sessionId,
+            mode: s.mode.id,
             interviewType,
             jobTitle: packTitle,
             questionCount: sessionsRepo.questionCount(sessionId),
+            turnCount: sessionsRepo.turnCount(sessionId),
           },
           ['main'],
         );
@@ -311,18 +311,11 @@ class Engine {
             log.warn('meeting report generation failed', e),
           );
         }
-        // Memory candidates: consent-gated inside the extractor — a no-op
-        // until the user enables memory. Candidates land as PENDING; nothing
-        // is remembered until reviewed in Library › Memory.
-        void extractMemoryCandidates(sessionId).catch((e) =>
-          log.warn('memory extraction failed', e),
-        );
-        // Conversation archive (docs/16-CONTINUITY.md): a short, retrievable
-        // record of what happened, so the NEXT conversation can be grounded in
-        // this one. Gated inside the archiver and fire-and-forget — a session
-        // that ended successfully must not report an error because its
-        // summary failed.
-        void archiveSession(sessionId).catch((e) => log.warn('session archive failed', e));
+        // NOTHING is remembered here. The archive and memory extraction wait
+        // for the user's answer to the save prompt (docs/16-CONTINUITY.md §9):
+        // "keep this?" is a question about the conversation, and running either
+        // before it is answered would mean Discard had to undo work that should
+        // never have started. `session:remember` does both on Save.
       }
     }
     return result;
