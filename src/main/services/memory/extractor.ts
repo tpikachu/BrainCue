@@ -6,6 +6,7 @@ import { contextPacksRepo } from '../../db/repositories/jobs.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
 import { providerFor } from '../../providers/registry';
 import { checkSensitive } from './sensitiveFilter';
+import type { MemoryItem } from '@shared/types';
 
 /**
  * Post-session memory extraction — CONSERVATIVE by contract:
@@ -54,9 +55,41 @@ BE CONSERVATIVE:
 - scope "space" only when the fact is specific to THIS meeting/job context; otherwise "profile".
 - confidence reflects how explicitly the transcript supports it. When in doubt, lower.`;
 
+const normalize = (text: string): string =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/**
+ * Has the user already been asked about this exact claim?
+ *
+ * A recurring Space states the same facts every week — that is what makes it
+ * recurring. Without this, week two re-proposes what week one approved, and the
+ * review queue fills with the user's own past decisions; pressing Keep twice on
+ * one session does the same thing in a single sitting. Both make the queue
+ * something you stop reading, which is the only mechanism protecting memory
+ * from garbage.
+ *
+ * Any STATUS counts, including rejected: the user has answered this sentence.
+ * Re-asking is noise whichever way they answered, and the match is on exact
+ * normalized text, so a genuinely different phrasing still gets through.
+ *
+ * Scope follows recall's rule: a profile-wide memory is already recalled inside
+ * every Space, so it shadows a Space-scoped duplicate. A memory belonging to a
+ * DIFFERENT Space shadows nothing — that Space's conversations never see it.
+ */
+function alreadyKnown(known: MemoryItem[], content: string, packId: string | null): boolean {
+  const needle = normalize(content);
+  return known.some(
+    (m) => normalize(m.content) === needle && (m.packId == null || m.packId === packId),
+  );
+}
+
 /** Extract + persist pending candidates for a finished session. Returns how
  *  many were saved (0 when consent is off, the Space opted out, the session
- *  is too thin, or nothing survived the gates). */
+ *  is too thin, nothing survived the gates, or everything was already known). */
 export async function extractMemoryCandidates(sessionId: string): Promise<number> {
   if (settingsRepo.get(SETTINGS_KEYS.memoryEnabled) !== '1') return 0; // no capture before consent
   const session = db()
@@ -94,19 +127,27 @@ export async function extractMemoryCandidates(sessionId: string): Promise<number
     return 0; // extraction failure → nothing (never a partial guess)
   }
 
+  // Everything this profile already has to say about, in any scope and any
+  // state. Built once: the candidate set is at most 5 and this list is small.
+  const known = memoriesRepo.list({ profileId: session.profileId });
+
   let saved = 0;
   for (const c of parsed.candidates) {
     if (c.confidence < MEMORY_CONFIDENCE_FLOOR) continue;
     if (checkSensitive(c.content).sensitive) continue; // hard privacy gate — never stored
-    memoriesRepo.insertCandidate({
+    const packId = c.scope === 'space' ? session.packId : null;
+    if (alreadyKnown(known, c.content, packId)) continue;
+    const id = memoriesRepo.insertCandidate({
       profileId: session.profileId,
-      packId: c.scope === 'space' ? session.packId : null,
+      packId,
       category: c.category,
       content: c.content,
       confidence: c.confidence,
       importance: c.importance,
       sourceRefs: [{ type: 'session', id: sessionId }],
     });
+    // Within one extraction too: a model can repeat itself across candidates.
+    known.push(memoriesRepo.get(id)!);
     saved += 1;
   }
   return saved;

@@ -63,8 +63,9 @@ export default function MemoryPage() {
   }, [profileId, query, scope]);
 
   const memoryOn = !!settings?.memoryEnabled;
-  const setConsent = async (on: boolean) => {
-    await api.settings.set({ memoryEnabled: on });
+  const archiveOn = !!settings?.sessionArchiveEnabled;
+  const setSetting = async (patch: { memoryEnabled?: boolean; sessionArchiveEnabled?: boolean }) => {
+    await api.settings.set(patch);
     await loadSettings();
   };
 
@@ -115,16 +116,55 @@ export default function MemoryPage() {
       subtitle="What BrainCue remembers about this profile — proposed after each session, kept only when you say so."
       width="max-w-4xl"
     >
-      <Card className="mb-5 flex items-center justify-between !py-4">
-        <div>
-          <div className="font-medium text-neutral-100">Remember across sessions</div>
-          <p className="mt-1 max-w-xl text-xs leading-relaxed text-neutral-500">
-            When on, BrainCue suggests memories after each session — nothing is saved until you
-            approve it here, only approved memories ever ground answers, and everything stays in
-            the local database. Secrets, payment, health, and similar content are never stored.
-          </p>
+      {/* BOTH switches, together. There are two — summaries of conversations,
+          and standing facts about you — and they used to live in two different
+          places (this page and Settings) under labels that both read as
+          "remembering". Apart, there was no way to tell which one you had just
+          turned off. Side by side, the difference is the point: one keeps what
+          a conversation WAS, the other keeps claims about YOU, which is why
+          only the second is off until you ask for it. */}
+      <Card className="mb-5 space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="font-medium text-neutral-100">Summaries of conversations</div>
+            <p className="mt-1 max-w-xl text-xs leading-relaxed text-neutral-500">
+              After each session you keep, BrainCue saves a short summary — what it was about, what
+              was decided, who committed to what, and a few lines in the speakers’ own words — so
+              later conversations in that Space start where the last one ended. Summaries stay in
+              the Space they happened in and are deleted with their session.
+            </p>
+          </div>
+          <Switch
+            checked={archiveOn}
+            onChange={(v) => void setSetting({ sessionArchiveEnabled: v })}
+            onLabel="On"
+            offLabel="Off"
+          />
         </div>
-        <Switch checked={memoryOn} onChange={(v) => void setConsent(v)} />
+
+        <div className="flex items-start justify-between gap-4 border-t border-white/5 pt-4">
+          <div>
+            <div className="font-medium text-neutral-100">Long-term memory about you</div>
+            <p className="mt-1 max-w-xl text-xs leading-relaxed text-neutral-500">
+              Standing facts and preferences — “keep updates under a minute”, “Marco is my
+              counterpart at Acme”. These are claims about YOU rather than a record of one call, so
+              this is off until you turn it on: nothing is captured before you do, nothing is
+              recalled until you approve it below, and secrets, payment, and health content are
+              never stored at all.
+            </p>
+          </div>
+          <Switch
+            checked={memoryOn}
+            onChange={(v) => void setSetting({ memoryEnabled: v })}
+            onLabel="On"
+            offLabel="Off"
+          />
+        </div>
+
+        <p className="text-xs text-neutral-500">
+          They are independent: turning summaries off still lets memory be suggested, and turning
+          memory off still summarises. A Space with memory disabled gets neither.
+        </p>
       </Card>
 
       {/* Filter by what scopes it. A Space's memory is a separate body of

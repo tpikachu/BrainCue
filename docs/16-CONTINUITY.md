@@ -294,3 +294,67 @@ to add documents buried it.
 It is a top-level section now, in the profile-scoped nav group, filterable by
 Space — because a Space's memory is a separate body of knowledge from another's,
 recalled in that Space's conversations and nowhere else.
+
+## 14 · Does memory actually persist? (2026-07-28)
+
+Every piece was unit-tested and the promise still was not: *a conversation you
+kept last week changes the answer you get today, in the Space it happened in,
+and nowhere else.* That claim spans extraction, review, embedding, storage,
+scope, and recall — so each part could pass while the whole failed.
+
+`services/memory/persistence.e2e.test.ts` drives the real pipeline against real
+persistence (sql.js + the actual migrations) with only the model providers
+scripted, and covers the edges where "it works" quietly stops being true:
+
+| Edge | What is pinned |
+| --- | --- |
+| Another Space | neither the archive nor the memory follows |
+| Another profile | nothing at all |
+| Profile-wide memory | reaches every Space — that is what "everywhere" means |
+| Re-scoping | moves where a memory is recalled, both directions |
+| Consent revoked after approval | silences recall, deletes nothing, re-enabling restores |
+| Space opted out | neither archived nor extracted |
+| Pending / rejected / archived | never recalled — even when a pending row is forced to carry a vector |
+| Edited content | re-embeds, so recall follows the new words |
+| Expiry, embedding-model change | drop out of recall rather than mis-ranking |
+| SQLite BLOB round trip | a stored vector still matches its own text |
+| Space deleted | its memory goes with it; profile-wide memory survives |
+| Session discarded | archive and PENDING candidates go; approved ones stay |
+| Provider failure | recall returns `[]`, extraction failing still lets the archive through |
+
+### The bug it found
+
+**The same fact was proposed every single time.** A recurring Space states its
+facts every week — that is what makes it recurring — and nothing checked whether
+the user had already been asked. Week two re-proposed what week one approved;
+pressing *Keep* twice on one session did it in a single sitting. The review
+queue is the only mechanism protecting memory from garbage, and this is exactly
+how it becomes something you stop reading.
+
+`alreadyKnown` in the extractor now suppresses a candidate whose normalized text
+matches an existing memory in a **visible** scope:
+
+- **Any status counts**, including rejected. The user has answered this
+  sentence; re-asking is noise whichever way they answered. The match is exact
+  normalized text, so a genuinely different phrasing still gets through — this
+  is a duplicate filter, not a similarity filter.
+- **Scope follows recall's rule.** A profile-wide memory is already recalled
+  inside every Space, so it shadows a Space-scoped duplicate. A memory belonging
+  to a *different* Space shadows nothing, because that Space's conversations
+  never see it.
+
+### The two switches
+
+There are two, and they used to live in two places under labels that both read
+as "remembering", which made it impossible to tell which one you had just turned
+off:
+
+| Switch | Keeps | Default |
+| --- | --- | --- |
+| `sessionArchiveEnabled` | what a conversation WAS — a summary, scoped to its Space, deleted with its session | **on** |
+| `memoryEnabled` | standing claims about the PERSON, reviewed one by one | **off** |
+
+They are independent, and the E2E pins that in both directions: archiving off
+still proposes memories, memory off still archives. Both switches now sit
+together on the Memory page, side by side, where the difference between them is
+the point. Settings links there instead of owning half the answer.
