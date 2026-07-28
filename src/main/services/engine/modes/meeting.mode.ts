@@ -65,7 +65,7 @@ async function buildCard(
   }
 
   // Context card: only exists when retrieval finds something to stand on.
-  const chunks = await ground(ctx.profileId, ctx.turnText, ctx.packId);
+  const chunks = await ground(ctx.profileId, ctx.turnText, ctx.packId, 'meeting');
   if (chunks.length === 0) return null;
   const numbered = chunks
     .map((c, i) => `[${i + 1}] (${c.sourceType}) ${c.content.slice(0, 500)}`)
@@ -103,8 +103,9 @@ export const meetingMode: ModeDefinition = {
   defaultPresence: 'quiet', // meetings hate interruptions
   reportStrategy: 'meeting_report',
 
-  // Summoned answers reuse the shared grounded generator; meetings default to
-  // plain explanation framing.
+  // Summoned answers reuse the shared grounded generator — but NOT the
+  // interview framing. Nobody in this meeting is assessing the user, and the
+  // candidate prompt made every summoned answer read like a pitch.
   generate(input) {
     return streamAnswer({
       question: input.question,
@@ -113,7 +114,7 @@ export const meetingMode: ModeDefinition = {
       profile: input.profile,
       format: input.settings.answerFormat,
       pronunciation: false, // spoken-cue pronunciation aids are an interview thing
-      interviewType: 'general',
+      framing: 'conversation',
       signal: input.signal,
     });
   },

@@ -9,6 +9,7 @@ import { JobFormModal } from '../JobFormModal';
 import { BriefModal } from '../BriefModal';
 import { StartSessionModal } from '../StartSessionModal';
 import { PlayIcon, PlusIcon } from '../../components/icons';
+import { FLAGS } from '@shared/flags';
 
 const PER_PAGE = 8;
 
@@ -113,13 +114,15 @@ export function SpacesTab() {
           >
             Brief
           </Button>
-          <Button
-            variant="ghost"
-            title="Tailor your résumé to this Space's job description"
-            onClick={() => navigate('/tailor')}
-          >
-            Tailor
-          </Button>
+          {FLAGS.jobSearch && (
+            <Button
+              variant="ghost"
+              title="Tailor your résumé to this Space's job description"
+              onClick={() => navigate('/tailor')}
+            >
+              Tailor
+            </Button>
+          )}
           <Button
             variant="ghost"
             onClick={() => {

@@ -180,7 +180,10 @@ const api = {
   session: {
     start: (
       profileId: string,
-      interviewType: string,
+      /** Interview/practice only. Ambient modes omit it; the row keeps the
+       *  column's 'general' default, and the answer prompt ignores it (see
+       *  services/openai/answer.ts — framing). */
+      interviewType: string | undefined,
       jobId: string | null = null,
       answerFormat = 'key_points',
       mode = 'interview',
@@ -190,7 +193,7 @@ const api = {
     ) =>
       invoke(IPC.session.start, {
         profileId,
-        interviewType,
+        interviewType: interviewType ?? 'general',
         jobId,
         answerFormat,
         mode,

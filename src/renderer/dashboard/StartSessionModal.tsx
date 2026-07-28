@@ -113,7 +113,8 @@ export function StartSessionModal(props: {
       await live.startNew({
         profileId,
         jobId: spaceId || null,
-        interviewType: 'general',
+        // No interviewType: this modal starts ambient modes, where there is no
+        // such thing. The session row keeps the column's 'general' default.
         // Companion replies are spoken persona prose, not glanceable cues.
         answerFormat: mode === 'companion' ? 'explanation' : 'key_points',
         // Companion listens to YOU — always the microphone.

@@ -4,6 +4,7 @@ import { api } from '../../lib/api';
 import { useProfileStore } from '../../store/useProfileStore';
 import type { Job, Story } from '@shared/types';
 import { Badge, Card, Field, Select } from '../../components/ui';
+import { FLAGS } from '@shared/flags';
 
 /** Library › Documents: everything BrainCue has ingested for a profile —
  *  the résumé, STAR stories, and each Space's JD / company research. Read-only
@@ -79,7 +80,9 @@ export function DocumentsTab() {
             </div>
           </Card>
 
-          <Card className="flex items-center justify-between !py-4">
+          {/* STAR stories are an interview device — quarantined with the rest
+              of the job-search surface (shared/flags.ts). */}
+          <Card className={`flex items-center justify-between !py-4 ${FLAGS.jobSearch ? '' : 'hidden'}`}>
             <div>
               <div className="font-medium text-neutral-100">STAR stories</div>
               <div className="mt-1 text-xs text-neutral-500">

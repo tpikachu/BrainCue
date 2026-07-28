@@ -226,8 +226,11 @@ describe('detected question → retrieval → streamed answer → persistence', 
     expect(qRow).toMatchObject({ text: q, type: 'behavioral' });
     expect(qRow.transcriptChunkId).not.toBeNull(); // linked to the persisted turn
 
-    // Retrieval: profile scope, top-5, no job selected
-    expect(h.retrieveCalls).toEqual([[profileId, q, 5, null]]);
+    // Retrieval: profile scope, top-5, no job selected — and the STAR story
+    // cue ON, because this is an interview. Ambient modes pass storyCue:false
+    // (engine/grounding.ts); pinning it here keeps the interview path from
+    // silently losing its "Story to tell" cue.
+    expect(h.retrieveCalls).toEqual([[profileId, q, 5, null, { storyCue: true }]]);
 
     // Transparency + stream events, in pipeline order
     expect(evts(EVENTS.contextSent).at(0)?.payload).toMatchObject({ questionId: qRow.id });

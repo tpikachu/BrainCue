@@ -34,7 +34,10 @@ interface LiveSessionState {
 
   startNew: (a: {
     profileId: string;
-    interviewType: string;
+    /** Interview/practice only. Ambient modes leave it unset — there is no
+     *  "interview type" in a standup, and passing one told the answer prompt
+     *  to behave as if there were. The column keeps its 'general' default. */
+    interviewType?: string;
     answerFormat: string;
     jobId: string | null;
     source: AudioSource;

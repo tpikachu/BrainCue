@@ -7,6 +7,17 @@ import type {
   RetrievedMemory,
 } from '@shared/types';
 
+/**
+ * WHO the answer is being written for.
+ *
+ * `interview` casts the model as the candidate being assessed — the v1 framing,
+ * and still exactly right when someone is in an interview. It is badly wrong
+ * anywhere else: it tells the model an interviewer is watching and that the
+ * user's job is to prove themselves, so a summoned answer in a standup came out
+ * as a pitch. `conversation` is the framing for every other mode.
+ */
+export type AnswerFraming = 'interview' | 'conversation';
+
 export interface AnswerInput {
   question: string;
   contextChunks: RetrievedChunk[];
@@ -18,7 +29,10 @@ export interface AnswerInput {
   format: AnswerFormat;
   /** Annotate rare/technical/foreign terms with a quick phonetic respelling. */
   pronunciation: boolean;
-  interviewType: InterviewType;
+  /** Defaults to `interview` so the v1 path is unchanged byte-for-byte. */
+  framing?: AnswerFraming;
+  /** Only meaningful under `interview` framing; ignored otherwise. */
+  interviewType?: InterviewType;
   signal?: AbortSignal;
 }
 
@@ -68,10 +82,37 @@ export type AnswerEvent =
   | { type: 'meta'; riskWarning: string | null }
   | { type: 'usage'; prompt: number; completion: number };
 
-const SYSTEM = `You ARE the candidate — a second version of them — answering the interview ON
+/** The role paragraph — the ONLY part of the prompt that knows what kind of
+ *  conversation this is. Everything after it is shared, because "speakable,
+ *  human, cited, never fabricated" is true of every mode. */
+const ROLE: Record<AnswerFraming, string> = {
+  interview: `You ARE the candidate — a second version of them — answering the interview ON
 THEIR BEHALF, in first person, as if they are speaking. Never say "the candidate" or "they";
 you are them ("I led…", not "The candidate led…"). Your output is a cue card they READ ALOUD,
-live, while the interviewer watches — every line must be effortless to say on the first try.
+live, while the interviewer watches — every line must be effortless to say on the first try.`,
+  conversation: `You ARE the user — a second version of them — speaking ON THEIR BEHALF in a
+live conversation: a meeting, a call, a working session. Never say "the user" or "they"; you
+are them ("I shipped…", not "They shipped…"). Your output is a cue they READ ALOUD, live,
+while the conversation carries on — every line must be effortless to say on the first try.`,
+};
+
+/** What "the person" is called in the shared rules. Keeps the interview prompt
+ *  byte-identical to v1 while the conversation prompt stops calling someone in
+ *  their own standup a candidate. */
+const SUBJECT: Record<AnswerFraming, string> = {
+  interview: 'candidate',
+  conversation: 'user',
+};
+
+const CLOSING_RULE: Record<AnswerFraming, string> = {
+  interview: '- Match the interview type.',
+  conversation:
+    '- ANSWER THE CONVERSATION THAT IS ACTUALLY HAPPENING. Nobody is assessing them here, so\n' +
+    '  never sell, never perform credentials, and never pitch their background unless the\n' +
+    '  question genuinely asks about it. Say the useful thing and stop.',
+};
+
+const buildSystem = (framing: AnswerFraming): string => `${ROLE[framing]}
 Rules:
 - FORMAT is a HARD constraint. Obey the requested format EXACTLY — even if you have more
   to say. When unsure, be shorter. Never pad. (KEY POINTS especially must stay tiny.)
@@ -93,12 +134,12 @@ Rules:
   mid-phrase, so the marks don't break the reading flow. Cite only real context numbers;
   never invent a citation.
 - Ground every SPECIFIC claim (employers, projects, metrics, dates) ONLY in the context.
-  Use (company) context to tailor — but NEVER invent the candidate's own experience or
+  Use (company) context to tailor — but NEVER invent the ${SUBJECT[framing]}'s own experience or
   numbers that aren't there. Generic best-practice statements need no citation.
 - FABRICATION GUARD: if the context can't support what's asked, do NOT make it up. Begin
   the answer with "⚠", state in one short clause that it's not in their background, then
   pivot to a grounded, cited, transferable-skills framing (this is the riskWarning case).
-- Match the interview type.
+${CLOSING_RULE[framing]}
 - Formatting: lead with the single most important line; **bold** only the few words that
   anchor the eye mid-glance; bullets for KEY POINTS and connected sentences for everything
   else; no headers, no stage directions, no meta-commentary — every word on the card must
@@ -121,8 +162,12 @@ export function buildMemoryBlock(memories: RetrievedMemory[]): string {
  * Skeleton: streams the prose answer; meta is requested as a final JSON pass.
  */
 export async function* streamAnswer(input: AnswerInput): AsyncGenerator<AnswerEvent> {
+  const framing: AnswerFraming = input.framing ?? 'interview';
   const userPrompt = [
-    `Interview type: ${input.interviewType}`,
+    // The interview type steers the answer's shape; outside an interview there
+    // is no such thing, and passing 'general' told the model to behave as if
+    // there were.
+    framing === 'interview' ? `Interview type: ${input.interviewType ?? 'general'}` : '',
     FORMAT_INSTRUCTION[input.format],
     input.pronunciation
       ? 'PRONUNCIATION GUIDE: keep the ANSWER itself clean — do NOT put respellings inline. ' +
@@ -134,7 +179,13 @@ export async function* streamAnswer(input: AnswerInput): AsyncGenerator<AnswerEv
         '(e.g. "regulations | noun, plural | regulation | reg-yuh-LAY-shunz"). No IPA. Only include ' +
         'genuinely hard words; if none, omit the section entirely.'
       : '',
-    `Candidate role target: ${input.profile.targetRole} @ ${input.profile.targetCompany ?? 'n/a'}`,
+    framing === 'interview'
+      ? `Candidate role target: ${input.profile.targetRole} @ ${input.profile.targetCompany ?? 'n/a'}`
+      : // A daily user has no "target role"; naming one would invite the model to
+        // answer as if they were applying for it.
+        input.profile.targetRole
+        ? `About them: ${input.profile.name} — ${input.profile.targetRole}`
+        : `About them: ${input.profile.name}`,
     '',
     'CONTEXT:',
     buildContext(input.contextChunks),
@@ -143,7 +194,7 @@ export async function* streamAnswer(input: AnswerInput): AsyncGenerator<AnswerEv
     ...(input.memories?.length
       ? [
           '',
-          "MEMORY (the candidate's own saved notes — cite as [M1], [M2]…, separate from the CONTEXT numbers):",
+          `MEMORY (the ${SUBJECT[framing]}'s own saved notes — cite as [M1], [M2]…, separate from the CONTEXT numbers):`,
           buildMemoryBlock(input.memories),
         ]
       : []),
@@ -165,7 +216,7 @@ export async function* streamAnswer(input: AnswerInput): AsyncGenerator<AnswerEv
   let emitted = false;
   for await (const ev of chat.stream({
     task: 'answer',
-    system: SYSTEM,
+    system: buildSystem(framing),
     user: userPrompt,
     // Hard ceiling per format so "key points" can never run long. Pronunciation adds
     // a short trailing guide, so give it headroom (the guide must not eat the answer).

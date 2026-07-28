@@ -30,6 +30,7 @@ import {
   SettingsIcon,
 } from '../components/icons';
 import { Logo } from '../components/Logo';
+import { FLAGS } from '@shared/flags';
 
 // Dev-only DB explorer — shown/routed only in unpackaged builds.
 const DEV = import.meta.env.DEV;
@@ -55,7 +56,7 @@ const HOME_LAUNCHED: Record<string, string> = {
   '/interview': 'Interview Copilot',
   '/mock': 'Practice · Mock interview',
   '/sparring': 'Practice · Sparring drill',
-  '/tailor': 'Tailor Resume',
+  ...(FLAGS.jobSearch ? { '/tailor': 'Tailor Resume' } : {}),
 };
 
 export default function App() {
@@ -177,7 +178,14 @@ export default function App() {
             <Route path="/interview" element={<InterviewPage />} />
             <Route path="/mock" element={<MockPage />} />
             <Route path="/sparring" element={<SparringPage />} />
-            <Route path="/tailor" element={<TailorPage />} />
+            {/* Job-search tooling is quarantined behind a flag (shared/flags.ts):
+                the page and its data are intact, but a companion for daily
+                conversations should not lead with résumé tailoring. A stale
+                deep-link lands on Home rather than a dead route. */}
+            <Route
+              path="/tailor"
+              element={FLAGS.jobSearch ? <TailorPage /> : <Navigate to="/home" replace />}
+            />
             <Route path="/sessions" element={<SessionsPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/settings" element={<SettingsPage />} />

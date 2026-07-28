@@ -115,3 +115,46 @@ An archive carries its session's `packId`:
 - **Speaker identity.** `transcript_chunks.speaker` is still `me`/`them`, so a
   six-person standup yields "them" and participants come from the summariser's
   reading rather than from diarization.
+
+## 8. De-interviewing the shared defaults
+
+Continuity fixed what BrainCue *remembered*. The same review found the other
+half of the mismatch: what it *assumed*. Three shared defaults were still
+interview-shaped, and every non-interview mode inherited them.
+
+**The answer prompt.** `streamAnswer` opened with "You ARE the candidate …
+answering the interview ON THEIR BEHALF … while the interviewer watches", and
+`meeting.mode.ts` reused it for summoned answers. Correct at the engine level —
+one generate path is the whole point — but the *prompt* was never generalized
+alongside the pipeline, so a question asked in a standup was answered by a model
+told it was being assessed. It now takes an `AnswerFraming`:
+
+- `interview` — unchanged, byte-for-byte, and still right when someone is in an
+  interview. It stays the default so no existing caller changes behaviour.
+- `conversation` — same shared rules (speakable, human, cited, never
+  fabricated), different role, plus one explicit instruction: *nobody is
+  assessing them here, so never sell, never perform credentials, and never pitch
+  their background unless the question asks.*
+
+**The STAR story force-include.** `retrieve()` force-included the best-matching
+`story` chunk even when it missed the top-k, so it could surface as the Cue
+Card's "Story to tell". That is a behavioural-interview device — the right
+answer to "tell me about a time you…" and the wrong thing to push into a client
+call, where it displaces an actual document and invites the model to start
+narrating the user's achievements. Now gated to the interview family
+(`engine/grounding.ts`), which is also why `ground()` takes the mode.
+
+**`interviewType` on ambient sessions.** The start flow stamped `'general'` on
+every meeting and companion session, and the prompt then branched on it. The
+column keeps its default for compatibility; nothing asserts it any more.
+
+Wiring is tested, not just rendering: `meeting.framing.test.ts` fails if meeting
+mode is pointed back at the interview framing. The rendering tests alone did not
+catch that — a mutation run proved it.
+
+**Job-search tooling is quarantined, not deleted.** Tailor Resume, applications,
+and the STAR story bank sit behind `FLAGS.jobSearch` (off). Tables, IPC,
+repositories, and pages are intact and user data is untouched; one flag brings
+the surface back. They belong to the interview-copilot product, and Home leading
+with résumé tailoring misrepresents what BrainCue is — but deleting shipped
+features from a released version needs a deprecation path, not a delete key.

@@ -234,34 +234,18 @@ export default function HomePage() {
         </>
       )}
 
-      {/* Modes — secondary presets. */}
+      {/* Modes. Ordered by what BrainCue IS now: the conversations someone has
+          every day come first, and the interview modes — still fully shipped —
+          sit after them rather than defining the product. */}
       <h3 className="mb-3 mt-8 text-xs font-medium uppercase tracking-wider text-neutral-500">
         Modes
       </h3>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <ModeCard
-          to="/interview"
-          Icon={MicIcon}
-          title="Interview Copilot"
-          desc="You're the candidate. BrainCue hears the questions and streams grounded answer cues into the Cue Card."
-          tour="mode-interview"
-        />
-        <ModeCard
-          Icon={MockIcon}
-          title="Practice"
-          desc="Rehearse out loud: an AI interviewer asks with a voice, and every answer gets coached."
-          tour="mode-practice"
-        >
-          <div className="mt-3 flex gap-2">
-            <PracticeLink to="/mock" label="Mock interview" />
-            <PracticeLink to="/sparring" label="Sparring drill" />
-          </div>
-        </ModeCard>
         {FLAGS.meeting && (
           <ModeCard
             Icon={UsersIcon}
             title="Meeting Copilot"
-            desc="Sits in quietly and surfaces context, open questions, action items, and decisions — only when confident."
+            desc="Sits in quietly and surfaces context, open questions, action items, and decisions — only when confident. Remembers each call, so the next one starts where this one ended."
             labs
             tour="mode-meeting"
             onClick={() => {
@@ -283,6 +267,24 @@ export default function HomePage() {
             }}
           />
         )}
+        <ModeCard
+          to="/interview"
+          Icon={MicIcon}
+          title="Interview Copilot"
+          desc="You're the candidate. BrainCue hears the questions and streams grounded answer cues into the Cue Card."
+          tour="mode-interview"
+        />
+        <ModeCard
+          Icon={MockIcon}
+          title="Practice"
+          desc="Rehearse out loud: an AI interviewer asks with a voice, and every answer gets coached."
+          tour="mode-practice"
+        >
+          <div className="mt-3 flex gap-2">
+            <PracticeLink to="/mock" label="Mock interview" />
+            <PracticeLink to="/sparring" label="Sparring drill" />
+          </div>
+        </ModeCard>
         <ModeCard
           Icon={BoltIcon}
           title="Solve from screen"

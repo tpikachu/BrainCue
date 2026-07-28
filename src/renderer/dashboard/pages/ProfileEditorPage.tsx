@@ -5,6 +5,7 @@ import type { AppSettings, Profile } from '@shared/types';
 import { Badge, BusyOverlay, Button, Card, Field, Page, TextArea, TextInput } from '../../components/ui';
 import { ChevronLeftIcon, UploadIcon } from '../../components/icons';
 import { StoryBankModal } from '../StoryBankModal';
+import { FLAGS } from '@shared/flags';
 
 export default function ProfileEditorPage() {
   const { id } = useParams<{ id: string }>();
@@ -129,7 +130,8 @@ export default function ProfileEditorPage() {
         </Field>
       </Card>
 
-      <Card className="mb-5">
+      {/* Interview device — quarantined with the job-search surface. */}
+      <Card className={`mb-5 ${FLAGS.jobSearch ? '' : 'hidden'}`}>
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">

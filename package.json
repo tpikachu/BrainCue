@@ -1,7 +1,7 @@
 {
   "name": "braincue",
   "version": "2.0.0",
-  "description": "BrainCue Copilot — desktop AI interview copilot (Electron + React + OpenAI). Local-first data, BYO OpenAI key.",
+  "description": "BrainCue — a local-first desktop AI companion for live conversations (Electron + React + OpenAI). It listens with consent, remembers your calls, and answers into a capture-invisible overlay. BYO OpenAI key.",
   "author": "tpikachu",
   "license": "MIT",
   "private": true,

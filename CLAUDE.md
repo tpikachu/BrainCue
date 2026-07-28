@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**BrainCue Copilot** — a local-first desktop AI interview copilot (Electron + React + TypeScript). It transcribes interview audio in real time, detects questions, and streams grounded answer cues into a floating, screen-share-invisible overlay ("Cue Card"). Data stays on the user's machine; only retrieved context + the current question go to OpenAI (BYO key).
+**BrainCue** — a local-first desktop AI companion for live conversations (Electron + React + TypeScript). It transcribes what it hears in real time (with consent), decides when it can help, and streams grounded cues into a floating, screen-share-invisible overlay ("Cue Card"). It archives each conversation so the next one starts where the last ended, and holds reviewed long-term memory per profile. Data stays on the user's machine; only retrieved context + the current question go to OpenAI (BYO key).
+
+**Interviews are one mode, not the product.** Interview Copilot and Practice are still fully shipped, but meeting/companion are the daily modes — when you touch a shared path (prompts, retrieval, session defaults), check that it doesn't assume an interview. See [docs/00-VISION.md](docs/00-VISION.md) and [docs/16-CONTINUITY.md](docs/16-CONTINUITY.md).
 
 ## Commands
 

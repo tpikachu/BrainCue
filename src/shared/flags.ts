@@ -22,10 +22,20 @@ export const FLAGS = {
    *  with the review-first substrate (Prompt 8): consent is still OFF by
    *  default per user — this flag only surfaces the UI. */
   memory: true,
-  /** "Talk to BrainCue" — the voice/summon layer (Prompt 9): global
-   *  push-to-talk, spoken replies with barge-in, no-session quick ask. Voice
-   *  is an output surface over the contribution pipeline, not a mode. */
+  /** "Talk to BrainCue" — the voice/summon layer: global push-to-talk, spoken
+   *  replies with barge-in, no-session quick ask. Voice is an output surface
+   *  over the contribution pipeline, not a mode. */
   voice: true,
+  /**
+   * Job-search tooling: Tailor Resume, applications, and the STAR story bank.
+   *
+   * Shipped and working, but it belongs to the interview-copilot product rather
+   * than to a companion for daily conversations, and leading Home with it
+   * misrepresents what BrainCue now is. Quarantined rather than deleted: the
+   * tables, IPC, repositories, and pages are all intact, and existing users'
+   * data is untouched. Flip this to `true` to bring the surface back.
+   */
+  jobSearch: false,
 } as const;
 
 export type FlagName = keyof typeof FLAGS;

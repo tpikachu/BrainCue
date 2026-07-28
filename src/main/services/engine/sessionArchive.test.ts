@@ -67,6 +67,7 @@ import { sessionsRepo } from '../../db/repositories/sessions.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
 import { archiveSession, renderArchive } from './sessionArchive';
 import { SESSION_ARCHIVE_MAX, capSource, retrieve } from '../rag/retriever';
+import { ground } from './grounding';
 import type { RetrievedChunk } from '@shared/types';
 
 let seq = 0;
@@ -296,6 +297,42 @@ describe('an archive never outlives its session', () => {
     sessionsRepo.deleteAll();
 
     expect(archiveChunks(pid)).toHaveLength(0);
+  });
+});
+
+describe('the STAR story cue belongs to interviews only', () => {
+  /**
+   * The fixture has to isolate FORCE-inclusion from ordinary ranking, or it
+   * proves nothing: a story that wins the top-k on cosine appears under every
+   * mode and always would. So the story here scores ~0.71 against the query —
+   * above STORY_CUE_MIN_SCORE (0.3), and below six notes that score 1.0 and
+   * fill every one of the k=5 slots. It can therefore ONLY appear via the
+   * force path.
+   */
+  function seedStoryBelowTopK(pid: string): void {
+    seedChunk(pid, 'Renewal experience: I led the Acme renegotiation.', 'story');
+    for (let i = 0; i < 6; i += 1) seedChunk(pid, `Renewal pricing note ${i}.`, 'note');
+  }
+
+  it('interview mode force-includes it', async () => {
+    const pid = seedProfile();
+    seedStoryBelowTopK(pid);
+    const hits = await ground(pid, 'renewal pricing', null, 'interview');
+    expect(hits.some((c) => c.sourceType === 'story')).toBe(true);
+  });
+
+  it('a meeting does not — a résumé anecdote is not context for a client call', async () => {
+    const pid = seedProfile();
+    seedStoryBelowTopK(pid);
+    const hits = await ground(pid, 'renewal pricing', null, 'meeting');
+    expect(hits.some((c) => c.sourceType === 'story')).toBe(false);
+  });
+
+  it('nor does the companion', async () => {
+    const pid = seedProfile();
+    seedStoryBelowTopK(pid);
+    const hits = await ground(pid, 'renewal pricing', null, 'companion');
+    expect(hits.some((c) => c.sourceType === 'story')).toBe(false);
   });
 });
 

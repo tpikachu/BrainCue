@@ -89,7 +89,11 @@ export async function reindexProfile(
 /** (Re)index a single job's context (jobId set): its JD plus any company research
  *  scraped from the company website. Both are scoped to the job. */
 export async function indexJob(jobId: string): Promise<{ chunks: number; embedded: number }> {
-  const job = db().select().from(schema.jobs).where(eq(schema.jobs.id, jobId)).get();
+  const job = db()
+    .select()
+    .from(schema.contextPacks)
+    .where(eq(schema.contextPacks.id, jobId))
+    .get();
   if (!job) throw new Error('Job not found');
 
   // Always clear this job's chunks first (embeddings cascade), so removing a JD or

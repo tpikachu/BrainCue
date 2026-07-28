@@ -199,3 +199,45 @@ describe('streamAnswer — streamed events', () => {
     expect((noCtx as { riskWarning: string | null }).riskWarning).toBeTruthy();
   });
 });
+
+/** The framing split (docs/00-VISION.md): interviews are one mode, so the
+ *  candidate persona must not follow the user into every other conversation. */
+describe('answer framing', () => {
+  const system = () => String((h.lastBody!.input as { role: string; content: string }[])[0].content);
+
+  it('defaults to the interview framing, unchanged', async () => {
+    await collect(streamAnswer(baseInput()));
+    expect(system()).toContain('You ARE the candidate');
+    expect(system()).toContain('while the interviewer watches');
+    expect(userPrompt()).toContain('Interview type: behavioral');
+    expect(userPrompt()).toContain('Candidate role target: SWE @ Acme');
+  });
+
+  it('conversation framing never casts the user as a candidate being assessed', async () => {
+    await collect(streamAnswer(baseInput({ framing: 'conversation' })));
+    const sys = system();
+    expect(sys).not.toContain('candidate');
+    expect(sys).not.toContain('interviewer');
+    expect(sys).toContain('live conversation');
+    // and it says so positively, not just by omission
+    expect(sys).toMatch(/Nobody is assessing them/i);
+  });
+
+  it('conversation framing drops interview-only user-prompt lines', async () => {
+    await collect(streamAnswer({ ...baseInput(), framing: 'conversation' }));
+    const p = userPrompt();
+    expect(p).not.toContain('Interview type:');
+    expect(p).not.toContain('Candidate role target:');
+  });
+
+  it('keeps the shared rules under BOTH framings — speakable, human, cited, grounded', async () => {
+    for (const framing of ['interview', 'conversation'] as const) {
+      await collect(streamAnswer(baseInput({ framing })));
+      const sys = system();
+      expect(sys, framing).toMatch(/WRITE FOR THE EAR/i);
+      expect(sys, framing).toMatch(/SOUND 100% HUMAN/i);
+      expect(sys, framing).toMatch(/CITE YOUR SOURCES/i);
+      expect(sys, framing).toMatch(/FABRICATION GUARD/i);
+    }
+  });
+});
