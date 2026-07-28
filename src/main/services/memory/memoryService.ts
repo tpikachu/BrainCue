@@ -23,6 +23,15 @@ async function embed(content: string) {
   };
 }
 
+/**
+ * Approve a candidate — and, when it carries a factKey that already has a
+ * current value, RETIRE that value in the same step.
+ *
+ * This is the truthfulness guarantee (docs/14-MEMORY.md §3.1): after approval
+ * there is exactly one current row per fact, so an agent grounded in memory
+ * cannot state last month's answer. The old row is stamped, not deleted — the
+ * history chain stays readable.
+ */
 export async function approveMemory(
   id: string,
   edits: { content?: string; category?: MemoryCategory; packId?: string | null } = {},
@@ -34,12 +43,63 @@ export async function approveMemory(
   if (verdict.sensitive) {
     throw new Error(`This looks like ${verdict.reason} data — BrainCue won't store it as memory.`);
   }
-  return memoriesRepo.approve(id, {
+  const packId = edits.packId !== undefined ? edits.packId : existing.packId;
+
+  // Embed BEFORE any write: a provider failure must leave the store untouched
+  // rather than half-superseded.
+  const embedding = await embed(content);
+
+  const superseded = existing.factKey
+    ? memoriesRepo.currentByFactKey(existing.profileId, packId, existing.factKey)
+    : null;
+
+  const approved = memoriesRepo.approve(id, {
     content,
     category: edits.category ?? existing.category,
-    packId: edits.packId !== undefined ? edits.packId : existing.packId,
-    embedding: await embed(content),
+    packId,
+    embedding,
   });
+
+  if (superseded && superseded.id !== id) {
+    memoriesRepo.supersede(superseded.id, id);
+    memoriesRepo.setRevision(id, memoriesRepo.nextRevision(superseded));
+    return memoriesRepo.get(id)!;
+  }
+  return approved;
+}
+
+/**
+ * Create a memory the user typed themselves. It still lands `pending` and
+ * still passes the sensitive gate — authoring is a faster path to the same
+ * review lifecycle, never a bypass of it (docs/14-MEMORY.md §4).
+ */
+export function createMemory(opts: {
+  profileId: string;
+  packId: string | null;
+  category: MemoryCategory;
+  content: string;
+  importance?: number;
+  factKey?: string | null;
+}): MemoryItem {
+  const content = opts.content.trim();
+  if (content.length < 3) throw new Error('A memory needs some content.');
+  const verdict = checkSensitive(content);
+  if (verdict.sensitive) {
+    throw new Error(`This looks like ${verdict.reason} data — BrainCue won't store it as memory.`);
+  }
+  const id = memoriesRepo.insertCandidate({
+    profileId: opts.profileId,
+    packId: opts.packId,
+    category: opts.category,
+    content,
+    // The user asserting something directly is the strongest signal there is.
+    confidence: 1,
+    importance: opts.importance ?? 0.6,
+    sourceRefs: [],
+    factKey: opts.factKey ?? null,
+    sourceKind: 'authored',
+  });
+  return memoriesRepo.get(id)!;
 }
 
 export async function updateMemory(

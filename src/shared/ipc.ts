@@ -110,6 +110,9 @@ export const IPC = {
   // memory is ever recalled. All review actions are explicit user actions.
   memory: {
     list: 'memory:list',
+    create: 'memory:create', // author a memory by hand (still lands pending)
+    conflicts: 'memory:conflicts', // pending candidates that would replace a current fact
+    history: 'memory:history', // a fact's revision chain, newest first
     review: 'memory:review', // approve (optionally with edits) or reject a candidate
     update: 'memory:update', // edit an item (content/category/importance/scope/expiry)
     archive: 'memory:archive',

@@ -68,7 +68,7 @@ import { createTestDb } from '../../test/dbHarness';
 import { memoriesRepo } from '../../db/repositories/memories.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
 import { extractMemoryCandidates, extractionSchema } from './extractor';
-import { approveMemory, updateMemory } from './memoryService';
+import { approveMemory, createMemory, updateMemory } from './memoryService';
 import { recallMemories } from './recall';
 
 let seq = 0;
@@ -318,5 +318,231 @@ describe('scoped hybrid recall', () => {
     settingsRepo.set(SETTINGS_KEYS.memoryEnabled, '1');
     const off = seedPack(pid, 0);
     expect(await recallMemories(pid, 'concise bullets', off, T0)).toEqual([]);
+  });
+});
+
+/**
+ * Supersession — the truthfulness guarantee (docs/14-MEMORY.md §3.1).
+ *
+ * The failure this prevents: a fact changes, both values sit in the store,
+ * both match the query, and an agent grounded in memory confidently states
+ * the old answer. After M1 there is exactly ONE current row per fact key, and
+ * the previous value survives as history rather than as a competing truth.
+ */
+describe('supersession', () => {
+  const KEY = 'project:atlas/launch-date';
+
+  const pendingFact = (profileId: string, content: string, factKey: string | null = KEY) =>
+    memoriesRepo.insertCandidate({
+      profileId,
+      packId: null,
+      category: 'fact',
+      content,
+      confidence: 0.9,
+      importance: 0.7,
+      sourceRefs: [],
+      factKey,
+      sourceKind: 'extracted',
+    });
+
+  it('approving a new value retires the old one and promotes the revision', async () => {
+    const pid = seedProfile();
+    const oldId = seedApproved(pid, 'The launch deadline is March 3.', { factKey: KEY });
+    const newId = pendingFact(pid, 'The launch deadline moved to May 9.');
+
+    await approveMemory(newId);
+
+    const before = memoriesRepo.get(oldId)!;
+    const after = memoriesRepo.get(newId)!;
+    expect(before.supersededBy).toBe(newId);
+    expect(before.validTo).not.toBeNull();
+    expect(after.supersededBy).toBeNull();
+    expect(after.validTo).toBeNull();
+    expect(after.revision).toBe(before.revision + 1);
+    expect(memoriesRepo.currentByFactKey(pid, null, KEY)!.id).toBe(newId);
+  });
+
+  it('recall returns ONLY the current value — the stale fact is unreachable', async () => {
+    const pid = seedProfile();
+    seedApproved(pid, 'The launch deadline is March 3.', { factKey: KEY });
+    const newId = pendingFact(pid, 'The launch deadline moved to May 9.');
+    await approveMemory(newId);
+
+    const out = await recallMemories(pid, 'launch deadline', null, T0);
+    expect(out).toHaveLength(1);
+    expect(out[0].content).toContain('May 9');
+    expect(out.some((m) => m.content.includes('March 3'))).toBe(false);
+  });
+
+  it('keeps the superseded row as history, newest first, with its vector cleared', async () => {
+    const pid = seedProfile();
+    const oldId = seedApproved(pid, 'The launch deadline is March 3.', { factKey: KEY });
+    const newId = pendingFact(pid, 'The launch deadline moved to May 9.');
+    await approveMemory(newId);
+
+    const chain = memoriesRepo.history(pid, KEY);
+    expect(chain.map((m) => m.id)).toEqual([newId, oldId]);
+    // Belt-and-braces: even a retrieval path that forgot the supersededBy
+    // filter cannot surface it, because it has no vector left to match.
+    const raw = memoriesRepo.recallRows(pid, null, T0);
+    expect(raw.some((r) => r.id === oldId)).toBe(false);
+  });
+
+  it('excludes a superseded row on the FILTER alone, vector intact', () => {
+    // The previous test passes for two independent reasons (the supersededBy
+    // filter AND the cleared vector), so it cannot prove the filter works.
+    // Here the row keeps a valid embedding and is only marked superseded —
+    // if recallRows ever drops the isNull(supersededBy) condition, this fails.
+    const pid = seedProfile();
+    const live = seedApproved(pid, 'The launch deadline is March 3.', { factKey: KEY });
+    // supersededBy ONLY — validTo stays null and the vector stays intact, so
+    // the supersession filter is the single thing that can exclude this row.
+    const retired = seedApproved(pid, 'The launch deadline was January 8.', {
+      factKey: KEY,
+      supersededBy: live,
+    });
+
+    // seedApproved always embeds, so `retired` carries a valid vector and a
+    // null validTo: supersededBy is the only thing that can exclude it.
+    const rows = memoriesRepo.recallRows(pid, null, T0);
+    expect(rows.map((r) => r.id)).toEqual([live]);
+    expect(memoriesRepo.get(retired)!.supersededBy).toBe(live);
+  });
+
+  it('leaves free-text memories (no factKey) coexisting', async () => {
+    const pid = seedProfile();
+    seedApproved(pid, 'Prefers concise bullet answers.');
+    const second = pendingFact(pid, 'Prefers concise bullet summaries up front.', null);
+    await approveMemory(second);
+
+    const rows = memoriesRepo.recallRows(pid, null, T0);
+    expect(rows).toHaveLength(2); // nothing was retired
+    expect(rows.every((r) => r.supersededBy == null)).toBe(true);
+  });
+
+  it('surfaces a conflict for review instead of applying it', async () => {
+    const pid = seedProfile();
+    const oldId = seedApproved(pid, 'The launch deadline is March 3.', { factKey: KEY });
+    const newId = pendingFact(pid, 'The launch deadline moved to May 9.');
+
+    const conflicts = memoriesRepo.conflicts(pid);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].candidate.id).toBe(newId);
+    expect(conflicts[0].current.id).toBe(oldId);
+    expect(memoriesRepo.get(oldId)!.supersededBy).toBeNull(); // nothing applied yet
+  });
+
+  it('scopes supersession per Space — a Space value never retires the global one', async () => {
+    const pid = seedProfile();
+    const pack = seedPack(pid);
+    const globalId = seedApproved(pid, 'The launch deadline is March 3.', { factKey: KEY });
+    const scoped = memoriesRepo.insertCandidate({
+      profileId: pid,
+      packId: pack,
+      category: 'fact',
+      content: 'For this Space the launch deadline is June 1.',
+      confidence: 0.9,
+      importance: 0.7,
+      sourceRefs: [],
+      factKey: KEY,
+    });
+    await approveMemory(scoped);
+
+    expect(memoriesRepo.get(globalId)!.supersededBy).toBeNull();
+    expect(memoriesRepo.currentByFactKey(pid, pack, KEY)!.id).toBe(scoped);
+    expect(memoriesRepo.currentByFactKey(pid, null, KEY)!.id).toBe(globalId);
+  });
+});
+
+describe('consolidation + authoring', () => {
+  const KEY = 'project:atlas/launch-date';
+
+  it('drops a re-stated identical fact and re-confirms the existing one', async () => {
+    const pid = seedProfile();
+    const existing = seedApproved(pid, 'The launch deadline is March 3.', {
+      factKey: KEY,
+      lastUsedAt: null,
+    });
+    const sid = seedSession(pid, null, ['We are still on for March 3.', 'Right, noted.']);
+    h.chatJson = async () => ({
+      candidates: [
+        {
+          category: 'fact',
+          // Same claim, different case/punctuation — normalization catches it.
+          content: 'the launch deadline is march 3',
+          scope: 'profile',
+          confidence: 0.9,
+          importance: 0.7,
+          factKey: KEY,
+        },
+      ],
+    });
+
+    expect(await extractMemoryCandidates(sid)).toBe(0); // nothing new stored
+    expect(memoriesRepo.list({ profileId: pid, status: 'pending' })).toHaveLength(0);
+    expect(memoriesRepo.get(existing)!.lastUsedAt).not.toBeNull(); // re-confirmed
+  });
+
+  it('stores a contradicting fact as pending — never auto-supersedes', async () => {
+    const pid = seedProfile();
+    const existing = seedApproved(pid, 'The launch deadline is March 3.', { factKey: KEY });
+    const sid = seedSession(pid, null, ['Deadline slipped.', 'It is May 9 now.']);
+    h.chatJson = async () => ({
+      candidates: [
+        {
+          category: 'fact',
+          content: 'The launch deadline moved to May 9.',
+          scope: 'profile',
+          confidence: 0.9,
+          importance: 0.8,
+          factKey: KEY,
+        },
+      ],
+    });
+
+    expect(await extractMemoryCandidates(sid)).toBe(1);
+    expect(memoriesRepo.get(existing)!.supersededBy).toBeNull(); // untouched
+    const pending = memoriesRepo.list({ profileId: pid, status: 'pending' });
+    expect(pending).toHaveLength(1);
+    expect(pending[0].factKey).toBe(KEY);
+  });
+
+  it('rejects a malformed factKey rather than storing a bad one', () => {
+    const parsed = extractionSchema.safeParse({
+      candidates: [
+        {
+          category: 'fact',
+          content: 'The launch deadline moved to May 9.',
+          scope: 'profile',
+          confidence: 0.9,
+          importance: 0.8,
+          factKey: 'Not A Valid Key',
+        },
+      ],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('authored memories land pending and still pass the sensitive gate', () => {
+    const pid = seedProfile();
+    const m = createMemory({
+      profileId: pid,
+      packId: null,
+      category: 'fact',
+      content: 'I report to Sarah Chen.',
+      factKey: 'person:sarah-chen/reports-to',
+    });
+    expect(m.status).toBe('pending'); // authoring is not a bypass of review
+    expect(m.sourceKind).toBe('authored');
+    expect(m.confidence).toBe(1);
+
+    expect(() =>
+      createMemory({
+        profileId: pid,
+        packId: null,
+        category: 'fact',
+        content: 'My password is hunter2 for the staging box.',
+      }),
+    ).toThrow();
   });
 });

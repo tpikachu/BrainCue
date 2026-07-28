@@ -238,6 +238,14 @@ optional edits, or reject) / `memory:update` / `memory:archive` /
 ride the `session:context` / `contribution:patch` payloads as a separate
 `memories` array so "data sent" always shows every memory used.
 
+Truthfulness additions ([14 · Memory](14-MEMORY.md) M1): `memory:create`
+(author a memory by hand — still lands `pending`, still passes the sensitive
+gate), `memory:conflicts` (pending candidates that would REPLACE a current
+fact, each paired with what it would replace), and `memory:history`
+(a fact's revision chain, newest first). Approving a candidate that carries a
+`factKey` retires the current value for that key in the same step, so recall
+only ever sees one truth per fact.
+
 Meeting Copilot additions (Prompt 7): `session:start` now accepts `mode`
 (SessionMode, default `interview`) and `presence`
 (summoned|quiet|balanced|active) for ambient modes; `session:meeting-report`

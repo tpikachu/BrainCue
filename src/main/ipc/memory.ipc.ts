@@ -3,7 +3,14 @@ import { IPC } from '@shared/ipc';
 import { handle } from './helpers';
 import { memoriesRepo } from '../db/repositories/memories.repo';
 import { contextPacksRepo } from '../db/repositories/jobs.repo';
-import { approveMemory, updateMemory } from '../services/memory/memoryService';
+import { approveMemory, createMemory, updateMemory } from '../services/memory/memoryService';
+
+/** "domain:subject/attribute", lowercase kebab — mirrors the extractor's
+ *  schema so hand-authored and extracted facts share one key space. */
+const zFactKey = z
+  .string()
+  .regex(/^[a-z0-9]+:[a-z0-9-]+\/[a-z0-9-]+$/, 'Use the form domain:subject/attribute')
+  .max(80);
 
 const zCategory = z.enum([
   'preference',
@@ -27,6 +34,29 @@ export function registerMemoryIpc(): void {
       query: z.string().optional(),
     }),
     ({ profileId, status, query }) => memoriesRepo.list({ profileId, status, query }),
+  );
+
+  handle(
+    IPC.memory.create,
+    z.object({
+      profileId: z.string().min(1),
+      packId: z.string().nullable().default(null),
+      category: zCategory,
+      content: z.string().min(3).max(1000),
+      importance: z.number().min(0).max(1).optional(),
+      factKey: zFactKey.nullable().optional(),
+    }),
+    (args) => createMemory(args),
+  );
+
+  handle(IPC.memory.conflicts, z.object({ profileId: z.string().min(1) }), ({ profileId }) =>
+    memoriesRepo.conflicts(profileId),
+  );
+
+  handle(
+    IPC.memory.history,
+    z.object({ profileId: z.string().min(1), factKey: zFactKey }),
+    ({ profileId, factKey }) => memoriesRepo.history(profileId, factKey),
   );
 
   handle(

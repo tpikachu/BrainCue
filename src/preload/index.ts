@@ -14,6 +14,7 @@ import type {
   ContributionResetEvent,
   InterviewBrief,
   MeetingReport,
+  MemoryConflict,
   MemoryItem,
   Presence,
   SparringFeedback,
@@ -253,6 +254,20 @@ const api = {
   memory: {
     list: (profileId: string, opts: { status?: string; query?: string } = {}) =>
       invoke<MemoryItem[]>(IPC.memory.list, { profileId, ...opts }),
+    create: (args: {
+      profileId: string;
+      packId?: string | null;
+      category: string;
+      content: string;
+      importance?: number;
+      factKey?: string | null;
+    }) => invoke<MemoryItem>(IPC.memory.create, args),
+    /** Pending candidates that would replace a current fact, paired with what
+     *  they'd replace — the review surface renders both sides. */
+    conflicts: (profileId: string) =>
+      invoke<MemoryConflict[]>(IPC.memory.conflicts, { profileId }),
+    history: (profileId: string, factKey: string) =>
+      invoke<MemoryItem[]>(IPC.memory.history, { profileId, factKey }),
     review: (
       id: string,
       action: 'approve' | 'reject',

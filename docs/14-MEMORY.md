@@ -71,15 +71,23 @@ So: don't swap the database. Add the model around it.
 Additive columns on `memories` (no destructive migration):
 
 ```
-subjectId      text  → entities.id   (nullable — the thing this fact is ABOUT)
 factKey        text  (nullable — a normalized slug for a single-valued fact,
                       e.g. "project:atlas/launch-date", "person:sarah/role")
 validFrom      int   (defaults to createdAt)
 validTo        int   (null = still true)
 supersededBy   text  → memories.id   (null = current)
 sourceKind     text  ('extracted' | 'authored' | 'imported' | 'derived')
-revision       int   (bumped on edit; the row is the head of its chain)
+revision       int   (bumped on supersession; the row is its chain's head)
 ```
+
+*(`subjectId → entities.id` moves to M3 with the entities table itself — a
+column referencing a table that does not exist yet buys nothing.)*
+
+**Shipped in M1** as migration `0013`, purely additive (`ALTER TABLE ADD`), so
+existing memories keep working and default to `sourceKind='extracted'`,
+`revision=1`, current. Index `memories_fact_key_idx` on
+`(profile_id, fact_key, superseded_by)` keeps the "is there a current row for
+this fact?" lookup off a profile scan.
 
 **The supersession rule (answers G1, G3):** at most one row per
 `(profileId, packId, factKey)` may have `supersededBy IS NULL`. When a new
@@ -182,7 +190,7 @@ Benchmarks land as a test (`recall.bench.test.ts`) with synthetic corpora at
 
 | Stage | Content |
 | --- | --- |
-| **M1 · Truthfulness** | Additive migration (§3.1), supersession + conflict review, consolidation stage 2, `memory:create`. The twin cannot be built before this — it is the "don't state a stale fact" guarantee. |
+| **M1 · Truthfulness** ✅ | Additive migration (§3.1), supersession + conflict review, consolidation stage 2, `memory:create` / `memory:conflicts` / `memory:history`. The twin cannot be built before this — it is the "don't state a stale fact" guarantee. |
 | **M2 · Recall quality** | FTS5 index + hybrid union, recency/entity signals, benchmark test |
 | **M3 · Entities** | `entities` + `memory_entities`, alias resolution with approval, entity-browse UI |
 | **M4 · Authoring** | Import (paste/drop a doc), bulk approve, merge/split, history view |

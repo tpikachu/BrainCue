@@ -37,11 +37,29 @@ export const extractionSchema = z.object({
         scope: z.enum(['profile', 'space']).default('profile'),
         confidence: z.number().min(0).max(1),
         importance: z.number().min(0).max(1).default(0.5),
+        /** Set ONLY for single-valued facts, so a new value can supersede the
+         *  old one instead of coexisting with it (docs/14-MEMORY.md §3.1). */
+        factKey: z
+          .string()
+          .regex(/^[a-z0-9]+:[a-z0-9-]+\/[a-z0-9-]+$/)
+          .max(80)
+          .nullish(),
       }),
     )
     .max(5)
     .default([]),
 });
+
+/** Normalized for comparison: case, punctuation, and filler collapsed away so
+ *  "We ship on May 3rd." and "we ship on may 3rd" are recognised as the same
+ *  claim and the second one doesn't create a duplicate row. */
+function normalize(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 const SYSTEM = `You extract AT MOST 5 durable memory candidates from a finished session transcript. Return STRICT JSON:
 {"candidates": [{"category": "preference"|"person"|"project"|"goal"|"decision"|"fact"|"workflow"|"custom", "content": string, "scope": "profile"|"space", "confidence": 0..1, "importance": 0..1}]}
@@ -52,7 +70,10 @@ BE CONSERVATIVE:
 - Fewer is better; return {"candidates": []} when nothing is clearly durable.
 - NEVER include secrets, credentials, payment data, government IDs, health details, or sensitive personal attributes (religion, politics, orientation, immigration, criminal record) — not even paraphrased.
 - scope "space" only when the fact is specific to THIS meeting/job context; otherwise "profile".
-- confidence reflects how explicitly the transcript supports it. When in doubt, lower.`;
+- confidence reflects how explicitly the transcript supports it. When in doubt, lower.
+
+SET "factKey" ONLY for a fact that can have exactly ONE current value, so a later value replaces this one rather than sitting beside it. Format: "domain:subject/attribute", lowercase kebab — e.g. "project:atlas/launch-date", "person:sarah-chen/role", "profile:user/job-title". Same fact = same key across sessions, so choose the obvious slug and reuse it.
+OMIT "factKey" (or null) for anything multi-valued or narrative: preferences, stories, workflows, observations. A wrong key silently retires a good memory, so when unsure, omit it.`;
 
 /** Extract + persist pending candidates for a finished session. Returns how
  *  many were saved (0 when consent is off, the Space opted out, the session
@@ -98,14 +119,33 @@ export async function extractMemoryCandidates(sessionId: string): Promise<number
   for (const c of parsed.candidates) {
     if (c.confidence < MEMORY_CONFIDENCE_FLOOR) continue;
     if (checkSensitive(c.content).sensitive) continue; // hard privacy gate — never stored
+
+    const packId = c.scope === 'space' ? session.packId : null;
+
+    // ── Consolidation (docs/14-MEMORY.md §3.4) ────────────────────────────
+    // Before persisting, compare against what is already known:
+    //   identical  → drop, and mark the existing memory as freshly confirmed
+    //   contradicts→ keep as a pending candidate; approving it supersedes the
+    //                old value (the user decides, never the extractor)
+    //   new        → normal pending candidate
+    const current = c.factKey
+      ? memoriesRepo.currentByFactKey(session.profileId, packId, c.factKey)
+      : null;
+    if (current && normalize(current.content) === normalize(c.content)) {
+      memoriesRepo.markUsed([current.id], Date.now()); // re-confirmed, not re-stored
+      continue;
+    }
+
     memoriesRepo.insertCandidate({
       profileId: session.profileId,
-      packId: c.scope === 'space' ? session.packId : null,
+      packId,
       category: c.category,
       content: c.content,
       confidence: c.confidence,
       importance: c.importance,
       sourceRefs: [{ type: 'session', id: sessionId }],
+      factKey: c.factKey ?? null,
+      sourceKind: 'extracted',
     });
     saved += 1;
   }

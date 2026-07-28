@@ -89,6 +89,9 @@ export type MemoryCategory =
  *  durable MemoryItem, rejected/archived = out of retrieval. */
 export type MemoryStatus = 'pending' | 'approved' | 'rejected' | 'archived';
 
+/** How a memory got here — shown in review so the user can weigh it. */
+export type MemorySourceKind = 'extracted' | 'authored' | 'imported' | 'derived';
+
 export interface MemoryItem {
   id: string;
   profileId: string;
@@ -102,10 +105,28 @@ export interface MemoryItem {
   importance: number;
   sensitive: boolean;
   status: MemoryStatus;
+  /** Single-valued facts carry a key ("project:atlas/launch-date"); approving a
+   *  new value for the same key supersedes the old one instead of coexisting
+   *  with it. null = free-text memory, many may coexist. */
+  factKey: string | null;
+  validFrom: number;
+  /** null = still true; set when superseded. */
+  validTo: number | null;
+  /** The memory that replaced this one; null = current. */
+  supersededBy: string | null;
+  sourceKind: MemorySourceKind;
+  revision: number;
   createdAt: number;
   updatedAt: number;
   lastUsedAt: number | null;
   expiresAt: number | null;
+}
+
+/** A pending candidate whose factKey already has a current approved value —
+ *  surfaced in review as "this replaces that", never auto-applied. */
+export interface MemoryConflict {
+  candidate: MemoryItem;
+  current: MemoryItem;
 }
 
 /** A memory recalled for grounding — cited separately from documents ([M1]…). */
