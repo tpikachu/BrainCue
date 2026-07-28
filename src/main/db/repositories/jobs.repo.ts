@@ -143,6 +143,7 @@ export const contextPacksRepo = {
 
   update(id: string, patch: Partial<ContextPack>): ContextPack {
     const set: Record<string, unknown> = { updatedAt: Date.now() };
+    if (patch.kind !== undefined) set.kind = patch.kind;
     if (patch.title !== undefined) set.title = patch.title;
     if (patch.company !== undefined) set.company = patch.company;
     if (patch.jdUrl !== undefined) set.jdUrl = patch.jdUrl;

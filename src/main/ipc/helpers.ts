@@ -34,3 +34,13 @@ export function handle<S extends z.ZodTypeAny, TOutput>(
 /** Common no-argument schema. */
 export const NoInput = z.union([z.undefined(), z.null(), z.void()]).transform(() => undefined);
 export const zId = z.object({ id: z.string().min(1) });
+/** ContextPackKind — what a Space is about (see shared/spaceKinds.ts). */
+export const zSpaceKind = z.enum([
+  'job',
+  'subject',
+  'project',
+  'meeting',
+  'personal',
+  'game',
+  'custom',
+]);

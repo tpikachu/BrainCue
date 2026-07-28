@@ -111,6 +111,9 @@ const api = {
     save: (input: {
       id?: string;
       profileId: string;
+      /** What this Space is about (see shared/spaceKinds.ts). Absent on an edit
+       *  leaves the stored kind alone; absent on create defaults to 'job'. */
+      kind?: string;
       title: string;
       company: string | null;
       jdUrl: string | null;

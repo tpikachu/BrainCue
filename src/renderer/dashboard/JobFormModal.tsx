@@ -1,14 +1,19 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { FLAGS } from '@shared/flags';
-import type { CompanionSpaceOverrides, Job } from '@shared/types';
+import { SPACE_KINDS, SPACE_KIND_ORDER, isInterviewSpace, spaceKind } from '@shared/spaceKinds';
+import type { CompanionSpaceOverrides, ContextPackKind, Job } from '@shared/types';
 import { Button, Field, Modal, Select, TextArea, TextInput } from '../components/ui';
 import { UploadIcon } from '../components/icons';
 
 type Notice = { tone: 'ok' | 'err'; text: string } | null;
 
-/** Create a new interview (job/client) or edit an existing one. Reused from the
- *  jobs table ("New interview" and per-row "Detail"). */
+/** Create or edit a Space — the bundle of context a conversation is grounded in.
+ *
+ *  Every field here used to be named for a job interview, so setting one up for
+ *  a standup meant filling in a "job description". The shape was always general;
+ *  only the words were not. The kind picked at the top supplies the vocabulary
+ *  (shared/spaceKinds.ts) over exactly the same storage. */
 export function JobFormModal({
   open,
   profileId,
@@ -27,6 +32,10 @@ export function JobFormModal({
   const editing = !!job;
   const empty = { title: '', company: '', jdUrl: '', jdText: '', companyUrl: '', notes: '' };
   const [form, setForm] = useState(empty);
+  // New Spaces default to 'meeting' — the daily case. Editing keeps whatever
+  // the Space already is, so v1 job rows stay jobs.
+  const [kind, setKind] = useState<ContextPackKind>('meeting');
+  const copy = spaceKind(kind);
   const [companion, setCompanion] = useState<CompanionSpaceOverrides>({});
   const [saving, setSaving] = useState(false);
   const [fetching, setFetching] = useState(false);
@@ -44,6 +53,7 @@ export function JobFormModal({
       companyUrl: job?.companyUrl ?? '',
       notes: job?.notes ?? '',
     });
+    setKind((job?.kind as ContextPackKind) ?? 'meeting');
     setCompanion(job?.companionPrefs ?? {});
     setJdNotice(null);
     setNotice(null);
@@ -79,7 +89,7 @@ export function JobFormModal({
 
   const save = async () => {
     if (!form.title.trim() && !form.jdText.trim()) {
-      setNotice({ tone: 'err', text: 'Add at least a title or a job description.' });
+      setNotice({ tone: 'err', text: `Add at least a name or ${copy.docLabel.toLowerCase()}.` });
       return;
     }
     setSaving(true);
@@ -88,7 +98,8 @@ export function JobFormModal({
       const res = await api.jobs.save({
         id: job?.id,
         profileId,
-        title: form.title.trim() || 'Untitled role',
+        kind,
+        title: form.title.trim() || copy.titleLabel,
         company: form.company.trim() || null,
         jdUrl: form.jdUrl.trim() || null,
         jdText: form.jdText.trim() || null,
@@ -108,7 +119,7 @@ export function JobFormModal({
         onSaved(res.job as Job);
       }
       if (res.companyError) {
-        setNotice({ tone: 'err', text: `Saved, but company research failed: ${res.companyError}` });
+        setNotice({ tone: 'err', text: `Saved, but reading the link failed: ${res.companyError}` });
       } else {
         onClose();
       }
@@ -127,33 +138,56 @@ export function JobFormModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title={editing ? 'Edit interview' : 'New interview'}>
+    <Modal open={open} onClose={onClose} title={editing ? 'Edit Space' : 'New Space'}>
       <div className="space-y-3">
+        <Field label="What is this Space for?" hint={copy.hint}>
+          <Select
+            value={kind}
+            onChange={(e) => setKind(e.target.value as ContextPackKind)}
+            disabled={editing}
+          >
+            {SPACE_KIND_ORDER.map((k) => (
+              <option key={k} value={k}>
+                {SPACE_KINDS[k].label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {editing && (
+          <p className="text-xs text-neutral-500">
+            A Space&rsquo;s kind is fixed after it is created — its documents are already indexed
+            under it. Create a new Space if this one is really something else.
+          </p>
+        )}
+
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Interview name / role">
+          <Field label={copy.titleLabel}>
             <TextInput
               value={form.title}
               onChange={(e) => set({ title: e.target.value })}
-              placeholder="e.g. Acme — Senior PM"
+              placeholder={copy.titlePlaceholder}
             />
           </Field>
-          <Field label="Client / company">
+          <Field label={copy.partyLabel}>
             <TextInput
               value={form.company}
               onChange={(e) => set({ company: e.target.value })}
-              placeholder="e.g. Acme"
+              placeholder={copy.partyPlaceholder}
             />
           </Field>
         </div>
 
-        <Field label="JD link (optional)" hint="We'll try to pull the description in. Some sites block this; paste below if so.">
+        <Field
+          label={`${copy.docLabel} — link (optional)`}
+          hint="We'll try to pull the page text in. Some sites block this; paste below if so."
+        >
           <div className="flex gap-2">
             <TextInput
               type="url"
               value={form.jdUrl}
               onChange={(e) => set({ jdUrl: e.target.value })}
               onKeyDown={(e) => e.key === 'Enter' && fetchJd()}
-              placeholder="https://company.com/careers/123"
+              placeholder={copy.linkPlaceholder}
               className="flex-1"
             />
             <Button variant="default" onClick={fetchJd} loading={fetching} disabled={!form.jdUrl.trim()}>
@@ -168,39 +202,46 @@ export function JobFormModal({
         )}
 
         <Button variant="default" onClick={uploadJd}>
-          <UploadIcon /> Upload JD file
+          <UploadIcon /> Upload a file
         </Button>
 
-        <Field label="Job description (parsed for grounding)">
+        <Field
+          label={`${copy.docLabel}${copy.docOptional ? ' (optional)' : ''}`}
+          hint={
+            isInterviewSpace(kind)
+              ? 'Parsed into requirements and responsibilities, then indexed for grounding.'
+              : 'Indexed for grounding — answers here can cite it.'
+          }
+        >
           <TextArea
             rows={5}
             value={form.jdText}
             onChange={(e) => set({ jdText: e.target.value })}
-            placeholder="Paste the job description"
+            placeholder={copy.docPlaceholder}
           />
         </Field>
 
         <Field
-          label="Company website (optional)"
-          hint="On save we research the site so answers can speak to the company. Needs an OpenAI key."
+          label={`${copy.linkLabel} (optional)`}
+          hint="On save we read the page so answers can speak to it. Needs an OpenAI key."
         >
           <TextInput
             type="url"
             value={form.companyUrl}
             onChange={(e) => set({ companyUrl: e.target.value })}
-            placeholder="https://company.com"
+            placeholder={copy.linkPlaceholder}
           />
         </Field>
 
         <Field
-          label="Notes about this client (optional)"
-          hint="On hand while you pick this client and inside the Cue Card during the session."
+          label={`${copy.notesLabel} (optional)`}
+          hint="On hand while you pick this Space and inside the Cue Card during the session."
         >
           <TextArea
             rows={3}
             value={form.notes}
             onChange={(e) => set({ notes: e.target.value })}
-            placeholder="e.g. Recruiter: Jane. Panel of 3. They care about system design. Remote."
+            placeholder={copy.notesPlaceholder}
           />
         </Field>
 

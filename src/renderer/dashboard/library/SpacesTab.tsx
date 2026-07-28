@@ -10,6 +10,7 @@ import { BriefModal } from '../BriefModal';
 import { StartSessionModal } from '../StartSessionModal';
 import { PlayIcon, PlusIcon } from '../../components/icons';
 import { FLAGS } from '@shared/flags';
+import { isInterviewSpace, spaceKind } from '@shared/spaceKinds';
 
 const PER_PAGE = 8;
 
@@ -92,8 +93,19 @@ export function SpacesTab() {
       className: 'w-36',
       render: (j) => (
         <div className="flex flex-wrap gap-1.5">
-          {j.parsedJd ? <Badge tone="green">JD ✓</Badge> : <Badge tone="amber">no JD</Badge>}
-          {j.parsedCompany && <Badge tone="blue">company ✓</Badge>}
+          <Badge>{spaceKind(j.kind).label}</Badge>
+          {/* "Parsed" is only meaningful for an interview; other kinds index
+              their document as plain text, so show whether there IS one. */}
+          {isInterviewSpace(j.kind) ? (
+            j.parsedJd ? (
+              <Badge tone="green">JD ✓</Badge>
+            ) : (
+              <Badge tone="amber">no JD</Badge>
+            )
+          ) : (
+            j.jdText && <Badge tone="green">context ✓</Badge>
+          )}
+          {j.parsedCompany && <Badge tone="blue">link read ✓</Badge>}
         </div>
       ),
     },
@@ -106,14 +118,18 @@ export function SpacesTab() {
           <Button variant="success" onClick={() => setStartSpaceId(j.id)} title="Start a session in this Space">
             <PlayIcon /> Start
           </Button>
-          <Button
-            variant="ghost"
-            disabled={!j.parsedJd}
-            title={j.parsedJd ? 'Pre-interview prep brief' : 'Add a job description first'}
-            onClick={() => setBriefJob(j)}
-          >
-            Brief
-          </Button>
+          {/* A prep brief predicts interview questions against a JD — it has no
+              meaning for a standup or a project. */}
+          {isInterviewSpace(j.kind) && (
+            <Button
+              variant="ghost"
+              disabled={!j.parsedJd}
+              title={j.parsedJd ? 'Pre-interview prep brief' : 'Add a job description first'}
+              onClick={() => setBriefJob(j)}
+            >
+              Brief
+            </Button>
+          )}
           {FLAGS.jobSearch && (
             <Button
               variant="ghost"
