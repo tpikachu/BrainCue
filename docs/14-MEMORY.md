@@ -119,17 +119,28 @@ floor surfaces) and gains three retrieval paths that are **unioned before
 ranking**:
 
 ```
-candidates = vector_top_n(query)              -- semantic, k≈40
-           ∪ fts_top_n(query)                 -- FTS5 exact/keyword, k≈40
-           ∪ entity_facts(entities_in_query)  -- structured, all current rows
+surface    semantic ≥ MEMORY_MIN_SCORE          -- topical match, as before
+        OR (lexical ≥ MEMORY_MIN_LEXICAL        -- names it specifically
+            AND the query names something the memory actually contains)
+        ∪ entity_facts(entities_in_query)       -- structured (M3)
 filter     current only (supersededBy IS NULL, validTo null-or-future),
            approved only, scope-allowed, embedding-identity-matched
-rank       semantic (gate) + lexical + importance + recency + entity-hit bonus
+rank       semantic + 0.45·lexical + importance + recency (+ entity bonus, M3)
 budget     top-k with a per-memory char cap, unchanged
 ```
 
-FTS5 closes G5 and costs one virtual table plus triggers. The entity path
-makes account/person questions reliable.
+**The surfacing contract changed in M2.** Previously semantic score was the
+sole gate, which meant a memory could never be recalled by *naming the thing
+it is about*: embeddings blur identifiers, so "ticket ATL-4471" sits nowhere
+near the memory recording ATL-4471 and the cosine floor discarded it. Now
+either signal can surface a memory, and both contribute to ranking.
+
+The lexical half is IDF-weighted so rare tokens dominate: a shared ticket id
+or proper noun outweighs three shared common words. Anchoring uses **document
+frequency** rather than raw IDF, because IDF's magnitude moves with corpus
+size — the same token scores 0.69 among 2 memories and 2.0 among 40, so an
+absolute threshold silently stops working in small stores. The entity path
+(M3) makes account/person questions reliable.
 
 ### 3.4 Consolidation (answers G4, G7)
 
@@ -218,24 +229,51 @@ What an export contains and what it never contains:
 
 ## 6. Scale plan
 
-Stay on brute-force cosine until measured pain, then swap the `VectorStore`
-backend — the interface already anticipates this. Trigger points:
+Stay on brute-force scoring until measured pain, then swap the `VectorStore`
+backend — the interface already anticipates this.
+
+**Measured** (`recall.bench.test.ts`, 1536-dim vectors, dev laptop):
+
+| Rows | Semantic | Lexical | Total |
+| --- | --- | --- | --- |
+| 1,000 | 9.5 ms | 14.8 ms | **24 ms** |
+| 5,000 | 17.2 ms | 47.6 ms | **65 ms** |
+| 10,000 | 41.5 ms | 95.0 ms | **137 ms** |
+
+Two results worth acting on, both of which contradict the original guesses:
+
+1. **The 80 ms budget is crossed near 5–6k memories, not 20k.** For a profile
+   accumulating facts from daily calls that is a matter of months, so M5 is
+   nearer than "someday".
+2. **Lexical costs more than semantic at scale** (95 ms vs 41 ms at 10k),
+   because `buildIndex` re-tokenizes every candidate on every query. So the
+   first optimisation is not an ANN index at all — it is caching the lexical
+   index per profile (invalidated on write) or persisting tokens. That is
+   cheaper to build and buys more than `sqlite-vec` would.
+
+Revised trigger points:
 
 | Signal | Action |
 | --- | --- |
-| p95 recall > 80 ms | Move scoring off the main thread (worker), pre-filter by SQL |
-| > ~20k embedded rows per profile | Adopt `sqlite-vec` (ANN) behind the same interface |
+| > ~4k embedded rows per profile | Cache/persist the lexical index (kills the dominant cost) |
+| p95 recall > 80 ms after that | Move scoring to a worker thread — it is already off the DB |
+| > ~20k embedded rows per profile | Adopt `sqlite-vec` (ANN) behind the same `VectorStore` interface |
 | Cross-device sync requested | Separate design — out of scope here |
 
-Benchmarks land as a test (`recall.bench.test.ts`) with synthetic corpora at
-1k / 10k / 50k rows, so the trigger points are observed rather than guessed.
+**Why not SQLite FTS5** for the lexical half: the test harness (sql.js 1.14)
+ships FTS3/FTS4 but **not** FTS5. An FTS5 virtual table would fail every
+migration under test and leave the path that decides what an agent says aloud
+unverifiable; FTS4 has no BM25 ranking, which is the only reason to want FTS.
+Scoring in JS (`lexical.ts`) is testable on every engine and gives direct
+control over rare-token weighting. The swap point, if it is ever justified,
+is that module's interface rather than its callers.
 
 ## 7. Delivery
 
 | Stage | Content |
 | --- | --- |
 | **M1 · Truthfulness** ✅ | Additive migration (§3.1), supersession + conflict review, consolidation stage 2, `memory:create` / `memory:conflicts` / `memory:history`. The twin cannot be built before this — it is the "don't state a stale fact" guarantee. |
-| **M2 · Recall quality** | FTS5 index + hybrid union, recency/entity signals, benchmark test |
+| **M2 · Recall quality** ✅ | IDF-weighted lexical scoring (`lexical.ts`), the semantic ∪ lexical surfacing contract (§3.3), and the scale benchmark. FTS5 was evaluated and rejected — see §6. |
 | **M3 · Entities** | `entities` + `memory_entities`, alias resolution with approval, entity-browse UI |
 | **M4 · Authoring** | Ingest a document as "things to know about me", bulk approve, merge/split, history view |
 | **M6 · Portability** ✅ | Export/import a profile's memory as inspectable JSON (§5). Shipped alongside M1 — a store the user cannot get their data out of is not one they should trust with more of it. |

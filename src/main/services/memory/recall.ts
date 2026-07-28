@@ -3,49 +3,40 @@ import { memoriesRepo } from '../../db/repositories/memories.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
 import { providerFor } from '../../providers/registry';
 import { bufferToVector, cosineSimilarity } from '../rag/vectorMath';
+import { buildIndex, hasExactAnchor, lexicalScore, tokenize } from './lexical';
 import type { MemoryCategory, RetrievedMemory } from '@shared/types';
 
 /**
- * Memory recall for grounding — hybrid (semantic + lexical), scope-aware,
- * budget-capped, and consent-gated. Ranking contract: SEMANTIC relevance is
- * the gate (a memory below the cosine floor never surfaces, whatever its
- * importance); lexical overlap, importance, and recency are small tiebreak
- * signals only. Recall failures return [] — memory must never break answers.
+ * Memory recall for grounding — hybrid (semantic ∪ lexical), scope-aware,
+ * budget-capped, and consent-gated. Recall failures return [] — memory must
+ * never break answers.
+ *
+ * SURFACING CONTRACT (changed in M2, docs/14-MEMORY.md §3.3). Previously the
+ * semantic score was the sole gate, which meant a memory could never be
+ * recalled by naming the thing it is about: embeddings blur identifiers, so
+ * "ticket ATL-4471" sits nowhere near the memory recording ATL-4471 and the
+ * cosine floor discarded it. A memory now surfaces when EITHER
+ *
+ *   • its semantic score clears MEMORY_MIN_SCORE (topical match, as before), OR
+ *   • the query names something specific that it actually contains — an
+ *     identifier, figure, or distinctly rare word (see hasExactAnchor)
+ *
+ * and is then ranked by a blend of both signals. Importance and recency remain
+ * small tiebreaks, never gates: a memory nothing asked for must not surface
+ * because it happens to be important.
  */
 
 export const MEMORY_TOP_K = 3;
 export const MEMORY_MIN_SCORE = 0.25; // floor on the SEMANTIC score alone
 export const MEMORY_MAX_CHARS = 300; // per-memory context budget cap
+/** A lexical hit needs this much of the query's token weight before it can
+ *  surface a memory on its own — one shared rare word is not a match. */
+export const MEMORY_MIN_LEXICAL = 0.34;
 
-const LEXICAL_WEIGHT = 0.08;
+const LEXICAL_WEIGHT = 0.45; // a real ranking signal now, not a tiebreak
 const IMPORTANCE_WEIGHT = 0.05;
 const RECENCY_WEIGHT = 0.03;
 const RECENCY_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
-
-const STOPWORDS = new Set(
-  'a an the is are was were what when where who why how which our your their my of for to in on at by with and or so we you they i it this that do does did'.split(
-    ' ',
-  ),
-);
-
-function words(text: string): Set<string> {
-  return new Set(
-    text
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .split(/\s+/)
-      .filter((w) => w.length > 1 && !STOPWORDS.has(w)),
-  );
-}
-
-/** Fraction of query content words that appear in the memory. */
-function lexicalOverlap(query: Set<string>, content: string): number {
-  if (query.size === 0) return 0;
-  const c = words(content);
-  let hit = 0;
-  for (const w of query) if (c.has(w)) hit += 1;
-  return hit / query.size;
-}
 
 export async function recallMemories(
   profileId: string,
@@ -74,23 +65,36 @@ export async function recallMemories(
     if (usable.length === 0) return [];
 
     const queryVector = await providerFor('embedding').embedOne(query);
-    const queryWords = words(query);
+    const queryTokens = tokenize(query);
+    // Indexed over THIS profile's memories: rarity is relative to what the user
+    // actually stores, so a word common in their corpus stops being a signal.
+    const index = buildIndex(usable.map((r) => r.content));
+
     const scored = usable
       .map((r) => {
         const semantic = cosineSimilarity(queryVector, bufferToVector(r.embedVector as Buffer));
+        const lexical = lexicalScore(queryTokens, r.content, index);
         const recent =
           (r.lastUsedAt ?? r.updatedAt) >= now - RECENCY_WINDOW_MS ? RECENCY_WEIGHT : 0;
         return {
           row: r,
           semantic,
+          lexical,
+          // Both signals contribute, with lexical weighted heavily enough that
+          // an exact identifier match outranks a merely topical neighbour.
           blended:
             semantic +
-            LEXICAL_WEIGHT * lexicalOverlap(queryWords, r.content) +
+            LEXICAL_WEIGHT * lexical +
             IMPORTANCE_WEIGHT * r.importance +
             recent,
         };
       })
-      .filter((s) => s.semantic >= MEMORY_MIN_SCORE) // semantic gate, not blended
+      .filter(
+        (s) =>
+          s.semantic >= MEMORY_MIN_SCORE ||
+          (s.lexical >= MEMORY_MIN_LEXICAL &&
+            hasExactAnchor(queryTokens, s.row.content, index)),
+      )
       .sort((a, b) => b.blended - a.blended)
       .slice(0, MEMORY_TOP_K);
 
