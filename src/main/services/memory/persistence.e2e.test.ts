@@ -113,6 +113,24 @@ function seedSpace(profileId: string, title: string, over: { memoryEnabled?: num
     .run();
   return id;
 }
+/**
+ * The Space a test conversation happens in — one per profile, reused.
+ *
+ * A conversation with no Space is not remembered at all (see "a Space is where
+ * a conversation is kept" below), so every test about what IS remembered has to
+ * run in one. Reused rather than fresh-per-call because two sessions in
+ * DIFFERENT Spaces are deliberately isolated from each other, which would
+ * quietly break the dedupe tests.
+ */
+const spaces = new Map<string, string>();
+function spaceOf(profileId: string): string {
+  const existing = spaces.get(profileId);
+  if (existing) return existing;
+  const id = seedSpace(profileId, 'Tuesday standup');
+  spaces.set(profileId, id);
+  return id;
+}
+
 /** A finished session with a transcript, ready to be kept. */
 function seedSession(profileId: string, packId: string | null, turns: string[]): string {
   const id = `e2e-s${++seq}`;
@@ -187,6 +205,7 @@ beforeAll(async () => {
 });
 beforeEach(() => {
   h.db.delete(schema.profiles).run(); // cascades to everything below it
+  spaces.clear();
   h.identity = { provider: 'fake', model: 'test-embed', dim: 18 };
   h.chatJson = defaultChat;
   settingsRepo.set(SETTINGS_KEYS.memoryEnabled, '1');
@@ -274,7 +293,7 @@ describe('the loop the whole product rests on', () => {
 
   it('re-keeping the same session does not duplicate its memories either', async () => {
     const profileId = seedProfile();
-    const sid = seedSession(profileId, null, STANDUP_TURNS);
+    const sid = seedSession(profileId, spaceOf(profileId), STANDUP_TURNS);
     await keepSession(sid);
     await keepSession(sid); // the user pressed Keep twice
 
@@ -321,16 +340,16 @@ describe('the loop the whole product rests on', () => {
 
   it('a REJECTED suggestion is not raised again — the user answered it', async () => {
     const profileId = seedProfile();
-    await keepSession(seedSession(profileId, null, STANDUP_TURNS));
+    await keepSession(seedSession(profileId, spaceOf(profileId), STANDUP_TURNS));
     memoriesRepo.setStatus(memoriesRepo.list({ profileId, status: 'pending' })[0].id, 'rejected');
 
-    await keepSession(seedSession(profileId, null, STANDUP_TURNS));
+    await keepSession(seedSession(profileId, spaceOf(profileId), STANDUP_TURNS));
     expect(memoriesRepo.list({ profileId, status: 'pending' })).toEqual([]);
   });
 
   it('matches on the words, not on punctuation or case', async () => {
     const profileId = seedProfile();
-    await keepSession(seedSession(profileId, null, STANDUP_TURNS));
+    await keepSession(seedSession(profileId, spaceOf(profileId), STANDUP_TURNS));
     const fact = EXTRACTION_REPLY.candidates[0].content;
     h.chatJson = async (req) =>
       req.system.startsWith('You write the archive entry')
@@ -341,13 +360,13 @@ describe('the loop the whole product rests on', () => {
             ],
           };
 
-    await keepSession(seedSession(profileId, null, STANDUP_TURNS));
+    await keepSession(seedSession(profileId, spaceOf(profileId), STANDUP_TURNS));
     expect(memoriesRepo.list({ profileId })).toHaveLength(1);
   });
 
   it('a differently-worded fact still gets through — this is not a similarity filter', async () => {
     const profileId = seedProfile();
-    await keepSession(seedSession(profileId, null, STANDUP_TURNS));
+    await keepSession(seedSession(profileId, spaceOf(profileId), STANDUP_TURNS));
     h.chatJson = async (req) =>
       req.system.startsWith('You write the archive entry')
         ? ARCHIVE_REPLY
@@ -360,7 +379,7 @@ describe('the loop the whole product rests on', () => {
             ],
           };
 
-    await keepSession(seedSession(profileId, null, STANDUP_TURNS));
+    await keepSession(seedSession(profileId, spaceOf(profileId), STANDUP_TURNS));
     expect(memoriesRepo.list({ profileId })).toHaveLength(2);
   });
 
@@ -388,6 +407,59 @@ describe('the loop the whole product rests on', () => {
 
 // ---------------------------------------------------------------------------
 
+describe('a Space is where a conversation is kept', () => {
+  it('no Space, nothing kept — neither half leaks through', async () => {
+    const profileId = seedProfile();
+    const { archived, proposed } = await keepSession(
+      seedSession(profileId, null, STANDUP_TURNS),
+    );
+    expect({ archived, proposed }).toEqual({ archived: 0, proposed: 0 });
+    expect(memoriesRepo.list({ profileId })).toEqual([]);
+    expect(h.db.select().from(schema.chunks).all()).toEqual([]);
+  });
+
+  it('filing it into a Space at the save prompt is what keeps it', async () => {
+    // The user starts a call without a Space — most calls happen once — and it
+    // turns out to belong to one. Choosing it at the end has to be worth as
+    // much as choosing it at the start, so the file happens BEFORE either half
+    // runs and both read their scope off it.
+    const profileId = seedProfile();
+    const space = seedSpace(profileId, 'Tuesday standup');
+    const sid = seedSession(profileId, null, STANDUP_TURNS);
+    expect(await keepSession(sid)).toEqual({ archived: 0, proposed: 0 });
+
+    sessionsRepo.setPack(sid, space); // what `session:remember` does first
+    const { archived, proposed } = await keepSession(sid);
+    expect(archived).toBeGreaterThan(0);
+    expect(proposed).toBe(1);
+
+    // And it is genuinely retrievable from inside that Space, not merely stored.
+    await approveMemory(memoriesRepo.list({ profileId, status: 'pending' })[0].id);
+    const grounded = await ground(profileId, 'where did we land on the renewal pricing?', space);
+    expect(grounded.find((c) => c.sourceType === 'session')).toBeDefined();
+    expect(await recallMemories(profileId, 'how concise should updates be?', space)).toHaveLength(1);
+  });
+
+  it('an unscoped conversation cannot ground a later one, in any Space', async () => {
+    const profileId = seedProfile();
+    const space = seedSpace(profileId, 'Tuesday standup');
+    await keepSession(seedSession(profileId, null, STANDUP_TURNS));
+
+    expect(
+      (await ground(profileId, 'the renewal pricing', space)).find(
+        (c) => c.sourceType === 'session',
+      ),
+    ).toBeUndefined();
+    expect(
+      (await ground(profileId, 'the renewal pricing', null)).find(
+        (c) => c.sourceType === 'session',
+      ),
+    ).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+
 describe('a Space’s memory belongs to that Space', () => {
   it('does not leak into another Space', async () => {
     const profileId = seedProfile();
@@ -408,7 +480,7 @@ describe('a Space’s memory belongs to that Space', () => {
   it('does not leak into another profile', async () => {
     const mine = seedProfile();
     const theirs = seedProfile();
-    await keepSession(seedSession(mine, null, STANDUP_TURNS));
+    await keepSession(seedSession(mine, spaceOf(mine), STANDUP_TURNS));
     await approveMemory(memoriesRepo.list({ profileId: mine, status: 'pending' })[0].id);
 
     expect(await recallMemories(theirs, 'how concise should updates be?', null)).toEqual([]);
@@ -465,7 +537,7 @@ describe('consent is a gate at every stage, not only at capture', () => {
       if (!req.system.startsWith('You write the archive entry')) called = true;
       return defaultChat(req);
     };
-    const { proposed } = await keepSession(seedSession(profileId, null, STANDUP_TURNS));
+    const { proposed } = await keepSession(seedSession(profileId, spaceOf(profileId), STANDUP_TURNS));
     expect(proposed).toBe(0);
     expect(called).toBe(false);
   });
@@ -474,16 +546,17 @@ describe('consent is a gate at every stage, not only at capture', () => {
     // Turning memory off must stop it being used, not destroy what the user
     // approved — re-enabling has to bring it back intact.
     const profileId = seedProfile();
-    await keepSession(seedSession(profileId, null, STANDUP_TURNS));
+    const space = spaceOf(profileId);
+    await keepSession(seedSession(profileId, space, STANDUP_TURNS));
     await approveMemory(memoriesRepo.list({ profileId, status: 'pending' })[0].id);
-    expect(await recallMemories(profileId, 'how concise should updates be?', null)).toHaveLength(1);
+    expect(await recallMemories(profileId, 'how concise should updates be?', space)).toHaveLength(1);
 
     settingsRepo.set(SETTINGS_KEYS.memoryEnabled, '0');
-    expect(await recallMemories(profileId, 'how concise should updates be?', null)).toEqual([]);
+    expect(await recallMemories(profileId, 'how concise should updates be?', space)).toEqual([]);
     expect(memoriesRepo.list({ profileId, status: 'approved' })).toHaveLength(1); // still there
 
     settingsRepo.set(SETTINGS_KEYS.memoryEnabled, '1');
-    expect(await recallMemories(profileId, 'how concise should updates be?', null)).toHaveLength(1);
+    expect(await recallMemories(profileId, 'how concise should updates be?', space)).toHaveLength(1);
   });
 
   it('a Space that opted out neither archives nor extracts', async () => {
@@ -499,7 +572,7 @@ describe('consent is a gate at every stage, not only at capture', () => {
     // make turning off summaries silently disable memory too.
     settingsRepo.set(SETTINGS_KEYS.sessionArchiveEnabled, '0');
     const profileId = seedProfile();
-    const { archived, proposed } = await keepSession(seedSession(profileId, null, STANDUP_TURNS));
+    const { archived, proposed } = await keepSession(seedSession(profileId, spaceOf(profileId), STANDUP_TURNS));
     expect(archived).toBe(0);
     expect(proposed).toBe(1);
   });
@@ -507,7 +580,7 @@ describe('consent is a gate at every stage, not only at capture', () => {
   it('…and memory off still archives', async () => {
     settingsRepo.set(SETTINGS_KEYS.memoryEnabled, '0');
     const profileId = seedProfile();
-    const { archived, proposed } = await keepSession(seedSession(profileId, null, STANDUP_TURNS));
+    const { archived, proposed } = await keepSession(seedSession(profileId, spaceOf(profileId), STANDUP_TURNS));
     expect(archived).toBeGreaterThan(0);
     expect(proposed).toBe(0);
   });
@@ -518,15 +591,16 @@ describe('consent is a gate at every stage, not only at capture', () => {
 describe('only what the user approved is ever used', () => {
   const approvedContent = 'Priya wants standup updates concise — under a minute each.';
 
-  async function seedOneCandidate(): Promise<{ profileId: string; id: string }> {
+  async function seedOneCandidate(): Promise<{ profileId: string; id: string; space: string }> {
     const profileId = seedProfile();
-    await keepSession(seedSession(profileId, null, STANDUP_TURNS));
-    return { profileId, id: memoriesRepo.list({ profileId, status: 'pending' })[0].id };
+    const space = spaceOf(profileId);
+    await keepSession(seedSession(profileId, space, STANDUP_TURNS));
+    return { profileId, id: memoriesRepo.list({ profileId, status: 'pending' })[0].id, space };
   }
 
   it('pending is never recalled', async () => {
-    const { profileId } = await seedOneCandidate();
-    expect(await recallMemories(profileId, 'how concise should updates be?', null)).toEqual([]);
+    const { profileId, space } = await seedOneCandidate();
+    expect(await recallMemories(profileId, 'how concise should updates be?', space)).toEqual([]);
   });
 
   it('…and would still not be, even if it somehow carried a vector', async () => {
@@ -534,34 +608,34 @@ describe('only what the user approved is ever used', () => {
     // has-a-vector gate agree and either alone would pass this suite. Forcing a
     // vector onto a pending row separates them: `status = 'approved'` is what
     // makes a memory usable, and nothing else may stand in for it.
-    const { profileId, id } = await seedOneCandidate();
+    const { profileId, id, space } = await seedOneCandidate();
     await approveMemory(id);
     memoriesRepo.setStatus(id, 'pending'); // keeps the embedding, drops the approval
     expect(memoriesRepo.get(id)?.status).toBe('pending');
 
-    expect(await recallMemories(profileId, 'how concise should updates be?', null)).toEqual([]);
+    expect(await recallMemories(profileId, 'how concise should updates be?', space)).toEqual([]);
   });
 
   it('rejected is never recalled', async () => {
-    const { profileId, id } = await seedOneCandidate();
+    const { profileId, id, space } = await seedOneCandidate();
     memoriesRepo.setStatus(id, 'rejected');
-    expect(await recallMemories(profileId, 'how concise should updates be?', null)).toEqual([]);
+    expect(await recallMemories(profileId, 'how concise should updates be?', space)).toEqual([]);
   });
 
   it('archiving an approved memory takes it out of recall but keeps the row', async () => {
-    const { profileId, id } = await seedOneCandidate();
+    const { profileId, id, space } = await seedOneCandidate();
     await approveMemory(id);
-    expect(await recallMemories(profileId, 'how concise should updates be?', null)).toHaveLength(1);
+    expect(await recallMemories(profileId, 'how concise should updates be?', space)).toHaveLength(1);
 
     memoriesRepo.setStatus(id, 'archived');
-    expect(await recallMemories(profileId, 'how concise should updates be?', null)).toEqual([]);
+    expect(await recallMemories(profileId, 'how concise should updates be?', space)).toEqual([]);
     expect(memoriesRepo.get(id)).not.toBeNull();
   });
 
   it('an edit at approval time is what gets remembered', async () => {
-    const { profileId, id } = await seedOneCandidate();
+    const { profileId, id, space } = await seedOneCandidate();
     await approveMemory(id, { content: 'Standup updates stay under a minute — Priya is strict.' });
-    const [hit] = await recallMemories(profileId, 'how long can a standup update be?', null);
+    const [hit] = await recallMemories(profileId, 'how long can a standup update be?', space);
     expect(hit.content).toBe('Standup updates stay under a minute — Priya is strict.');
     expect(hit.content).not.toBe(approvedContent);
   });
@@ -570,21 +644,21 @@ describe('only what the user approved is ever used', () => {
     // The stale-vector bug: content updated, embedding not. The memory would
     // keep matching what it USED to say — invisible until the wrong thing
     // surfaces in a call.
-    const { profileId, id } = await seedOneCandidate();
+    const { profileId, id, space } = await seedOneCandidate();
     await approveMemory(id);
     await updateMemory(id, { content: 'The Raft consensus paper is the reference for phase two.' });
 
-    expect(await recallMemories(profileId, 'raft consensus', null)).toHaveLength(1);
-    expect(await recallMemories(profileId, 'how concise should updates be?', null)).toEqual([]);
+    expect(await recallMemories(profileId, 'raft consensus', space)).toHaveLength(1);
+    expect(await recallMemories(profileId, 'how concise should updates be?', space)).toEqual([]);
   });
 
   it('deleting removes the memory AND its vector together', async () => {
-    const { profileId, id } = await seedOneCandidate();
+    const { profileId, id, space } = await seedOneCandidate();
     await approveMemory(id);
     memoriesRepo.delete(id);
 
     expect(memoriesRepo.get(id)).toBeNull();
-    expect(await recallMemories(profileId, 'how concise should updates be?', null)).toEqual([]);
+    expect(await recallMemories(profileId, 'how concise should updates be?', space)).toEqual([]);
     // The embedding lives ON the row, so nothing can be orphaned.
     expect(h.db.select().from(schema.memories).all()).toHaveLength(0);
   });
@@ -631,7 +705,7 @@ describe('memory that should no longer apply', () => {
 
   it('an unrelated question recalls nothing — the floor is a real gate', async () => {
     const profileId = seedProfile();
-    await keepSession(seedSession(profileId, null, STANDUP_TURNS));
+    await keepSession(seedSession(profileId, spaceOf(profileId), STANDUP_TURNS));
     await approveMemory(memoriesRepo.list({ profileId, status: 'pending' })[0].id);
 
     expect(await recallMemories(profileId, 'what is the kubernetes rollout plan?', null)).toEqual(
@@ -743,14 +817,14 @@ describe('nothing here may break a live answer', () => {
       if (req.system.startsWith('You write the archive entry')) return ARCHIVE_REPLY;
       throw new Error('extraction provider exploded');
     };
-    const { archived, proposed } = await keepSession(seedSession(profileId, null, STANDUP_TURNS));
+    const { archived, proposed } = await keepSession(seedSession(profileId, spaceOf(profileId), STANDUP_TURNS));
     expect(archived).toBeGreaterThan(0);
     expect(proposed).toBe(0);
   });
 
   it('a failing embedder makes recall empty, never a thrown error', async () => {
     const profileId = seedProfile();
-    await keepSession(seedSession(profileId, null, STANDUP_TURNS));
+    await keepSession(seedSession(profileId, spaceOf(profileId), STANDUP_TURNS));
     await approveMemory(memoriesRepo.list({ profileId, status: 'pending' })[0].id);
 
     const identity = h.identity;
@@ -760,7 +834,7 @@ describe('nothing here may break a live answer', () => {
 
   it('a session with nothing in it produces neither an archive nor a memory', async () => {
     const profileId = seedProfile();
-    const { archived, proposed } = await keepSession(seedSession(profileId, null, []));
+    const { archived, proposed } = await keepSession(seedSession(profileId, spaceOf(profileId), []));
     expect({ archived, proposed }).toEqual({ archived: 0, proposed: 0 });
   });
 });

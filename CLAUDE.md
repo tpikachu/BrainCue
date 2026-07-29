@@ -12,6 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **The user picks an activity, never a mode.** `shared/activities.ts` is the one catalog: what a call IS (meeting/project/job/subject/personal/game/solo/custom), what a Space is a saved instance of, and which `SessionMode` the engine derives from it. There used to be two lists answering the same question and they could disagree. Never add a mode picker back to a start surface; add an activity. See [docs/18-ACTIVITIES.md](docs/18-ACTIVITIES.md).
 
+**A Space is where a conversation is kept.** `archiveSession` and `extractMemoryCandidates` both return 0 when `sessions.packId` is null — no Space, no summary, no memory. The start modal offers only the Spaces of the chosen activity (`spacesFor`) and says what will survive the session before it starts; the save prompt offers the choice once more and files the session before either half runs. Exactly one activity refuses to start without one (`ActivityConfig.needsSpace`, `job`). See [docs/16-CONTINUITY.md](docs/16-CONTINUITY.md) §15.
+
 ## Commands
 
 ```bash

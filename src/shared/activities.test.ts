@@ -5,6 +5,7 @@ import {
   ACTIVITY_ORDER,
   DEFAULT_ACTIVITY,
   activity,
+  activityOf,
   isInterviewSpace,
   modeEnabled,
   modeFor,
@@ -47,6 +48,19 @@ describe('the activity catalog', () => {
     expect(activity('meeting')).toBe(ACTIVITIES.meeting);
   });
 
+  it('names the activity a saved Space is an instance of, agreeing with activity()', () => {
+    // The Space picker filters on this, so a disagreement between the key and
+    // the config would hide a Space from the only list that can offer it.
+    for (const kind of ACTIVITY_ORDER) {
+      expect(activityOf(kind), kind).toBe(kind);
+      expect(ACTIVITIES[activityOf(kind)], kind).toBe(activity(kind));
+    }
+    // v1 rows and hand-edited kinds read as "something else", not as a meeting.
+    expect(activityOf(null)).toBe('custom');
+    expect(activityOf('not-a-kind')).toBe('custom');
+    expect(ACTIVITIES[activityOf('not-a-kind')]).toBe(activity('not-a-kind'));
+  });
+
   it('treats only the job activity as an interview', () => {
     expect(isInterviewSpace('job')).toBe(true);
     for (const kind of ACTIVITY_ORDER.filter((k) => k !== 'job')) {
@@ -81,6 +95,17 @@ describe('activity → mode: the mapping that replaced the mode picker', () => {
     expect(ACTIVITIES.job.needsResume).toBe(true);
     for (const kind of ACTIVITY_ORDER.filter((k) => k !== 'job')) {
       expect(ACTIVITIES[kind].needsResume, kind).toBe(false);
+    }
+  });
+
+  it('asks for a Space for interviews ONLY', () => {
+    // A Space is where a conversation is kept, so requiring one is requiring
+    // setup. Most calls happen once and are better started immediately; an
+    // interview is one round of several for one role, and losing what was asked
+    // is losing the whole point.
+    expect(ACTIVITIES.job.needsSpace).toBe(true);
+    for (const kind of ACTIVITY_ORDER.filter((k) => k !== 'job')) {
+      expect(ACTIVITIES[kind].needsSpace, kind).toBe(false);
     }
   });
 

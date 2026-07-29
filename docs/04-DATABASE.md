@@ -115,9 +115,12 @@ foreign key, so deleting a session cannot cascade — `sessionsRepo.delete` /
 pack delete); resume/note/story chunks have `job_id` null. `story` chunks are managed
 by `indexStories` (one chunk per story) and are deliberately **excluded** from the
 résumé/notes re-index, so re-saving a résumé doesn't wipe the curated story bank.
-`session` chunks are excluded from it too: unscoped archives also have `job_id`
-null, so without that exclusion editing a profile would erase every archive the
-user has.
+`session` chunks are excluded from it too. Archives written today are always
+scoped to a Space ([16 §15](./16-CONTINUITY.md)), but ones written before that
+rule have `job_id` null and are still in users' databases — so without the
+exclusion, editing a profile would erase every archive of every call they had
+before the upgrade. The exclusion is by `source_type`, not by scope, so it holds
+either way.
 `tailored` chunks (an application's tailored resume, indexed by `indexJob`) REPLACE the
 base `resume` chunks in retrieval whenever the selected pack has them — that's how
 "Start interview" on an application grounds in the tailored resume instead of the base.

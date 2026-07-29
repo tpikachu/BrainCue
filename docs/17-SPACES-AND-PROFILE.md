@@ -88,11 +88,16 @@ themselves, and it must be as easy to retract as to give.
 
 `reindexProfile` clears every unscoped chunk before writing fresh ones. That set
 had already grown once (STAR stories are managed separately), and conversation
-archives are unscoped whenever the session had no Space — so **editing your name
+archives were unscoped whenever the session had no Space — so **editing your name
 would have silently erased every archive of every call you had ever had.** No
 error, no symptom, until answers quietly stopped citing last week. Archives are
 now excluded explicitly, and the exclusion has a test that fails when it is
 removed.
+
+Archives are always Space-scoped now ([16 §15](./16-CONTINUITY.md)), which would
+have prevented this bug — but the exclusion stays and is still keyed on
+`source_type` rather than scope, because every archive written before that rule
+is still unscoped in existing databases.
 
 ## 3. Not in this milestone
 

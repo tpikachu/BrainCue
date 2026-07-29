@@ -88,8 +88,14 @@ function alreadyKnown(known: MemoryItem[], content: string, packId: string | nul
 }
 
 /** Extract + persist pending candidates for a finished session. Returns how
- *  many were saved (0 when consent is off, the Space opted out, the session
- *  is too thin, nothing survived the gates, or everything was already known). */
+ *  many were saved (0 when consent is off, there is no Space to keep it in, the
+ *  Space opted out, the session is too thin, nothing survived the gates, or
+ *  everything was already known).
+ *
+ *  Note the scopes still differ: the session must belong to a Space, but a
+ *  candidate the extractor marks `profile` is stored profile-wide and recalled
+ *  everywhere. Where a conversation is kept and how far what it taught reaches
+ *  are two different questions. */
 export async function extractMemoryCandidates(sessionId: string): Promise<number> {
   if (settingsRepo.get(SETTINGS_KEYS.memoryEnabled) !== '1') return 0; // no capture before consent
   const session = db()
@@ -98,10 +104,13 @@ export async function extractMemoryCandidates(sessionId: string): Promise<number
     .where(eq(schema.sessions.id, sessionId))
     .get();
   if (!session) return 0;
-  if (session.packId) {
-    const pack = contextPacksRepo.get(session.packId);
-    if (pack && !pack.memoryEnabled) return 0; // Space opted out
-  }
+  // A Space is where a conversation is kept — with none, this session is a
+  // one-off and leaves nothing behind, the same rule the archive follows. It is
+  // stated in the start modal and offered again at the save prompt, so "no
+  // Space" is a choice the user made twice rather than something lost quietly.
+  if (!session.packId) return 0;
+  const pack = contextPacksRepo.get(session.packId);
+  if (pack && !pack.memoryEnabled) return 0; // Space opted out
 
   const turns = db()
     .select()

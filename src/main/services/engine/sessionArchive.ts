@@ -190,8 +190,8 @@ export function renderArchive(
 
 /**
  * Summarise a finished session and index it for retrieval. Returns how many
- * chunks were written (0 whenever it declined — consent off, Space opted out,
- * too short, or the model failed).
+ * chunks were written (0 whenever it declined — consent off, no Space to keep
+ * it in, Space opted out, too short, or the model failed).
  *
  * Never throws: this runs fire-and-forget after a session ends, and a failed
  * archive must not surface as a broken session.
@@ -211,7 +211,14 @@ export async function archiveSession(sessionId: string): Promise<number> {
     if (session.mode === 'practice' || session.kind === 'mock' || session.kind === 'sparring') {
       return 0;
     }
-    const pack = session.packId ? contextPacksRepo.get(session.packId) : null;
+    // No Space, nothing kept. An archive has to be scoped to something for it
+    // to be worth retrieving: a Space is what makes the tenth standup grounded
+    // in the previous nine, and what stops one client's history grounding
+    // another client's call. A session with no Space is a one-off — it helped
+    // live and leaves its transcript, and the user is told so before it starts
+    // and offered a Space again when it ends.
+    if (!session.packId) return 0;
+    const pack = contextPacksRepo.get(session.packId);
     if (pack && !pack.memoryEnabled) return 0; // the Space opted out of remembering
 
     const turns = db()
@@ -265,10 +272,9 @@ export async function archiveSession(sessionId: string): Promise<number> {
         .values({
           id: chunkId,
           profileId: session.profileId,
-          // Scoped to where the conversation happened: a Space-bound call stays
-          // inside that Space, so one client's history can never ground another
-          // client's meeting. Unscoped sessions archive globally, which is what
-          // makes a personal companion continuous across the day.
+          // Scoped to where the conversation happened, always: an archive stays
+          // inside its Space, so one client's history can never ground another
+          // client's meeting.
           packId: session.packId,
           sourceType: 'session',
           sourceId: sessionId,

@@ -157,6 +157,16 @@ describe('extraction gates', () => {
     expect(h.chatCalls).toBe(0);
   });
 
+  it('a conversation with no Space extracts nothing — and is never sent to the model', async () => {
+    // A Space is where a conversation is kept; with none there is nowhere to
+    // put what it taught, so the transcript never leaves the machine either.
+    const pid = seedProfile();
+    const sid = seedSession(pid, null, ['We should meet weekly.', 'Agreed, Mondays work.']);
+    h.chatJson = candidates();
+    expect(await extractMemoryCandidates(sid)).toBe(0);
+    expect(h.chatCalls).toBe(0);
+  });
+
   it('a Space that opted out extracts nothing', async () => {
     const pid = seedProfile();
     const packId = seedPack(pid, 0);
@@ -168,7 +178,7 @@ describe('extraction gates', () => {
 
   it('saves only benign, confident candidates — as PENDING, with provenance', async () => {
     const pid = seedProfile();
-    const sid = seedSession(pid, null, ['I prefer bullet points.', 'Noted, concise it is.']);
+    const sid = seedSession(pid, seedPack(pid), ['I prefer bullet points.', 'Noted, concise it is.']);
     h.chatJson = candidates();
     expect(await extractMemoryCandidates(sid)).toBe(1); // floor-drop + sensitive-drop
     const rows = memoriesRepo.list({ profileId: pid });

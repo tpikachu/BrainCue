@@ -1,4 +1,10 @@
-import { ACTIVITIES, DEFAULT_ACTIVITY, activity, startableActivities } from '@shared/activities';
+import {
+  ACTIVITIES,
+  DEFAULT_ACTIVITY,
+  activity,
+  activityOf,
+  startableActivities,
+} from '@shared/activities';
 import type { ActivityConfig } from '@shared/activities';
 import type {
   CompanionPresence,
@@ -40,6 +46,26 @@ export const PRACTICE_LINKS: { to: '/mock' | '/sparring'; label: string }[] = [
   { to: '/sparring', label: 'Sparring drill' },
 ];
 
+/**
+ * The Spaces that can be picked for an activity.
+ *
+ * A Space IS a saved activity, so a Space of a different one is not a candidate:
+ * its documents, its archive format, and everything it has accumulated belong to
+ * what it is. Offering all of them turned the list into a directory of
+ * everything the profile had ever set up, and picking one silently rewrote the
+ * activity chosen a moment earlier.
+ *
+ * Kept here rather than inline in the modal so the rule is testable on its own
+ * and the picker and the "does the current selection survive?" check can never
+ * disagree about it.
+ */
+export function spacesFor<T extends { kind?: string | null }>(
+  spaces: T[],
+  activity: ContextPackKind,
+): T[] {
+  return spaces.filter((s) => activityOf(s.kind) === activity);
+}
+
 /** Presence options for ambient activities — labels for the explicit
  *  threshold/cooldown levels in the engine's trigger/presence.ts. */
 export const PRESENCE_OPTIONS: { value: Presence; label: string; desc: string }[] = [
@@ -75,24 +101,33 @@ export const BUDGET_OPTIONS: { value: number | null; label: string }[] = [
  * Can a session start? Returns the FIRST blocking reason so the UI can say
  * exactly what to fix (and never half-starts anything).
  *
- * The résumé gate is per-activity. It used to be unconditional, which meant you
- * could not sit in on your own standup without first uploading a CV — the
- * single loudest way the app still insisted it was an interview tool. Only the
- * Interview activity genuinely needs one: it answers AS the candidate, from
- * their history. A meeting needs nothing but a profile to attach to.
+ * Both per-activity gates are read off the catalog, never hardcoded here.
+ *
+ * The résumé gate used to be unconditional, which meant you could not sit in on
+ * your own standup without first uploading a CV — the single loudest way the app
+ * still insisted it was an interview tool. Only the Interview activity genuinely
+ * needs one: it answers AS the candidate, from their history.
+ *
+ * The Space gate is the same shape for the same reason. A Space is where a
+ * conversation is kept, so starting without one means keeping nothing — fine for
+ * a call that happens once, wrong for an interview, which is one round of
+ * several for one role and whose value is entirely cumulative.
  */
 export function startBlocker(a: {
   profile: Profile | undefined;
   apiKeyPresent: boolean;
   sessionLive: boolean;
   activity?: ContextPackKind;
+  spaceId?: string | null;
 }): string | null {
   if (a.sessionLive) return 'A session is already live — stop it first.';
   if (!a.apiKeyPresent) return 'Add your OpenAI API key in Settings.';
   if (!a.profile) return 'Pick a profile.';
-  const needsResume = ACTIVITIES[a.activity ?? DEFAULT_ACTIVITY]?.needsResume ?? false;
-  if (needsResume && !a.profile.parsedResume)
+  const config = ACTIVITIES[a.activity ?? DEFAULT_ACTIVITY];
+  if (config?.needsResume && !a.profile.parsedResume)
     return 'Interviews answer from your résumé — add one to this profile in the Library.';
+  if (config?.needsSpace && !a.spaceId)
+    return 'Pick the Space this interview is for, or create one — otherwise there is nowhere to keep what it learns.';
   return null;
 }
 
@@ -118,6 +153,12 @@ export function captureSummary(a: {
           ? 'System audio (the other side of your call), transcribed in real time.'
           : 'Your microphone, transcribed in real time.',
       'The transcript stays in the local database on this machine.',
+      // What survives the session, said before it starts. A Space is the only
+      // place a conversation is kept, so its absence is a real consequence and
+      // belongs here rather than being discovered at the save prompt.
+      a.spaceTitle
+        ? `Afterwards, if you keep it: a short summary and any memory suggestions, filed in “${a.spaceTitle}”.`
+        : 'Afterwards: nothing is summarised or remembered — pick a Space for that (you can still choose one when it ends).',
     ],
     sent: [
       'Audio to OpenAI for transcription (Realtime API, your key).',

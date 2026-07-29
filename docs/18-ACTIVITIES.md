@@ -67,8 +67,12 @@ Four consequences worth naming:
   Not a lock, and deliberately so: a Space set up for a job is the right
   grounding for the recruiter *call* about that job, and that call is a
   meeting, not an interview.
-- **Starting with no Space is first-class.** Most calls happen once. Requiring
-  a Space first was the friction that made this feel like a job tool.
+- **Starting with no Space is first-class — for every activity but one.** Most
+  calls happen once. Requiring a Space first was the friction that made this
+  feel like a job tool. It does have a consequence, stated before the session
+  starts and again when it ends: a Space is the only place a conversation is
+  kept, so with none there is no summary and no memory ([16
+  §15](./16-CONTINUITY.md)). Only `job` refuses to start without one.
 - **Unbuilt modes are not listed as activities.** In the one list you must
   answer to start, a "Coming soon" tile is an obstacle, not honesty — and a
   gated activity is *dropped*, never downgraded into a different mode, because
@@ -129,3 +133,38 @@ written for after `sessions.mode` was silently dropped by the same mechanism.
   `ACTIVITIES` moves it over and the flag gate lets it appear.
 - **The job-applicant profile columns.** Still on `profiles`, still deferred for
   the reasons in [17 §3](./17-SPACES-AND-PROFILE.md).
+
+## 8 · The Space list is filtered by the activity (2026-07-28)
+
+The start modal used to list **every** Space on the profile, and picking one
+rewrote the activity underneath (a Space is a saved activity, so its kind wins).
+Two problems compounded: the list was a directory of everything the profile had
+ever set up, most of it irrelevant to the call about to start; and answering the
+first question could silently un-answer it.
+
+`spacesFor(spaces, activity)` (in `startFlow.ts`, so it is testable on its own)
+now offers only the Spaces of the chosen activity. Changing the activity drops a
+selection that no longer matches, because a selection you cannot see is the one
+that surprises you afterwards. `activityOf(kind)` supplies the comparison and
+agrees with `activity(kind)` on the fallback, so a v1 Space with no kind appears
+under *Something else* rather than vanishing from every list.
+
+The effect that derives the activity from the Space stays, and now only ever
+fires for a Space arriving as `initialSpaceId` from the Library — one picked in
+the modal already matches by construction.
+
+**Creating one without leaving.** A "New Space" button beside the picker opens
+`JobFormModal` with `initialKind` set to the activity already chosen, so the same
+question is not asked twice and cannot be answered differently. It *replaces* the
+start modal rather than stacking on it: the start form's state lives in
+`StartSessionModal`, so it survives untouched and returns with the new Space
+selected. Closing is the sub-form's own call — it stays open to report a link it
+could not read.
+
+## 9 · `needsSpace`
+
+The second per-activity gate on `ActivityConfig`, read by `startBlocker` exactly
+like `needsResume`, and true for exactly one activity — see
+[16 §15](./16-CONTINUITY.md) for why the interview is the one that cannot start
+without a Space, and for the rule that makes a Space the only place a
+conversation is kept.

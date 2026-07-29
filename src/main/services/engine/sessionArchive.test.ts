@@ -94,6 +94,21 @@ function seedPack(profileId: string, memoryEnabled = 1): string {
     .run();
   return id;
 }
+/**
+ * The Space a test conversation happened in — one per profile, reused.
+ *
+ * A conversation with no Space is not archived at all (see "a conversation with
+ * no Space is not kept" below), so every test about what IS archived has to run
+ * in one.
+ */
+const packs = new Map<string, string>();
+function packOf(profileId: string): string {
+  const existing = packs.get(profileId);
+  if (existing) return existing;
+  const id = seedPack(profileId);
+  packs.set(profileId, id);
+  return id;
+}
 function seedSession(
   profileId: string,
   packId: string | null,
@@ -174,6 +189,7 @@ beforeAll(async () => {
   h.db = (await createTestDb()).db;
 });
 beforeEach(() => {
+  packs.clear();
   h.chatCalls = 0;
   h.chatJson = async () => GOOD_ARCHIVE;
   settingsRepo.set(SETTINGS_KEYS.sessionArchiveEnabled, '1');
@@ -206,10 +222,11 @@ describe('archiving a finished conversation', () => {
   it('grounds a LATER conversation in the earlier one', async () => {
     const pid = seedProfile();
     seedChunk(pid, 'Ten years of experience leading platform teams.'); // corpus to compete with
-    const sid = seedSession(pid, null, FOUR_TURNS); // unscoped → follows the user
+    const sid = seedSession(pid, packOf(pid), FOUR_TURNS);
     await archiveSession(sid);
 
-    const hits = await retrieve(pid, 'where did we land on the renewal pricing?', 5, null);
+    // Retrieved from inside the Space it happened in — the only place it is.
+    const hits = await retrieve(pid, 'where did we land on the renewal pricing?', 5, packOf(pid));
     const archive = hits.find((c) => c.sourceType === 'session');
     expect(archive).toBeDefined();
     expect(archive!.content).toContain('two-year');
@@ -217,7 +234,7 @@ describe('archiving a finished conversation', () => {
 
   it('does not archive before the conversation is one', async () => {
     const pid = seedProfile();
-    const sid = seedSession(pid, null, ['Hi.', 'Hello.']); // below MIN_TURNS
+    const sid = seedSession(pid, packOf(pid), ['Hi.', 'Hello.']); // below MIN_TURNS
     expect(await archiveSession(sid)).toBe(0);
     expect(h.chatCalls).toBe(0); // and nothing is sent anywhere
   });
@@ -225,10 +242,34 @@ describe('archiving a finished conversation', () => {
   it('respects the global switch', async () => {
     settingsRepo.set(SETTINGS_KEYS.sessionArchiveEnabled, '0');
     const pid = seedProfile();
-    const sid = seedSession(pid, null, FOUR_TURNS);
+    const sid = seedSession(pid, packOf(pid), FOUR_TURNS);
     expect(await archiveSession(sid)).toBe(0);
     expect(h.chatCalls).toBe(0);
     expect(archiveChunks(pid)).toHaveLength(0);
+  });
+
+  it('a conversation with no Space is not kept — there is nowhere to keep it', async () => {
+    // An archive has to be scoped to something to be worth retrieving: the
+    // Space is what makes the tenth standup grounded in the previous nine, and
+    // what stops one client's history grounding another client's call. Without
+    // one the session helped live and leaves its transcript, nothing more.
+    const pid = seedProfile();
+    const sid = seedSession(pid, null, FOUR_TURNS);
+    expect(await archiveSession(sid)).toBe(0);
+    expect(h.chatCalls).toBe(0); // and the transcript is never sent anywhere
+    expect(archiveChunks(pid)).toHaveLength(0);
+  });
+
+  it('…and is kept the moment it is filed into one', async () => {
+    // What the save prompt does: a call started without a Space often turns out
+    // to belong to one, and filing it is what makes that choice mean something.
+    const pid = seedProfile();
+    const sid = seedSession(pid, null, FOUR_TURNS);
+    expect(await archiveSession(sid)).toBe(0);
+
+    sessionsRepo.setPack(sid, packOf(pid));
+    expect(await archiveSession(sid)).toBeGreaterThan(0);
+    expect(archiveChunks(pid).every((c) => c.packId === packOf(pid))).toBe(true);
   });
 
   it('respects a Space that opted out of remembering', async () => {
@@ -241,7 +282,7 @@ describe('archiving a finished conversation', () => {
 
   it('never archives a practice drill — a rehearsal is not something that happened', async () => {
     const pid = seedProfile();
-    const sid = seedSession(pid, null, FOUR_TURNS, { mode: 'practice', kind: 'sparring' });
+    const sid = seedSession(pid, packOf(pid), FOUR_TURNS, { mode: 'practice', kind: 'sparring' });
     expect(await archiveSession(sid)).toBe(0);
     expect(h.chatCalls).toBe(0);
   });
@@ -252,7 +293,7 @@ describe('archiving a finished conversation', () => {
       ...GOOD_ARCHIVE,
       summary: 'They read out the staging password, which is hunter2, during the call.',
     });
-    const sid = seedSession(pid, null, FOUR_TURNS);
+    const sid = seedSession(pid, packOf(pid), FOUR_TURNS);
     expect(await archiveSession(sid)).toBe(0);
     expect(archiveChunks(pid)).toHaveLength(0);
   });
@@ -260,14 +301,14 @@ describe('archiving a finished conversation', () => {
   it('writes nothing when the summariser returns an unusable shape', async () => {
     const pid = seedProfile();
     h.chatJson = async () => ({ topic: 'x' }); // fails the schema
-    const sid = seedSession(pid, null, FOUR_TURNS);
+    const sid = seedSession(pid, packOf(pid), FOUR_TURNS);
     expect(await archiveSession(sid)).toBe(0);
     expect(archiveChunks(pid)).toHaveLength(0);
   });
 
   it('re-archiving replaces rather than duplicating', async () => {
     const pid = seedProfile();
-    const sid = seedSession(pid, null, FOUR_TURNS);
+    const sid = seedSession(pid, packOf(pid), FOUR_TURNS);
     const first = await archiveSession(sid);
     const again = await archiveSession(sid);
     expect(again).toBe(first);
@@ -364,7 +405,7 @@ describe('archiveSession reads the format off the SESSION', () => {
         },
       };
     };
-    const sid = seedSession(pid, null, FOUR_TURNS, { activity: 'subject' });
+    const sid = seedSession(pid, packOf(pid), FOUR_TURNS, { activity: 'subject' });
     await archiveSession(sid);
 
     const text = archiveChunks(pid)
@@ -509,7 +550,7 @@ describe('the words themselves', () => {
         'And we will throw in onboarding for free.', // never said
       ],
     });
-    const sid = seedSession(pid, null, [
+    const sid = seedSession(pid, packOf(pid), [
       ...FOUR_TURNS.slice(0, 3),
       { speaker: 'you', text: FOUR_TURNS[3] },
     ]);
@@ -526,7 +567,7 @@ describe('the words themselves', () => {
 describe('an archive never outlives its session', () => {
   it('deleting a session deletes its archive and the vector with it', async () => {
     const pid = seedProfile();
-    const sid = seedSession(pid, null, FOUR_TURNS);
+    const sid = seedSession(pid, packOf(pid), FOUR_TURNS);
     await archiveSession(sid);
     const ids = archiveChunks(pid).map((c) => c.id);
     expect(ids.length).toBeGreaterThan(0);
@@ -544,7 +585,7 @@ describe('an archive never outlives its session', () => {
 
   it('deleting every session clears every archive', async () => {
     const pid = seedProfile();
-    await archiveSession(seedSession(pid, null, FOUR_TURNS));
+    await archiveSession(seedSession(pid, packOf(pid), FOUR_TURNS));
     expect(archiveChunks(pid).length).toBeGreaterThan(0);
 
     sessionsRepo.deleteAll();
@@ -584,7 +625,7 @@ describe('discarding a conversation leaves nothing behind', () => {
 
   it('deletes the candidates it suggested', async () => {
     const pid = seedProfile();
-    const sid = seedSession(pid, null, FOUR_TURNS);
+    const sid = seedSession(pid, packOf(pid), FOUR_TURNS);
     const mine = seedMemory(pid, sid, 'pending');
     const other = seedMemory(pid, `arc-other${++seq}`, 'pending');
 
@@ -595,7 +636,7 @@ describe('discarding a conversation leaves nothing behind', () => {
 
   it('keeps memories the user already approved — that decision was theirs', async () => {
     const pid = seedProfile();
-    const sid = seedSession(pid, null, FOUR_TURNS);
+    const sid = seedSession(pid, packOf(pid), FOUR_TURNS);
     const approved = seedMemory(pid, sid, 'approved');
 
     memoriesRepo.deleteBySession(sid);
@@ -607,7 +648,7 @@ describe('discarding a conversation leaves nothing behind', () => {
 
   it('ignores memories with no provenance rather than guessing', async () => {
     const pid = seedProfile();
-    const sid = seedSession(pid, null, FOUR_TURNS);
+    const sid = seedSession(pid, packOf(pid), FOUR_TURNS);
     const orphan = seedMemory(pid, null, 'pending');
     memoriesRepo.deleteBySession(sid);
     expect(statusOf(orphan)).toBe('pending');
@@ -689,7 +730,7 @@ describe('archives cannot crowd the corpus out of grounding', () => {
     seedChunk(pid, 'Ten years of experience leading platform teams.');
     // Six archived calls, all closer to the query than the résumé is.
     for (let i = 0; i < 6; i += 1) {
-      await archiveSession(seedSession(pid, null, FOUR_TURNS));
+      await archiveSession(seedSession(pid, packOf(pid), FOUR_TURNS));
     }
     expect(archiveChunks(pid).length).toBeGreaterThan(SESSION_ARCHIVE_MAX);
 

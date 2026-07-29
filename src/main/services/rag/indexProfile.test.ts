@@ -5,10 +5,15 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
  *
  * `reindexProfile` clears every unscoped chunk for the profile before writing
  * fresh ones. That set has grown twice: STAR stories are managed separately,
- * and conversation archives (docs/16-CONTINUITY.md) are unscoped when the
+ * and conversation archives (docs/16-CONTINUITY.md) used to be unscoped when the
  * session had no Space. Without an explicit exclusion, editing your name would
  * silently erase every memory of every call you have ever had — a data-loss bug
  * with no error and no symptom until an answer quietly stops citing last week.
+ *
+ * Archives are always Space-scoped now (§15), so new ones are out of reach of
+ * this delete anyway. The exclusion still matters and is still keyed on
+ * `source_type`: every archive written before that rule is unscoped and still
+ * sitting in existing databases.
  */
 
 const h = vi.hoisted(() => ({

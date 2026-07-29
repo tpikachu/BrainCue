@@ -358,3 +358,45 @@ They are independent, and the E2E pins that in both directions: archiving off
 still proposes memories, memory off still archives. Both switches now sit
 together on the Memory page, side by side, where the difference between them is
 the point. Settings links there instead of owning half the answer.
+
+## 15 · No Space, nothing kept (2026-07-28)
+
+A Space is now the **only** place a conversation is kept. `archiveSession` and
+`extractMemoryCandidates` both return 0 when `sessions.packId` is null, before
+either sends anything to a model.
+
+Until now an unscoped session archived globally and proposed profile-wide
+memories. That reads as generous and behaves as leakage: a one-off call about
+nothing in particular joined the corpus that grounds every later conversation,
+and there was no way to say "help me now, keep nothing". The Space was already
+what made the tenth standup grounded in the previous nine, and what stops one
+client's history grounding another client's call — so scoping is not a
+restriction added on top of remembering, it *is* remembering.
+
+The user is told this twice, and it is a choice both times:
+
+1. **At the start**, `captureSummary` names what survives. With a Space: a
+   summary and memory suggestions filed into it. Without one: *"nothing is
+   summarised or remembered — pick a Space for that."*
+2. **At the end**, the save prompt still offers every Space. A call started
+   without one often turns out to belong to one, and `session:remember` files
+   the session **before** archiving or extracting, so choosing at the end is
+   worth exactly as much as choosing at the start. The no-Space option now reads
+   "No Space — remember nothing" rather than "This profile — everywhere".
+
+What did **not** change: where a conversation is kept and how far what it taught
+reaches are still two different questions. A candidate the extractor marks
+`profile` is still stored profile-wide and recalled in every Space — it just has
+to have come from a conversation that happened somewhere.
+
+### The gate an interview does not get to skip
+
+`ActivityConfig.needsSpace` is true for `job` and nothing else, and
+`startBlocker` reads it the same way it reads `needsResume`. Requiring a Space is
+requiring setup, and that friction is what made this feel like a job-interview
+tool — most calls happen once and are better started immediately.
+
+An interview is the exception. It is one round of several for one role at one
+company, and its value is entirely cumulative: what they asked, what you claimed,
+what they pushed on. Letting that default to being thrown away is the one place
+where "no Space" is a mistake rather than a choice.

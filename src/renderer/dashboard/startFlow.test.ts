@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Profile } from '@shared/types';
-import { ACTIVITIES } from '@shared/activities';
-import { START_ACTIVITIES, captureSummary, startBlocker } from './startFlow';
+import { ACTIVITIES, ACTIVITY_ORDER } from '@shared/activities';
+import { START_ACTIVITIES, captureSummary, spacesFor, startBlocker } from './startFlow';
 
 const profile = (over: Partial<Profile> = {}): Profile =>
   ({ id: 'p1', name: 'A', parsedResume: '{"skills":[]}', ...over }) as Profile;
@@ -53,6 +53,33 @@ describe('startBlocker — the explicit-start gate', () => {
     ).toMatch(/résumé/);
   });
 
+  it('asks for a Space before an interview, and takes one', () => {
+    // An interview is one round of several for one role. Without a Space there
+    // is nowhere to keep what was asked, what you claimed, and what they pushed
+    // on — so the next round starts from nothing, which is the whole loss.
+    expect(startBlocker({ ...ok, activity: 'job' })).toMatch(/Space/);
+    expect(startBlocker({ ...ok, activity: 'job', spaceId: '' })).toMatch(/Space/);
+    expect(startBlocker({ ...ok, activity: 'job', spaceId: 'space-1' })).toBeNull();
+  });
+
+  it('names the missing résumé before the missing Space', () => {
+    // Both are missing here. One message at a time, and the résumé is the one
+    // that takes longer to fix.
+    expect(
+      startBlocker({ ...ok, profile: profile({ parsedResume: null }), activity: 'job' }),
+    ).toMatch(/résumé/);
+  });
+
+  it('does NOT ask for a Space before anything else', () => {
+    // Every other activity starts with nothing set up. Requiring a Space is
+    // requiring setup, and that friction is exactly what made this feel like a
+    // job-interview tool — you can sit in on a call you were not expecting.
+    for (const kind of Object.keys(ACTIVITIES) as (keyof typeof ACTIVITIES)[]) {
+      if (kind === 'job') continue;
+      expect(startBlocker({ ...ok, activity: kind }), kind).toBeNull();
+    }
+  });
+
   it('does NOT ask for a résumé before anything else', () => {
     // The gate used to be unconditional: you could not sit in on your own
     // standup without first uploading a CV. That was the loudest remaining way
@@ -64,6 +91,34 @@ describe('startBlocker — the explicit-start gate', () => {
     }
     // …including when no activity is passed at all.
     expect(startBlocker({ ...ok, profile: noResume })).toBeNull();
+  });
+});
+
+describe('spacesFor — a Space is a saved activity', () => {
+  const spaces = [
+    { id: 'm1', kind: 'meeting' },
+    { id: 'm2', kind: 'meeting' },
+    { id: 'j1', kind: 'job' },
+    { id: 'v1', kind: null }, // a v1 row from before the catalog
+    { id: 'x1', kind: 'not-a-kind' },
+  ];
+
+  it('offers only the Spaces of the chosen activity', () => {
+    expect(spacesFor(spaces, 'meeting').map((s) => s.id)).toEqual(['m1', 'm2']);
+    expect(spacesFor(spaces, 'job').map((s) => s.id)).toEqual(['j1']);
+    expect(spacesFor(spaces, 'game')).toEqual([]);
+  });
+
+  it('files an unknown kind under "something else" rather than hiding it', () => {
+    // A Space you cannot see in any list is a Space you cannot use — and the
+    // start modal is the only place it can be chosen.
+    expect(spacesFor(spaces, 'custom').map((s) => s.id)).toEqual(['v1', 'x1']);
+  });
+
+  it('leaves every Space reachable from exactly one activity', () => {
+    const seen = ACTIVITY_ORDER.flatMap((k) => spacesFor(spaces, k).map((s) => s.id));
+    expect(seen.sort()).toEqual(spaces.map((s) => s.id).sort());
+    expect(new Set(seen).size).toBe(spaces.length);
   });
 });
 
@@ -81,6 +136,21 @@ describe('captureSummary — the transparency contract', () => {
     const noSpace = captureSummary({ source: 'system', spaceTitle: null });
     expect(noSpace.sent[1]).toContain('your profile');
     expect(noSpace.sent[1]).not.toContain('Space');
+  });
+
+  it('says what survives the session — before it starts, not at the save prompt', () => {
+    // A Space is the only place a conversation is kept, so starting without one
+    // means keeping nothing. Discovering that after the call is discovering it
+    // too late.
+    const noSpace = captureSummary({ source: 'system', spaceTitle: null }).captured.join(' ');
+    expect(noSpace).toMatch(/nothing is summarised or remembered/i);
+
+    const withSpace = captureSummary({
+      source: 'system',
+      spaceTitle: 'Senior engineer · Acme',
+    }).captured.join(' ');
+    expect(withSpace).toContain('Senior engineer · Acme');
+    expect(withSpace).not.toMatch(/nothing is summarised/i);
   });
 
   it('always states what NEVER leaves the machine (key, full docs, screen)', () => {

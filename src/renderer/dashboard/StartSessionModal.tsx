@@ -4,10 +4,11 @@ import { api } from '../lib/api';
 import { useActiveProfile } from '../store/useProfileStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useLiveSession } from '../store/useLiveSession';
-import { ACTIVITIES, DEFAULT_ACTIVITY } from '@shared/activities';
+import { ACTIVITIES, DEFAULT_ACTIVITY, activityOf } from '@shared/activities';
 import type { CompanionPresence, ContextPackKind, Job, Presence } from '@shared/types';
 import { COMPANION_TO_ENGINE_PRESENCE } from '@shared/types';
 import { Button, Dropdown, Field, Modal, Select } from '../components/ui';
+import { JobFormModal } from './JobFormModal';
 import {
   BUDGET_OPTIONS,
   COMPANION_PRESENCE_OPTIONS,
@@ -15,6 +16,7 @@ import {
   PRESENCE_OPTIONS,
   START_ACTIVITIES,
   captureSummary,
+  spacesFor,
   startBlocker,
 } from './startFlow';
 
@@ -49,6 +51,7 @@ export function StartSessionModal(props: {
   const [presence, setPresence] = useState<Presence>('quiet'); // meetings: quiet by default
   const [companionPresence, setCompanionPresence] = useState<CompanionPresence>('assistive');
   const [budgetCents, setBudgetCents] = useState<number | null>(null);
+  const [creatingSpace, setCreatingSpace] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,6 +64,7 @@ export function StartSessionModal(props: {
     setActivity(props.initialActivity ?? DEFAULT_ACTIVITY);
     setSpaceId(props.initialSpaceId ?? '');
     setPresence('quiet');
+    setCreatingSpace(false);
     setError(null);
   }, [props.open, props.initialSpaceId, props.initialActivity, loadSettings]);
 
@@ -91,16 +95,16 @@ export function StartSessionModal(props: {
       .catch(() => setSpaces([]));
   }, [props.open, profileId]);
 
-  // A Space IS a saved activity, so picking one answers the question — whether
-  // it was picked here or arrived as `initialSpaceId` from the Library. Not a
-  // lock: it only fires when the SPACE changes, so a job Space can still be
-  // used for a Meeting (the recruiter call about that job is not an interview).
+  // A Space IS a saved activity, so picking one answers the question. This now
+  // only ever fires for a Space that arrived as `initialSpaceId` from the
+  // Library — one picked in the list below already matches, because the list
+  // below only offers Spaces of the chosen activity.
   useEffect(() => {
     const picked = spaces.find((s) => s.id === spaceId);
-    if (picked?.kind && ACTIVITIES[picked.kind as ContextPackKind]) {
-      setActivity(picked.kind as ContextPackKind);
-    }
+    if (picked) setActivity(activityOf(picked.kind));
   }, [spaces, spaceId]);
+
+  const options = useMemo(() => spacesFor(spaces, activity), [spaces, activity]);
 
   const space = spaces.find((s) => s.id === spaceId);
   const spaceTitle = space ? space.company || space.title : null;
@@ -109,6 +113,7 @@ export function StartSessionModal(props: {
     apiKeyPresent: !!settings?.apiKeyPresent,
     sessionLive: !!live.session,
     activity,
+    spaceId,
   });
   const summary = useMemo(
     () => captureSummary({ source, spaceTitle, activity }),
@@ -156,8 +161,35 @@ export function StartSessionModal(props: {
     navigate(path);
   };
 
+  /** A Space created here is the one about to be used, so it is selected
+   *  immediately — and the activity follows it, in case the sub-form's own
+   *  picker was changed while it was open. */
+  const spaceCreated = (saved: Job) => {
+    setSpaces((prev) => [saved, ...prev.filter((s) => s.id !== saved.id)]);
+    setActivity(activityOf(saved.kind));
+    setSpaceId(saved.id);
+    // Closing is the sub-form's own call: it stays open to report a link it
+    // could not read, and that notice must not be taken off the screen here.
+  };
+
   return (
-    <Modal open={props.open} onClose={props.onClose} title="Start a session" width="max-w-lg">
+    <>
+      {/* Creating a Space REPLACES this modal rather than stacking on it: the
+          start form's state lives in this component, so it survives untouched
+          and comes back with the new Space already chosen. */}
+      <JobFormModal
+        open={props.open && creatingSpace}
+        profileId={profileId}
+        initialKind={activity}
+        onClose={() => setCreatingSpace(false)}
+        onSaved={spaceCreated}
+      />
+    <Modal
+      open={props.open && !creatingSpace}
+      onClose={props.onClose}
+      title="Start a session"
+      width="max-w-lg"
+    >
       <div className="space-y-5 text-sm">
         {/* 1 · What is this? The only question about what BrainCue will be.
             A dropdown, not a card grid: eight tiles pushed the Space, the audio
@@ -168,7 +200,14 @@ export function StartSessionModal(props: {
           <Dropdown
             value={activity}
             options={START_ACTIVITIES.map((a) => ({ value: a.id, label: a.label }))}
-            onChange={(v) => setActivity(v as ContextPackKind)}
+            onChange={(v) => {
+              const next = v as ContextPackKind;
+              setActivity(next);
+              // Drop a Space that no longer belongs to the chosen activity —
+              // it is about to disappear from the list, and a selection you
+              // cannot see is the one that surprises you afterwards.
+              setSpaceId((id) => (spacesFor(spaces, next).some((s) => s.id === id) ? id : ''));
+            }}
           />
           <p className="mt-1.5 text-xs leading-snug text-neutral-400">
             {config.hint} <span className="text-neutral-500">{config.does}</span>
@@ -187,17 +226,54 @@ export function StartSessionModal(props: {
           </div>
         )}
 
-        {/* 2 · Which Space grounds the answers. The profile is the sidebar's. */}
-        <Field label={`Space (optional) · ${profile?.name ?? 'no profile'}`}>
-          <Select value={spaceId} onChange={(e) => setSpaceId(e.target.value)} disabled={!profileId}>
-            <option value="">No Space — profile only</option>
-            {spaces.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.title || 'Untitled'}
-                {s.company ? ` · ${s.company}` : ''}
+        {/* 2 · Which Space this belongs to — what grounds the answers now AND
+            what keeps them afterwards. Only Spaces of the chosen activity are
+            offered, because a Space is a saved activity. */}
+        <Field
+          label={`${config.label} Space${config.needsSpace ? '' : ' (optional)'} · ${profile?.name ?? 'no profile'}`}
+        >
+          <div className="flex gap-2">
+            <Select
+              value={spaceId}
+              onChange={(e) => setSpaceId(e.target.value)}
+              disabled={!profileId}
+              className="flex-1"
+            >
+              <option value="">
+                {config.needsSpace ? 'Choose a Space…' : 'No Space — keep nothing afterwards'}
               </option>
-            ))}
-          </Select>
+              {options.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.title || 'Untitled'}
+                  {s.company ? ` · ${s.company}` : ''}
+                </option>
+              ))}
+            </Select>
+            <Button variant="default" disabled={!profileId} onClick={() => setCreatingSpace(true)}>
+              New Space
+            </Button>
+          </div>
+          <p className="mt-1.5 text-xs leading-snug text-neutral-400">
+            {spaceId ? (
+              <>
+                Grounded in what this Space knows, and everything you keep is filed back into it —
+                so the next one here starts where this one ends.
+              </>
+            ) : config.needsSpace ? (
+              <>
+                An interview is one round of several. Give it a Space — the role and who it is with,
+                like “Senior engineer · Acme” — so what they asked, what you claimed, and what they
+                pushed on is there for the next round.
+              </>
+            ) : options.length === 0 ? (
+              <>
+                No {config.label.toLowerCase()} Spaces yet. Starting without one is fine — it just
+                will not be summarised or remembered afterwards.
+              </>
+            ) : (
+              <>Without one, nothing is summarised or remembered when this ends.</>
+            )}
+          </p>
         </Field>
 
         {/* 3 · Input source. Defaulted by the activity, still yours to change. */}
@@ -322,5 +398,6 @@ export function StartSessionModal(props: {
         </div>
       </div>
     </Modal>
+    </>
   );
 }

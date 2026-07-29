@@ -19,6 +19,7 @@ export function JobFormModal({
   open,
   profileId,
   job,
+  initialKind,
   onClose,
   onSaved,
   onDeleted,
@@ -26,6 +27,10 @@ export function JobFormModal({
   open: boolean;
   profileId: string;
   job?: Job | null; // present => edit mode
+  /** What a NEW Space should start as. The start flow passes the activity the
+   *  user already picked, so creating a Space mid-start does not ask the same
+   *  question a second time (and cannot answer it differently). */
+  initialKind?: ContextPackKind;
   onClose: () => void;
   onSaved: (job: Job) => void;
   onDeleted?: (id: string) => void;
@@ -33,9 +38,10 @@ export function JobFormModal({
   const editing = !!job;
   const empty = { title: '', company: '', jdUrl: '', jdText: '', companyUrl: '', notes: '' };
   const [form, setForm] = useState(empty);
-  // New Spaces default to the daily case. Editing keeps whatever the Space
-  // already is, so v1 job rows stay jobs.
-  const [kind, setKind] = useState<ContextPackKind>(DEFAULT_ACTIVITY);
+  // New Spaces default to the daily case, or to the activity the caller is
+  // already in. Editing keeps whatever the Space already is, so v1 job rows
+  // stay jobs.
+  const [kind, setKind] = useState<ContextPackKind>(initialKind ?? DEFAULT_ACTIVITY);
   const copy = activity(kind);
   const [companion, setCompanion] = useState<CompanionSpaceOverrides>({});
   const [saving, setSaving] = useState(false);
@@ -54,7 +60,7 @@ export function JobFormModal({
       companyUrl: job?.companyUrl ?? '',
       notes: job?.notes ?? '',
     });
-    setKind((job?.kind as ContextPackKind) ?? DEFAULT_ACTIVITY);
+    setKind((job?.kind as ContextPackKind) ?? initialKind ?? DEFAULT_ACTIVITY);
     setCompanion(job?.companionPrefs ?? {});
     setJdNotice(null);
     setNotice(null);

@@ -20,9 +20,12 @@ import type { ContextPackKind, SessionMode } from './types';
  * own — who it listens to, when it speaks, and how it frames you.
  *
  * A Space is a SAVED activity (its `kind` is an activity), so picking a Space
- * answers the question for you. Starting without one is first-class: most calls
- * happen once, and needing to set up a Space first is exactly the friction that
- * made this feel like a job-interview tool.
+ * answers the question for you — and the start flow only offers Spaces of the
+ * chosen activity, for the same reason. Starting without one stays first-class:
+ * most calls happen once, and needing to set up a Space first is exactly the
+ * friction that made this feel like a job-interview tool. It costs the
+ * conversation its memory, though (docs/16-CONTINUITY.md §15), which is why
+ * `needsSpace` exists and why exactly one activity sets it.
  *
  * Column mapping for a Space (physical names are v1 legacy, deliberately
  * untouched):
@@ -53,6 +56,21 @@ export interface ActivityConfig {
    *  activity, which is the point: you should not have to upload a CV to sit in
    *  on your Tuesday standup. */
   needsResume: boolean;
+  /**
+   * Whether a Space must be chosen before this can start.
+   *
+   * A Space is where a conversation is remembered — without one, a session
+   * leaves its transcript and nothing else (no archive, no memory candidates).
+   * For most activities that is a fair default: most calls happen once, and
+   * demanding setup first is exactly the friction this app removed.
+   *
+   * An interview is the exception. It is one round of several for one role at
+   * one company, and its whole value is cumulative — what they asked in round
+   * one, what you claimed, what they pushed on. Letting that be thrown away by
+   * default is the one place where "no Space" is a mistake rather than a
+   * choice, so the interview asks for one up front.
+   */
+  needsSpace: boolean;
 
   // --- how a Space of this activity is set up ---
   titleLabel: string;
@@ -78,6 +96,7 @@ export const ACTIVITIES: Record<ContextPackKind, ActivityConfig> = {
     mode: 'meeting',
     listensTo: 'system',
     needsResume: false,
+    needsSpace: false,
     titleLabel: 'Meeting name',
     titlePlaceholder: 'e.g. Tuesday standup — Atlas',
     partyLabel: 'With (team, client, or org)',
@@ -97,6 +116,7 @@ export const ACTIVITIES: Record<ContextPackKind, ActivityConfig> = {
     mode: 'meeting',
     listensTo: 'system',
     needsResume: false,
+    needsSpace: false,
     titleLabel: 'Project name',
     titlePlaceholder: 'e.g. Atlas migration',
     partyLabel: 'Team or client',
@@ -116,6 +136,7 @@ export const ACTIVITIES: Record<ContextPackKind, ActivityConfig> = {
     mode: 'interview',
     listensTo: 'system',
     needsResume: true,
+    needsSpace: true,
     titleLabel: 'Interview name / role',
     titlePlaceholder: 'e.g. Acme — Senior PM',
     partyLabel: 'Client / company',
@@ -135,6 +156,7 @@ export const ACTIVITIES: Record<ContextPackKind, ActivityConfig> = {
     mode: 'meeting',
     listensTo: 'system',
     needsResume: false,
+    needsSpace: false,
     titleLabel: 'Subject',
     titlePlaceholder: 'e.g. Distributed systems',
     partyLabel: 'Course or source',
@@ -154,6 +176,7 @@ export const ACTIVITIES: Record<ContextPackKind, ActivityConfig> = {
     mode: 'meeting',
     listensTo: 'system',
     needsResume: false,
+    needsSpace: false,
     titleLabel: 'What is this about?',
     titlePlaceholder: 'e.g. House move',
     partyLabel: 'Who is involved',
@@ -173,6 +196,7 @@ export const ACTIVITIES: Record<ContextPackKind, ActivityConfig> = {
     mode: 'companion',
     listensTo: 'mic',
     needsResume: false,
+    needsSpace: false,
     titleLabel: 'Game',
     titlePlaceholder: 'e.g. Baldur’s Gate 3',
     partyLabel: 'Server or group',
@@ -192,6 +216,7 @@ export const ACTIVITIES: Record<ContextPackKind, ActivityConfig> = {
     mode: 'companion',
     listensTo: 'mic',
     needsResume: false,
+    needsSpace: false,
     titleLabel: 'What are you working on?',
     titlePlaceholder: 'e.g. Deep work — the rewrite',
     partyLabel: 'Related to',
@@ -211,6 +236,7 @@ export const ACTIVITIES: Record<ContextPackKind, ActivityConfig> = {
     mode: 'meeting',
     listensTo: 'system',
     needsResume: false,
+    needsSpace: false,
     titleLabel: 'Name',
     titlePlaceholder: 'What is this Space called?',
     partyLabel: 'Related to',
@@ -247,6 +273,17 @@ export const DEFAULT_ACTIVITY: ContextPackKind = 'meeting';
  *  else", not as a confident claim that it was a meeting. */
 export const activity = (kind: string | null | undefined): ActivityConfig =>
   ACTIVITIES[kind as ContextPackKind] ?? ACTIVITIES.custom;
+
+/**
+ * Which activity a saved Space IS an instance of.
+ *
+ * `activity()` gives you the config; this gives you the key, so a Space can be
+ * compared against the activity the user just picked. They agree on the
+ * fallback — a Space whose kind predates the catalog reads as `custom`, and so
+ * appears under "Something else" rather than being silently filed as a meeting.
+ */
+export const activityOf = (kind: string | null | undefined): ContextPackKind =>
+  kind && kind in ACTIVITIES ? (kind as ContextPackKind) : 'custom';
 
 /** Is this engine mode built and switched on? Modes are gated in flags.ts; an
  *  activity whose mode is off is not offered rather than silently downgraded

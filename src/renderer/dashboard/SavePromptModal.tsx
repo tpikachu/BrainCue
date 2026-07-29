@@ -80,7 +80,11 @@ export function SavePromptModal() {
       // Say what was actually kept. Both halves are gated by the user's own
       // settings, so zero is a legitimate outcome and should read as one.
       if (archived === 0 && memories === 0) {
-        setResult('Saved. Remembering is off, so nothing was summarised.');
+        setResult(
+          packId
+            ? 'Saved. Remembering is off, so nothing was summarised.'
+            : 'Saved with no Space — nothing was summarised or remembered.',
+        );
         setTimeout(clearPendingSave, 1800);
       } else {
         clearPendingSave();
@@ -120,13 +124,14 @@ export function SavePromptModal() {
           </span>
         </p>
 
-        {/* Where it is kept decides what can find it later: a Space-scoped
-            archive and its memories surface in the next conversation in that
-            Space and nowhere else, which is what makes a recurring meeting
-            accumulate instead of leaking into unrelated calls. */}
+        {/* A Space is what makes remembering possible at all: the archive and
+            its memories are scoped to one, which is what makes a recurring
+            meeting accumulate instead of leaking into unrelated calls. A call
+            started without one often turns out to belong to one, so the choice
+            is offered again here — and this is the last time it is asked. */}
         <Field label="Remember it in">
           <Select value={packId} onChange={(e) => setPackId(e.target.value)}>
-            <option value="">This profile — everywhere</option>
+            <option value="">No Space — remember nothing</option>
             {spaces.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.title || 'Untitled'}
@@ -137,13 +142,21 @@ export function SavePromptModal() {
         </Field>
 
         <p className="rounded-lg border border-white/5 bg-neutral-950/60 px-3 py-2 text-xs leading-relaxed text-neutral-400">
-          Keeping it saves a short summary — what it was about, what was decided, who committed to
-          what, and a few lines in the speakers' own words — plus memory suggestions for you to
-          review.{' '}
-          {packId
-            ? 'Both attach to that Space, so the next conversation there starts where this one ended.'
-            : 'Both attach to this profile, so any conversation can draw on them.'}{' '}
-          Everything stays on this machine.
+          {packId ? (
+            <>
+              Keeping it saves a short summary — what it was about, what was decided, who committed
+              to what, and a few lines in the speakers&rsquo; own words — plus memory suggestions
+              for you to review. Both file into that Space, so the next conversation there starts
+              where this one ended. Everything stays on this machine.
+            </>
+          ) : (
+            <>
+              Without a Space there is nowhere to file a summary, so nothing is summarised and
+              nothing is suggested for memory. The session and its transcript are still saved and
+              readable in Sessions — they just will not ground a later conversation. Pick a Space
+              above if this one should carry forward.
+            </>
+          )}
         </p>
 
         {isInterview && (
@@ -176,8 +189,8 @@ export function SavePromptModal() {
 
         <p className="text-xs text-neutral-500">
           “Discard” permanently deletes this session, its transcript, and any memories it suggested.
-          “Decide later” keeps the session but remembers nothing — you can keep or delete it from
-          Sessions.
+          “Decide later” keeps the session but remembers nothing — it stays readable in Sessions,
+          where you can also delete it.
         </p>
       </div>
     </Modal>
