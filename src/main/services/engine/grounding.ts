@@ -17,13 +17,29 @@ export const GROUNDING_TOP_K = 5;
  */
 const STORY_CUE_MODES: SessionMode[] = ['interview', 'practice', 'interviewer_assist'];
 
+/**
+ * `mode` is REQUIRED — deliberately, and it used to default to `'interview'`.
+ *
+ * That default was fail-open in the worst way: `'interview'` is the one value
+ * that turns interview-only retrieval ON, so a caller who forgot the argument
+ * silently opted INTO it. `voiceService` did exactly that, which meant every
+ * voice quick ask force-injected a résumé anecdote into a generic answer. A
+ * missing argument must never be the permissive case, so there is no default
+ * to forget any more.
+ */
 export async function ground(
   profileId: string,
   query: string,
   packId: string | null,
-  mode: SessionMode = 'interview',
+  mode: SessionMode,
 ): Promise<RetrievedChunk[]> {
+  // Both are interview-family devices, and both are wrong outside it. A STAR
+  // story answers "tell me about a time you…"; a TAILORED résumé is the user's
+  // CV rewritten for one specific application, so letting it stand in for the
+  // real one is only ever right while grounding that application's interview.
+  const interviewFamily = STORY_CUE_MODES.includes(mode);
   return retrieve(profileId, query, GROUNDING_TOP_K, packId, {
-    storyCue: STORY_CUE_MODES.includes(mode),
+    storyCue: interviewFamily,
+    tailoredResume: interviewFamily,
   });
 }

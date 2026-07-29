@@ -99,6 +99,19 @@ describe('streamAnswer — request body', () => {
     expect(userPrompt()).toContain('STORY TELLER');
   });
 
+  it('caps star at 520 output tokens and demands the four beats', async () => {
+    await collect(streamAnswer(baseInput({ format: 'star' })));
+    // Four labelled beats cost more than one flowing story, and Result — the
+    // point of the answer — is the beat a low ceiling would truncate.
+    expect(h.lastBody!.max_output_tokens).toBe(520);
+    const p = userPrompt();
+    expect(p).toContain('FORMAT = STAR');
+    for (const beat of ['SITUATION', 'TASK', 'ACTION', 'RESULT']) expect(p).toContain(beat);
+    // The two beats candidates actually drop, called out by name in the prompt.
+    expect(p).toMatch(/what \*I\* specifically was responsible for/);
+    expect(p).toMatch(/never invent one/); // a fabricated metric is worse than none
+  });
+
   it('includes the structured pronunciation-guide instruction only when enabled', async () => {
     await collect(streamAnswer(baseInput({ pronunciation: true })));
     expect(userPrompt()).toMatch(/phonetic respelling/i);

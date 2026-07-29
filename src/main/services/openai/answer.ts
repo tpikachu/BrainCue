@@ -66,6 +66,17 @@ const FORMAT_INSTRUCTION: Record<AnswerFormat, string> = {
     'flashbacks, no nested asides. Short sentences with rhythm, a beat of tension before the ' +
     'payoff, and a paragraph break wherever I would pause. One story, tightly told, effortless ' +
     'to speak on the first read.',
+  star:
+    'FORMAT = STAR. You are ME answering a behavioural question under the STAR scaffold, spoken ' +
+    'aloud (~120–170 words). Four beats, in order, each led by its label on its own line — ' +
+    'Situation, Task, Action, Result — so I can see at a glance which beat I am on. ' +
+    'SITUATION: one or two sentences of context, enough to make the stakes real. ' +
+    'TASK: what *I* specifically was responsible for — not what the team was. This is the beat ' +
+    'people skip, and the one panels probe. ACTION: two or three concrete moves I made, in ' +
+    'first person singular ("I did", never "we did"), each a decision rather than a duty. ' +
+    'RESULT: how it ended, with the most specific figure or outcome the context actually ' +
+    'supports — and never invent one; if the context has no number, say what changed in plain ' +
+    'words. Keep each beat speakable in one breath.',
 };
 
 /** Hard output ceiling per format — the model literally cannot exceed this, so
@@ -75,6 +86,9 @@ const FORMAT_MAX_TOKENS: Record<AnswerFormat, number> = {
   explanation: 340,
   detailed: 800,
   story_teller: 420,
+  // Four labelled beats cost more than one flowing story, and the Result beat
+  // is the one that must not get truncated — it is the point of the answer.
+  star: 520,
 };
 
 export type AnswerEvent =

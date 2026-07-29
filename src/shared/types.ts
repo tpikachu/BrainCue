@@ -17,8 +17,14 @@ export type InterviewType =
  *    through with someone.
  *  - `detailed`: thorough, with one concrete example.
  *  - `story_teller`: a short, vivid first-person story (hook → challenge → what I
- *    did → outcome) — memorable, great for behavioral answers. */
-export type AnswerFormat = 'key_points' | 'explanation' | 'detailed' | 'story_teller';
+ *    did → outcome) — memorable, great for behavioral answers.
+ *  - `star`: the same material under the named interview scaffold — Situation,
+ *    Task, Action, Result. Distinct from `story_teller` on purpose: that one
+ *    optimizes for how a story LANDS, this one for what a behavioural
+ *    interviewer is scoring against. Panels listen for the four beats, and
+ *    "what was YOUR task" and "what was the RESULT" are the two people
+ *    reliably skip. */
+export type AnswerFormat = 'key_points' | 'explanation' | 'detailed' | 'story_teller' | 'star';
 
 export type DocumentKind = 'resume' | 'jd' | 'note' | 'other';
 /** `tailored` = an application's tailored resume, indexed pack-scoped; when a pack

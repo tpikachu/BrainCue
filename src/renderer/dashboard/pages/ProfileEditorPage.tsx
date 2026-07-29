@@ -22,7 +22,7 @@ export default function ProfileEditorPage() {
   const [storyCount, setStoryCount] = useState(0);
 
   const loadStoryCount = useCallback(async () => {
-    if (!id) return;
+    if (!id || !FLAGS.storyBank) return; // no round-trip for a card that isn't rendered
     setStoryCount((await api.stories.list(id)).length);
   }, [id]);
 
@@ -170,8 +170,12 @@ export default function ProfileEditorPage() {
         </Field>
       </Card>
 
-      {/* Interview device — quarantined with the job-search surface. */}
-      <Card className={`mb-5 ${FLAGS.jobSearch ? '' : 'hidden'}`}>
+      {/* Stories ground live interview answers, so the bank that manages them
+          has to be reachable whenever that retrieval runs. Conditional render,
+          not a `hidden` class: display:none left StoryBankModal mounted with an
+          unreachable trigger and still fired an IPC round-trip for the count. */}
+      {FLAGS.storyBank && (
+      <Card className="mb-5">
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -198,6 +202,7 @@ export default function ProfileEditorPage() {
           </Button>
         </div>
       </Card>
+      )}
 
       <div className="sticky bottom-0 flex items-center justify-between gap-4 rounded-xl border border-neutral-800 bg-neutral-900/90 px-4 py-3 backdrop-blur">
         <span className="text-sm">

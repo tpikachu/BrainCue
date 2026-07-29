@@ -102,7 +102,7 @@ brief). Physical table/column names stay `jobs`/`job_id`; the rename is logical.
 | `notes:create` | `{ profileId, content }` | `Note` |
 | `notes:delete` | `{ id }` | `{ deleted: true }` |
 
-### applications (Tailor Resume)
+### applications (Tailor Resume) — **switched off**, see [20](20-QUARANTINE.md)
 A job application produced by the Tailor Resume flow: an ATS-friendly resume tailored
 from a base resume × JD (grounded — never invented), plus answers to the application
 questions. Each application owns a dedicated (hidden) job row; its tailored resume is

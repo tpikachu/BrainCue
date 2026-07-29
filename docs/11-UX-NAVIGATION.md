@@ -103,6 +103,10 @@ Two tabs, mapping the PRD §5 domain model:
   resume×JD operation, so it belongs on `job`-kind packs (button in the pack
   editor + a card in the pack list row). The page component survives nearly
   intact; only its entry point moves.
+  > **Not shipped as described.** Tailor Resume is switched off behind
+  > `FLAGS.jobSearch`; `/tailor` redirects to `/home`, there is no control in
+  > the pack editor, and the row button is hidden. See
+  > [20 · Quarantine](20-QUARANTINE.md).
 
 ### 3.4 Reports & Settings
 
@@ -124,7 +128,7 @@ memory all survive via redirects:
 | `/profiles`, `/profiles/:id` | `/library` (Profiles tab) | redirect |
 | `/interview` | `/home?mode=interview` → setup sheet | redirect opens the card |
 | `/mock`, `/sparring` | `/home?mode=practice` (variant preselected) | redirect |
-| `/tailor` | `/library` → pack action (route kept: `/tailor` redirects to picker) | |
+| `/tailor` | switched off (`FLAGS.jobSearch`); route kept, redirects to `/home` | see [20](20-QUARANTINE.md) |
 | `/reports`, `/settings`, `/whats-new`, `/dev` | unchanged | Settings gains sub-sections |
 | — | `/session` | new: the shared live SessionView |
 
@@ -141,7 +145,8 @@ window, not window/layout work.
 > Home is the universal launcher ("How can BrainCue help right now?" +
 > primary actions + status chips + recents + flag-gated Labs strip), the
 > Library merged Profiles/Spaces/Documents under `/library` tabs (jobs UI
-> lives in the Spaces tab; Tailor is a Space action), the sidebar is
+> lives in the Spaces tab; Tailor is switched off — [20](20-QUARANTINE.md)),
+> the sidebar is
 > Home/Library/Sessions/Insights/Settings, and the Tour was rewritten. The
 > shared start flow shipped as `StartSessionModal` (activity → Space → source →
 > transparency summary → explicit start); flags live in `src/shared/flags.ts`.

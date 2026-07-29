@@ -54,12 +54,23 @@ export async function retrieve(
   query: string,
   k = 5,
   jobId: string | null = null,
-  opts: { storyCue?: boolean } = {},
+  opts: { storyCue?: boolean; tailoredResume?: boolean } = {},
 ): Promise<RetrievedChunk[]> {
   const vector = await providerFor('embedding').embedOne(query);
   // Over-fetch so capping archives promotes real alternatives rather than
   // simply returning fewer chunks.
-  const ranked = sqliteVectorStore.search({ profileId, query: vector, k: k * 4, jobId });
+  //
+  // `tailoredResume` is opt-IN (`=== true`), unlike `storyCue` below, because
+  // letting a tailored résumé stand in for the real one changes what the model
+  // is told the user's experience IS. Defaulting that on for a caller who did
+  // not ask is how a job application ended up grounding a client meeting.
+  const ranked = sqliteVectorStore.search({
+    profileId,
+    query: vector,
+    k: k * 4,
+    jobId,
+    allowTailored: opts.tailoredResume === true,
+  });
   const chunks = capSource(ranked, 'session', SESSION_ARCHIVE_MAX, k);
   if (opts.storyCue === false) return chunks;
   const story = sqliteVectorStore.topStory({ profileId, query: vector });

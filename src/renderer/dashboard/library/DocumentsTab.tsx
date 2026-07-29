@@ -23,7 +23,9 @@ export function DocumentsTab() {
       setSpaces([]);
       return;
     }
-    void api.stories.list(profileId).then(setStories).catch(() => setStories([]));
+    if (FLAGS.storyBank) {
+      void api.stories.list(profileId).then(setStories).catch(() => setStories([]));
+    }
     void api.jobs
       .page(profileId, '', 100, 0)
       .then(({ items }) => setSpaces(items as Job[]))
@@ -58,9 +60,11 @@ export function DocumentsTab() {
             </div>
           </Card>
 
-          {/* STAR stories are an interview device — quarantined with the rest
-              of the job-search surface (shared/flags.ts). */}
-          <Card className={`flex items-center justify-between !py-4 ${FLAGS.jobSearch ? '' : 'hidden'}`}>
+          {/* Inventory entry for the story bank. Conditional render, not a
+              `hidden` class — the hidden version still cost an IPC round-trip
+              to fill a badge nobody could see. */}
+          {FLAGS.storyBank && (
+          <Card className="flex items-center justify-between !py-4">
             <div>
               <div className="font-medium text-neutral-100">STAR stories</div>
               <div className="mt-1 text-xs text-neutral-500">
@@ -76,6 +80,7 @@ export function DocumentsTab() {
               </Link>
             </div>
           </Card>
+          )}
 
           <Card>
             <div className="mb-3 font-medium text-neutral-100">Per-Space documents</div>

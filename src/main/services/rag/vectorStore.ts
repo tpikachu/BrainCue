@@ -20,6 +20,9 @@ export interface VectorStore {
     query: Float32Array;
     k: number;
     jobId?: string | null;
+    /** Allow an application's TAILORED résumé to stand in for the base one.
+     *  Interview-family grounding only — see retriever.ts. */
+    allowTailored?: boolean;
   }): RetrievedChunk[];
   /** The single best-matching `story` chunk for the query (or null), regardless of
    *  the top-k. Reuses the caller's query vector so it adds no extra embedding call. */
@@ -45,7 +48,7 @@ export const sqliteVectorStore: VectorStore = {
       .run();
   },
 
-  search({ profileId, query, k, jobId }) {
+  search({ profileId, query, k, jobId, allowTailored = false }) {
     // Join chunks (for the profile) with their embeddings, score in-process.
     const rows = db()
       .select({
@@ -63,7 +66,13 @@ export const sqliteVectorStore: VectorStore = {
     // An application job carries `tailored` chunks (the resume rewritten FOR that
     // job) — when present, they REPLACE the base resume for this job's retrieval,
     // so the session grounds in the tailored resume. Notes/stories still apply.
-    const hasTailored = rows.some((r) => r.jobId === jobId && r.sourceType === 'tailored');
+    //
+    // Only when the CALLER asked for it. This substitution used to run in every
+    // mode, so one leftover application could suppress the user's real résumé
+    // in an unrelated meeting — the model was told their experience was the
+    // version rewritten for a job they applied to once.
+    const hasTailored =
+      allowTailored && rows.some((r) => r.jobId === jobId && r.sourceType === 'tailored');
     const filtered = rows.filter(
       (r) =>
         // Base chunks (resume/notes/stories, jobId null) + the selected job's chunks…

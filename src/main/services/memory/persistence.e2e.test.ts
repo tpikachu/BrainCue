@@ -234,7 +234,7 @@ describe('the loop the whole product rests on', () => {
     await approveMemory(pending[0].id);
 
     // --- Tuesday: the next conversation in that Space. ---
-    const grounded = await ground(profileId, 'where did we land on the renewal pricing?', space);
+    const grounded = await ground(profileId, 'where did we land on the renewal pricing?', space, 'meeting');
     const archive = grounded.find((c) => c.sourceType === 'session');
     expect(archive, 'last week’s conversation must be retrievable').toBeDefined();
     expect(archive!.content).toContain('renewal pricing');
@@ -435,7 +435,7 @@ describe('a Space is where a conversation is kept', () => {
 
     // And it is genuinely retrievable from inside that Space, not merely stored.
     await approveMemory(memoriesRepo.list({ profileId, status: 'pending' })[0].id);
-    const grounded = await ground(profileId, 'where did we land on the renewal pricing?', space);
+    const grounded = await ground(profileId, 'where did we land on the renewal pricing?', space, 'meeting');
     expect(grounded.find((c) => c.sourceType === 'session')).toBeDefined();
     expect(await recallMemories(profileId, 'how concise should updates be?', space)).toHaveLength(1);
   });
@@ -446,12 +446,12 @@ describe('a Space is where a conversation is kept', () => {
     await keepSession(seedSession(profileId, null, STANDUP_TURNS));
 
     expect(
-      (await ground(profileId, 'the renewal pricing', space)).find(
+      (await ground(profileId, 'the renewal pricing', space, 'meeting')).find(
         (c) => c.sourceType === 'session',
       ),
     ).toBeUndefined();
     expect(
-      (await ground(profileId, 'the renewal pricing', null)).find(
+      (await ground(profileId, 'the renewal pricing', null, 'meeting')).find(
         (c) => c.sourceType === 'session',
       ),
     ).toBeUndefined();
@@ -473,7 +473,7 @@ describe('a Space’s memory belongs to that Space', () => {
     expect(await recallMemories(profileId, 'how concise should updates be?', clientCall)).toEqual(
       [],
     );
-    const grounded = await ground(profileId, 'the renewal pricing', clientCall);
+    const grounded = await ground(profileId, 'the renewal pricing', clientCall, 'meeting');
     expect(grounded.find((c) => c.sourceType === 'session')).toBeUndefined();
   });
 

@@ -119,10 +119,15 @@ export function SpacesTab() {
               Brief
             </Button>
           )}
-          {FLAGS.jobSearch && (
+          {/* Same kind gate as Brief above: only a job Space HAS a job
+              description to tailor against. The title no longer claims this
+              Space's JD is carried over — `navigate('/tailor')` passes no id,
+              and Tailor cannot attach an application to an existing Space at
+              all (docs/20-QUARANTINE.md). Promising it was the bug. */}
+          {FLAGS.jobSearch && isInterviewSpace(j.kind) && (
             <Button
               variant="ghost"
-              title="Tailor your résumé to this Space's job description"
+              title="Open Tailor Resume (you'll paste the job description there)"
               onClick={() => navigate('/tailor')}
             >
               Tailor

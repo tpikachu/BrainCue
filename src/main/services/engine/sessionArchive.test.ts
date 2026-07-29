@@ -139,12 +139,17 @@ function seedSession(
   return id;
 }
 /** A non-session chunk, so retrieval has real corpus to compete with. */
-function seedChunk(profileId: string, content: string, sourceType = 'resume'): string {
+function seedChunk(
+  profileId: string,
+  content: string,
+  sourceType = 'resume',
+  packId: string | null = null,
+): string {
   const id = `arc-c${++seq}`;
   const vec = fakeVec(content);
   h.db
     .insert(schema.chunks)
-    .values({ id, profileId, packId: null, sourceType, sourceId: null, ord: 0, content })
+    .values({ id, profileId, packId, sourceType, sourceId: null, ord: 0, content })
     .run();
   h.db
     .insert(schema.embeddings)
@@ -688,6 +693,62 @@ describe('the STAR story cue belongs to interviews only', () => {
     seedStoryBelowTopK(pid);
     const hits = await ground(pid, 'renewal pricing', null, 'companion');
     expect(hits.some((c) => c.sourceType === 'story')).toBe(false);
+  });
+});
+
+/**
+ * The same rule for the TAILORED résumé, which had no such rule at all.
+ *
+ * A tailored résumé is the user's CV rewritten for ONE job application, and
+ * retrieval SUPPRESSES the real résumé wherever it applies. That substitution
+ * ran in every mode, so a single leftover application silently replaced the
+ * user's actual experience in unrelated meetings — the model was told they are
+ * whoever they described themselves as for a job they applied to once.
+ *
+ * The fixture makes suppression the only possible explanation: both chunks
+ * match the query, so if the base résumé is missing it was filtered, not
+ * out-ranked.
+ */
+describe('a tailored résumé belongs to its own application only', () => {
+  function seedBaseAndTailored(pid: string): string {
+    const pack = packOf(pid);
+    seedChunk(pid, 'Renewal pricing: ten years leading platform teams.', 'resume');
+    seedChunk(pid, 'Renewal pricing: rewritten for the Acme role.', 'tailored', pack);
+    return pack;
+  }
+
+  it('substitutes for the base résumé while grounding that interview', async () => {
+    const pid = seedProfile();
+    const pack = seedBaseAndTailored(pid);
+    const hits = await ground(pid, 'renewal pricing', pack, 'interview');
+    expect(hits.some((c) => c.sourceType === 'tailored')).toBe(true);
+    expect(hits.some((c) => c.sourceType === 'resume')).toBe(false); // deliberately replaced
+  });
+
+  it('never suppresses the real résumé in a meeting', async () => {
+    const pid = seedProfile();
+    const pack = seedBaseAndTailored(pid);
+    const hits = await ground(pid, 'renewal pricing', pack, 'meeting');
+    expect(hits.some((c) => c.sourceType === 'resume')).toBe(true);
+  });
+
+  it('nor in a companion session or a voice quick ask', async () => {
+    const pid = seedProfile();
+    const pack = seedBaseAndTailored(pid);
+    // 'companion' is the mode voiceService files a quick ask under, so this
+    // covers the no-session path that used to inherit an 'interview' default.
+    const hits = await ground(pid, 'renewal pricing', pack, 'companion');
+    expect(hits.some((c) => c.sourceType === 'resume')).toBe(true);
+  });
+
+  it('defaults CLOSED at the retrieval layer — a caller must opt in', async () => {
+    // ground() is not the only door: retrieve() is exported. Its tailored
+    // substitution must be opt-in, so a future caller that forgets the option
+    // cannot re-introduce the suppression.
+    const pid = seedProfile();
+    const pack = seedBaseAndTailored(pid);
+    const hits = await retrieve(pid, 'renewal pricing', 5, pack);
+    expect(hits.some((c) => c.sourceType === 'resume')).toBe(true);
   });
 });
 
