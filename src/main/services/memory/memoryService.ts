@@ -71,6 +71,46 @@ export async function approveMemory(
   return approved;
 }
 
+/**
+ * Create a memory the user typed themselves.
+ *
+ * It lands `pending` and passes the same sensitive gate as anything the model
+ * proposed. Two reasons it is not written straight to `approved`: the row must
+ * exist even with no API key or no network (embedding happens at approval, and
+ * that is the step that can fail), and there is then exactly one path by which
+ * anything becomes recallable. The IPC layer approves it immediately after, so
+ * the user still experiences one action — and if embedding fails, the memory
+ * is waiting in review rather than lost.
+ */
+export function createMemory(opts: {
+  profileId: string;
+  packId: string | null;
+  category: MemoryCategory;
+  content: string;
+  importance?: number;
+  factKey?: string | null;
+}): MemoryItem {
+  const content = opts.content.trim();
+  if (content.length < 3) throw new Error('A memory needs some content.');
+  const verdict = checkSensitive(content);
+  if (verdict.sensitive) {
+    throw new Error(`This looks like ${verdict.reason} data — BrainCue won't store it as memory.`);
+  }
+  const id = memoriesRepo.insertCandidate({
+    profileId: opts.profileId,
+    packId: opts.packId,
+    category: opts.category,
+    content,
+    // The user asserting something directly is the strongest signal there is.
+    confidence: 1,
+    importance: opts.importance ?? 0.6,
+    sourceRefs: [],
+    factKey: opts.factKey ?? null,
+    sourceKind: 'authored',
+  });
+  return memoriesRepo.get(id)!;
+}
+
 export async function updateMemory(
   id: string,
   patch: {

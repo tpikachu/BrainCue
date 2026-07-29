@@ -172,6 +172,34 @@ const FAQS: { group: string; items: Faq[] }[] = [
         ),
       },
       {
+        q: 'Something it remembers has changed. Does it keep the old answer?',
+        a: (
+          <>
+            No. A fact that can only have one value at a time — a deadline, someone&rsquo;s role,
+            a decision — is tracked as that one fact. When a conversation says it has changed,
+            the suggestion arrives labelled <b>replaces a saved fact</b>, showing the value it
+            would retire struck through, and the button reads <b>Replace</b> instead of Approve.
+            Nothing is replaced until you say so. The old value is kept as history rather than
+            deleted, but it stops being used in answers, so you can never be quoted last
+            month&rsquo;s version. A fact merely repeated is recognised as the same fact and does
+            not clutter the queue at all.
+          </>
+        ),
+      },
+      {
+        q: 'Can I just tell it something instead of waiting for it to come up?',
+        a: (
+          <>
+            Yes — <b>Add a memory</b> on the Memory page. Waiting for a conversation to mention
+            something is the slow way to make BrainCue useful; anything you already know it
+            should know, you can type on day one and it is searchable immediately. It goes
+            through the same gates as anything proposed automatically: the sensitive-content
+            filter still applies, and you still choose whether it applies everywhere or only
+            inside one Space.
+          </>
+        ),
+      },
+      {
         q: 'Can a Space see another Space&rsquo;s history?',
         a: (
           <>

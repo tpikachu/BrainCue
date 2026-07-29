@@ -37,6 +37,12 @@ export default function MemoryPage() {
   const [spaces, setSpaces] = useState<Job[]>([]);
   const [edits, setEdits] = useState<Record<string, string>>({}); // id → draft content
   const [error, setError] = useState<string | null>(null);
+  // Authoring: "here is what you should know about me", without waiting for a
+  // conversation to propose it.
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [draftCategory, setDraftCategory] = useState('fact');
+  const [draftScope, setDraftScope] = useState('global');
 
   useEffect(() => {
     void loadSettings();
@@ -76,13 +82,17 @@ export default function MemoryPage() {
     await loadSettings();
   };
 
+  // Refreshes on failure too: an action can change the database and still
+  // throw — authoring a memory whose indexing failed leaves a real row that
+  // the user must be able to see, or it looks like nothing happened.
   const act = async (fn: () => Promise<unknown>) => {
     setError(null);
     try {
       await fn();
-      await refresh();
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      await refresh();
     }
   };
 
@@ -195,6 +205,96 @@ export default function MemoryPage() {
         <p className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300" role="alert">
           ⚠ {error}
         </p>
+      )}
+
+      {/* Authoring. Waiting for a conversation to mention something is the slow
+          way to make memory useful; the fast way is to say it once, on day one.
+          Same gates as anything extracted — the sensitive filter still applies,
+          and it still lands in the one lifecycle that ends in recall. */}
+      {profileId && (
+        <Card className="mb-5" data-tour="memory-add">
+          {!adding ? (
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-neutral-400">
+                Something it should already know? Add it yourself instead of waiting for a
+                conversation to bring it up.
+              </p>
+              <Button onClick={() => setAdding(true)}>Add a memory</Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <Field label="What should BrainCue remember?">
+                <TextInput
+                  value={draft}
+                  autoFocus
+                  aria-label="New memory text"
+                  placeholder="e.g. I report to Sarah Chen, who runs the platform team."
+                  onChange={(e) => setDraft(e.target.value)}
+                />
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Kind">
+                  <Select
+                    value={draftCategory}
+                    onChange={(e) => setDraftCategory(e.target.value)}
+                  >
+                    {['fact', 'preference', 'person', 'project', 'goal', 'decision', 'workflow'].map(
+                      (c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ),
+                    )}
+                  </Select>
+                </Field>
+                <Field label="Where it applies">
+                  <Select value={draftScope} onChange={(e) => setDraftScope(e.target.value)}>
+                    <option value="global">Everywhere</option>
+                    {spaces.map((sp) => (
+                      <option key={sp.id} value={sp.id}>
+                        Only in {sp.title || 'Untitled'}
+                        {sp.company ? ` · ${sp.company}` : ''}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="success"
+                  disabled={draft.trim().length < 3}
+                  onClick={() =>
+                    void act(async () => {
+                      await api.memory.create(profileId, draft.trim(), {
+                        category: draftCategory,
+                        packId: draftScope === 'global' ? null : draftScope,
+                      });
+                      setDraft('');
+                      setAdding(false);
+                    })
+                  }
+                >
+                  Save
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setDraft('');
+                    setAdding(false);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+              {!memoryOn && (
+                <p className="text-xs text-amber-400/90">
+                  Long-term memory is off, so this will be saved but never used in an answer until
+                  you turn it on above.
+                </p>
+              )}
+            </div>
+          )}
+        </Card>
       )}
 
       {/* Review queue */}

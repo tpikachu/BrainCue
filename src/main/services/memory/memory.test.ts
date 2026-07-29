@@ -68,7 +68,7 @@ import { createTestDb } from '../../test/dbHarness';
 import { memoriesRepo } from '../../db/repositories/memories.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
 import { extractMemoryCandidates, extractionSchema } from './extractor';
-import { approveMemory, updateMemory } from './memoryService';
+import { approveMemory, createMemory, updateMemory } from './memoryService';
 import { buildIndex, hasExactAnchor, lexicalScore, tokenize } from './lexical';
 import { MEMORY_MIN_SCORE, recallMemories } from './recall';
 
@@ -663,5 +663,57 @@ describe('consolidation', () => {
     });
 
     expect(await extractMemoryCandidates(sid)).toBe(0);
+  });
+});
+
+describe('authoring', () => {
+  it('lands pending, marked authored, and is fully trusted', () => {
+    const pid = seedProfile();
+    const m = createMemory({
+      profileId: pid,
+      packId: null,
+      category: 'fact',
+      content: 'I report to Sarah Chen.',
+    });
+    // Pending, not approved: embedding happens at approval, and that is the
+    // step that needs a key and a network. Creating must work without either.
+    expect(m.status).toBe('pending');
+    expect(m.sourceKind).toBe('authored');
+    expect(m.confidence).toBe(1); // the user asserting it directly is the strongest signal
+  });
+
+  it('applies the same sensitive gate as anything the model proposed', () => {
+    const pid = seedProfile();
+    expect(() =>
+      createMemory({
+        profileId: pid,
+        packId: null,
+        category: 'fact',
+        content: 'My password is hunter2 for the staging box.',
+      }),
+    ).toThrow();
+    // Refused outright — not stored in any status for later review.
+    expect(memoriesRepo.list({ profileId: pid })).toHaveLength(0);
+  });
+
+  it('becomes recallable once approved, like any other memory', async () => {
+    const pid = seedProfile();
+    const m = createMemory({
+      profileId: pid,
+      packId: null,
+      category: 'preference',
+      content: 'Prefers concise bullet answers in meetings.',
+    });
+    expect(await recallMemories(pid, 'concise bullet answers', null, T0)).toEqual([]); // pending
+    await approveMemory(m.id);
+    const out = await recallMemories(pid, 'concise bullet answers', null, T0);
+    expect(out.map((x) => x.id)).toEqual([m.id]);
+  });
+
+  it('refuses an empty memory', () => {
+    const pid = seedProfile();
+    expect(() =>
+      createMemory({ profileId: pid, packId: null, category: 'fact', content: '  ' }),
+    ).toThrow();
   });
 });

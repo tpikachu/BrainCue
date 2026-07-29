@@ -122,21 +122,28 @@ export const TOUR_STEPS: TourStep[] = [
     route: '/memory',
     target: 'memory-queue',
     title: '10 · You approve every memory, one at a time',
-    body: 'Suggestions arrive here after a session and sit unused until you press Approve — nothing pending is ever recalled. Edit the wording first if it is nearly right; reject it and the same sentence is not raised again. Each memory belongs either to one Space or to you generally, so you can see exactly what each context knows, and correct or delete any of it later from the very card that used it.',
+    body: 'Suggestions arrive here after a session and sit unused until you press Approve — nothing pending is ever recalled. Edit the wording first if it is nearly right; reject it and the same sentence is not raised again. When something you already saved has CHANGED — a date that moved, a person who switched roles — the card says “replaces a saved fact” and shows the old value struck through, and the button reads Replace. The old value is kept as history but stops being used, so an answer can never quote last month’s version back at you.',
+  },
+  {
+    chapter: 'What it keeps',
+    route: '/memory',
+    target: 'memory-add',
+    title: '11 · Or just tell it directly',
+    body: 'Waiting for a conversation to mention something is the slow way to make this useful. Anything you already know it should know — who you report to, what you are building, how you like answers written — you can type here on day one, and it is searchable immediately. It goes through exactly the same gates as anything BrainCue proposed itself: the sensitive-content filter still applies, and you still choose whether it applies everywhere or only inside one Space.',
   },
 
   {
     chapter: 'Afterwards',
     route: '/sessions',
     target: 'sessions-table',
-    title: '11 · Reviewing what happened',
+    title: '12 · Reviewing what happened',
     body: 'Sessions keeps the full history for this profile, with transcripts and reports: interviews get a coaching report with strengths, improvements, and per-question notes; meetings get a structured report with decisions and action items. Insights aggregates the practice sessions over time, so you can see whether you are actually improving.',
   },
   {
     chapter: 'Afterwards',
     route: '/settings',
     target: 'settings-privacy',
-    title: '12 · Staying invisible, and in control',
+    title: '13 · Staying invisible, and in control',
     body: 'Privacy Mode hides every BrainCue window from screen capture and recording, and can be toggled with a shortcut mid-call. Every shortcut is rebindable. Your data — transcripts, documents, embeddings, summaries, memory — lives in a local database on this machine, which is why Settings → Danger zone can genuinely erase all of it, and why there is no backup but yours.',
   },
   {

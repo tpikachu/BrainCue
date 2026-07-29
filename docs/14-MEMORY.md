@@ -157,6 +157,25 @@ answered* in any status. The two answer different questions — "you already
 decided this" versus "this changed" — and the keyed check runs first, because
 letting the text-match guard shadow it would swallow the re-confirmation.
 
+## 4.4 Authoring
+
+Waiting for a conversation to mention something is the slow way to make memory
+useful. **Add a memory** on the Memory page writes one directly — who you
+report to, what you are building, how you like answers written — and it is
+searchable immediately.
+
+It is a faster path into the same lifecycle, never a bypass of it. The
+sensitive filter still applies (and a refusal stores nothing, in any status),
+the scope choice is still Space-or-everywhere, and `sourceKind` records that a
+person wrote it rather than a model proposing it.
+
+`createMemory` lands the row `pending` and the IPC layer approves it in the
+same call, so the user experiences one action. The split matters: embedding is
+what needs a key and a network, and it happens at approval. Creating therefore
+always succeeds, and if indexing fails the memory is waiting in review rather
+than lost — which is also why the Memory page refreshes after a *failed*
+action, not only a successful one.
+
 ## 5. Scale
 
 `recallRows` loads every candidate row for the profile and scores it in JS.
@@ -184,11 +203,9 @@ is here.
 - **No entities.** `category: 'person'` is a string on a sentence; there is no
   *Sarah* to hang facts on, so "what do we know about Acme?" is a similarity
   search that misses anything phrased differently.
-- **No authoring.** IPC exposes review / update / archive / delete but no
-  *create* and no *import*. The user cannot say "here is what you should know
-  about me", which is the fastest way to make memory useful on day one. The
-  storage side is ready for it: `sourceKind` already distinguishes
-  `extracted` / `authored` / `imported` / `derived`.
+- **No document ingest.** A user can author one memory at a time, but cannot
+  point at a CV or a brief and say "learn this". `sourceKind` already
+  distinguishes `imported`, so the record is ready for it.
 - **No export.** Memory is local and has no backup or portability story.
 - **Fact keys depend on the model choosing consistently.** Nothing yet
   reconciles `project:atlas/launch-date` with `project:atlas/launch`, so two

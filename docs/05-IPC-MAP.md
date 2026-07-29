@@ -238,6 +238,8 @@ Memory additions: `memory:list` / `memory:review` (approve with
 optional edits, or reject) / `memory:update` / `memory:archive` /
 `memory:delete` (removes the row AND its embedding) /
 `memory:set-pack-enabled` (per-Space opt-out) /
+`memory:create` (author one by hand — creates pending then approves in the same
+call, so a failure leaves it in review rather than losing it) /
 `memory:conflicts` (pending candidates that would replace a fact the profile
 already holds, each paired with the value it would retire — see
 [14 · Memory](14-MEMORY.md) §4) / `memory:history` (a fact's revision chain,

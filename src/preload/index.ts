@@ -276,6 +276,13 @@ const api = {
       profileId: string,
       opts: { status?: string; query?: string; packId?: string | null } = {},
     ) => invoke<MemoryItem[]>(IPC.memory.list, { profileId, ...opts }),
+    /** Author a memory by hand. Same sensitive gate, same lifecycle — it is
+     *  approved immediately, so a failure here means it is waiting in review. */
+    create: (
+      profileId: string,
+      content: string,
+      opts: { category?: string; packId?: string | null; importance?: number } = {},
+    ) => invoke<MemoryItem>(IPC.memory.create, { profileId, content, ...opts }),
     /** Pending candidates that would replace a fact the profile already holds,
      *  each paired with the value it would retire. */
     conflicts: (profileId: string) =>

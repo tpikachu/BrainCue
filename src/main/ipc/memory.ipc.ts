@@ -3,7 +3,7 @@ import { IPC } from '@shared/ipc';
 import { handle } from './helpers';
 import { memoriesRepo } from '../db/repositories/memories.repo';
 import { contextPacksRepo } from '../db/repositories/jobs.repo';
-import { approveMemory, updateMemory } from '../services/memory/memoryService';
+import { approveMemory, createMemory, updateMemory } from '../services/memory/memoryService';
 
 const zCategory = z.enum([
   'preference',
@@ -31,6 +31,29 @@ export function registerMemoryIpc(): void {
     }),
     ({ profileId, status, query, packId }) =>
       memoriesRepo.list({ profileId, status, query, packId }),
+  );
+
+  /**
+   * Author a memory directly — "here is what you should know about me".
+   *
+   * Created pending, then approved in the same call so it is one action for
+   * the user. If embedding fails (no key, no network) the approval throws and
+   * the memory is left waiting in review, which is the honest outcome: it
+   * exists, it is simply not searchable yet.
+   */
+  handle(
+    IPC.memory.create,
+    z.object({
+      profileId: z.string().min(1),
+      content: z.string().min(3).max(1000),
+      category: zCategory.default('fact'),
+      packId: z.string().min(1).nullable().default(null),
+      importance: z.number().min(0).max(1).optional(),
+    }),
+    async ({ profileId, content, category, packId, importance }) => {
+      const created = createMemory({ profileId, packId, category, content, importance });
+      return approveMemory(created.id);
+    },
   );
 
   /** Pending candidates that would REPLACE a current fact, paired with what
