@@ -26,6 +26,7 @@ function toPack(r: Row): ContextPack {
     companyUrl: r.companyUrl,
     companyResearch: r.companyResearch,
     parsedCompany: r.parsedCompany ? JSON.parse(r.parsedCompany) : null,
+    tailoredResume: r.tailoredResume,
     notes: r.notes,
     memoryEnabled: r.memoryEnabled === 1,
     companionPrefs: r.companionPrefs ? JSON.parse(r.companionPrefs) : null,
@@ -155,6 +156,7 @@ export const contextPacksRepo = {
     if (patch.companyResearch !== undefined) set.companyResearch = patch.companyResearch;
     if (patch.parsedCompany !== undefined)
       set.parsedCompany = patch.parsedCompany ? JSON.stringify(patch.parsedCompany) : null;
+    if (patch.tailoredResume !== undefined) set.tailoredResume = patch.tailoredResume;
     db().update(schema.contextPacks).set(set).where(eq(schema.contextPacks.id, id)).run();
     return this.get(id)!;
   },

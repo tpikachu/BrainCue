@@ -567,13 +567,14 @@ function AdvancedCard({
   settings,
   onSaved,
 }: {
-  settings: AppSettings;
+  settings: AppSettings | null;
   onSaved: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
-  const on = !!settings.devDbExplorer;
+  const on = !!settings?.devDbExplorer;
 
   const toggle = async (next: boolean) => {
+    if (busy) return; // Switch has no disabled state — guard the handler instead
     setBusy(true);
     try {
       await api.settings.set({ devDbExplorer: next });
@@ -599,13 +600,7 @@ function AdvancedCard({
             if you know what you are looking for. Nothing here is edited or deleted by viewing it.
           </p>
         </div>
-        <Switch
-          checked={on}
-          onChange={(v) => void toggle(v)}
-          disabled={busy}
-          onLabel="Shown"
-          offLabel="Hidden"
-        />
+        <Switch checked={on} onChange={(v) => void toggle(v)} onLabel="Shown" offLabel="Hidden" />
       </div>
     </Card>
   );

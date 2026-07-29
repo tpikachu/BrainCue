@@ -13,6 +13,7 @@ import type {
   ContributionPatchEvent,
   ContributionResetEvent,
   InterviewBrief,
+  Job,
   MeetingReport,
   MemoryConflict,
   MemoryItem,
