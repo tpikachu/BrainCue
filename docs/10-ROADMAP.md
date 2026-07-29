@@ -3,27 +3,43 @@
 > Supersedes [09-MVP-PLAN.md](./09-MVP-PLAN.md) (kept as the record of the
 > shipped v1 build). Vision: [00-VISION.md](./00-VISION.md) · Spec:
 > [01-PRD.md](./01-PRD.md). Phases ship as release trains (v2.0, v2.1, …);
-> milestones within a phase are independently landable PRs.
+> milestones within a phase are independently landable PRs. The changelog is
+> the authoritative record of what shipped when; this document is the
+> plan-shaped view of the same history, plus what comes next.
 
-## Where we are (2026-07-22)
+## Where we are (2026-07-29 — v2.1.0 shipped)
 
-Delivery ran ahead of the phase ordering below — the voice, memory, and
-companion milestones landed before Interviewer Assist / Tutor / the second
-provider. Per milestone: ✅ shipped · 🧪 shipped behind a Labs badge · ⬜ open.
+Delivery ran ahead of the original phase ordering — voice, memory, and the
+companion landed before Interviewer Assist, Tutor, and the second provider.
+And v2.1 added a layer the original plan never named: **activities** (the user
+says what a call is, the engine derives the mode — one list, not two) and
+**continuity** (a Space is where a conversation is kept; kept conversations
+ground the next one). Original milestone numbers are kept for reference.
+✅ shipped · 🧪 shipped behind a Labs badge · ⬜ open.
 
 | Milestone | Status |
 | --- | --- |
-| 1.1–1.4 One engine (schema, extraction, mode-first layout, rebrand) | ✅ |
-| 2.1 Meeting Copilot | 🧪 Labs (`meeting.acceptance.test.ts` gate) |
-| 2.2 Interviewer Assist | ⬜ |
-| 2.3 Multi-provider v1 | ⬜ — seam ✅ shipped; Settings → Providers signposts the layer ("Coming soon"); no second provider registered |
-| 3.1 Voice output | ✅ as streamed sentence-level TTS + barge-in (not the Realtime speech-to-speech API) |
-| 3.2 Tutor | ⬜ |
+| 1.1–1.4 One engine (schema, engine extraction, provider seam, rebrand) | ✅ v2.0 |
+| 2.1 Meeting Copilot | 🧪 Labs (`meeting.acceptance.test.ts` gate) — graduation criteria scheduled: 5.5 |
+| 2.2 Interviewer Assist | ⬜ later train |
+| 2.3 Multi-provider v1 | ⬜ **scheduled v2.2 (5.1)** — seam ✅ since v2.0; Settings → Providers still says "Coming soon" |
+| 3.1 Voice output | ✅ sentence-streamed TTS + barge-in; Realtime speech-to-speech ⬜ later train |
+| 3.2 Tutor | ⬜ later train — `subject` ships meanwhile as a quiet ambient activity (meeting mode over your material) |
 | 3.3 Summon anywhere | ✅ push-to-talk (Ctrl+Shift+T) + no-session quick ask |
-| 4.1 Memory subsystem | ✅ review-first (approved-only recall) |
+| 4.1 Memory subsystem | ✅ review-first; v2.1 added lexical recall, fact supersession (Replace), and authoring |
 | 4.2 Interjection policy engine | ✅ (`companion.eval.test.ts` gate) |
 | 4.3 Companion | 🧪 Labs — game-buddy vision integration still ⬜ |
-| 4.4 Cost governance v2 | ✅ session budgets + live meter; local-STT spike ⬜ |
+| 4.4 Cost governance v2 | ✅ session budgets + live meter; local-STT spike ⬜ (scheduled as a 5.x spike) |
+| — Activities: one list, engine derives the mode (v2.1) | ✅ [18-ACTIVITIES.md](./18-ACTIVITIES.md) |
+| — Continuity: archives, save prompt, per-activity formats (v2.1) | ✅ [16-CONTINUITY.md](./16-CONTINUITY.md) |
+| — One active profile, resolved in main (v2.1) | ✅ [19-ACTIVE-PROFILE.md](./19-ACTIVE-PROFILE.md) |
+| — Job-search quarantine made *inert*, tailoring re-homed to the Space (v2.1) | ✅ [20-QUARANTINE.md](./20-QUARANTINE.md) |
+
+Phases 1–2 as originally drawn are complete in substance: the engine is one,
+the identity shift is public (README, media, and sample data lead with
+meetings, not interviews), and the copilots exist — with the single exception
+of the second provider, which is the oldest open promise in this document and
+therefore goes first in the next train.
 
 ## How we build (the development way)
 
@@ -31,129 +47,138 @@ Carried from v1: docs drive development; one session-log file per day; branch �
 PR, never commit to master; no version bump or changelog entry except when
 cutting a release; typecheck + build before committing.
 
-New rules for the v2 era:
+Rules of the v2 era, all still in force:
 
 1. **Engine-first.** A mode may only *configure* the conversation engine. If a
    mode needs something the engine can't express, extend the engine — never
    special-case inside a mode. Reviews enforce this.
 2. **Parity gate.** At every phase boundary (and any PR touching the pipeline):
    full unit suite green, `npm run build` clean, and the privacy hard test
-   (`scripts/privacy-affinity/hardtest.js`) passing. Interview mode is the
-   shipped product; it never regresses in the name of generality.
-3. **Master stays shippable.** Unfinished modes hide behind a Labs flag in
-   Settings until their acceptance criteria pass.
+   (`scripts/privacy-affinity/hardtest.js`) passing. Interview mode is shipped
+   product; it never regresses in the name of generality.
+3. **Master stays shippable.** Unfinished modes hide behind a Labs flag until
+   their acceptance criteria pass — and a flag that hides a surface must also
+   stop the behaviour behind it ([20-QUARANTINE.md](./20-QUARANTINE.md) §1,
+   learned the hard way).
 4. **Migrations are one-way and lossless.** Every schema change lands with a
    Drizzle migration (`npm run db:generate`) tested against a copy of a real
-   v1.5.x database.
+   earlier database.
+5. **Mutation-check the tests that guard invariants.** A test that cannot fail
+   is worse than no test; several v2.1 commits record tests that passed for
+   the wrong reason until a mutant exposed them. New invariant tests state
+   which mutant kills them.
 
-## Phase 1 — v2.0 "One engine" (foundation + rebrand)
+## Phase 5 — v2.2 "Trust" (the local-first promise, made good)
 
-The unglamorous phase: after it, the app looks almost identical — and every
-later phase becomes configuration instead of surgery.
+v2.1 made continuity and memory the core of the product. The next release
+hardens the promises that core rests on. The pitch is *local-first, your data,
+grounded answers* — and today that pitch has four soft spots: everything
+depends on one cloud vendor; memory can only be seeded one fact at a time; a
+local-first store has no backup or portability story; and the two flagship
+modes still wear Labs badges with no written way to take them off. Each
+milestone below closes one of those gaps. Breadth (new modes, new surfaces)
+deliberately waits — see *Later trains*.
 
-- **1.1 Vocabulary & schema generalization.** `jobs` → context packs
-  (`kind: job|subject|project|custom`; existing rows become `kind='job'`);
-  `sessions.mode` (live→`interview`, mock/sparring→`practice`); `InterviewType`
-  demoted to interview/practice scenario config in `@shared/types`. Rename map
-  documented in [04-DATABASE.md](./04-DATABASE.md) when it lands.
-- **1.2 Engine extraction.** Pull the pipeline out of
-  `sessionManager.ts` into `services/engine/` with a `ModeDefinition`
-  interface: `{ sources, triggerPolicy, persona, groundingScope, surfaces }`.
-  The interview mode becomes the first `ModeDefinition`; the question
-  classifier becomes the `reactive` trigger policy implementation.
-  Mock/sparring stay on their current path (they migrate in 3.2).
-  **Includes the provider seam** (PRD §6.7): the engine calls `Provider`
-  capability interfaces (`chat`/`embeddings`/`stt`/`speech`/`vision`), with
-  today's OpenAI services refactored into the reference implementation — no
-  second provider yet, just the cut.
-- **1.3 Renderer generalization — the mode-first layout.** Implement the
-  navigation redesign in [11-UX-NAVIGATION.md](./11-UX-NAVIGATION.md): sidebar
-  collapses to Home / Library / Reports / Settings, modes become launcher cards
-  on Home, Profiles+Jobs merge into Library, old routes redirect, tour updated.
-  `useLiveSession` and the overlay stay as-is for interview parity; card
-  components take a card *type* so Phase 2 can add new ones without churn.
-- **1.4 Rebrand pass.** In-app copy, onboarding tour script, Settings
-  descriptor: "interview copilot" → "ambient AI companion". No appId/installer
-  identity change (README repositioned 2026-07-21). Update
-  [02-ARCHITECTURE.md](./02-ARCHITECTURE.md), [05-IPC-MAP.md](./05-IPC-MAP.md)
-  as they drift.
+- **5.1 Multi-provider v1** *(carried from 2.3 — the seam's payoff).* A second
+  provider — **Anthropic first** (strong chat + vision peers; the seam itself
+  is vendor-neutral, so Google can follow the same path) — lands on the
+  Phase-1 capability interfaces for `chat` and `vision`. Per-capability
+  provider/model selection in Settings → Providers; per-provider keys under
+  the same isolation rules as the OpenAI key (main-process only, encrypted at
+  rest, never sent to the renderer). Realtime STT and speech stay OpenAI-only
+  until a peer capability exists; PRD §6.7 degradation rules apply. Embedding-
+  provider switching ships **only** with the re-index flow — the
+  `embeddingIdentity` guard already refuses mixed vector spaces, so the flow
+  is a UX task, not a safety one.
+  *Acceptance: a full meeting + interview session runs end-to-end with chat on
+  the second provider; capability gaps surface as clear UI states, never bare
+  errors; no key ever reaches the renderer.*
+- **5.2 Memory learns from documents.** "Learn this" on a document: extraction
+  proposes candidates through the **same review queue** as conversation
+  extraction — `sourceKind: 'imported'` is already reserved for exactly this
+  ([14-MEMORY.md](./14-MEMORY.md) §6). The sensitive filter applies before
+  persistence, scope is chosen at import (Space or everywhere), and nothing
+  is recalled un-reviewed. Closes the "day one it knows nothing" gap from the
+  document side, as authoring closed it from the typing side.
+  *Acceptance: pointing at a CV or a brief yields reviewable candidates;
+  rejecting the batch stores nothing; approving follows the existing
+  supersession rules (an imported fact can Replace a stale one).*
+- **5.3 Export & backup.** Memories (with history), conversation archives, and
+  the profile export to one portable, documented file; import restores it.
+  What is *not* included (transcript audio, API keys) is stated in the export
+  itself. A local-first product without a backup story loses the user's data
+  more reliably than a cloud product does — this is the price of the
+  architecture we chose, so we pay it.
+  *Acceptance: export → wipe → import round-trips on a real database;
+  recall and grounding behave identically after restore.*
+- **5.4 Encryption at rest.** The design deferred since v2.0
+  ([07-API-KEY-SECURITY.md](./07-API-KEY-SECURITY.md)): a safeStorage-wrapped
+  AES-GCM key encrypting memory and transcript content, with dual-read
+  migration so existing rows stay readable and encrypt on next write.
+  *Acceptance: a fresh row is unreadable in a raw DB browse; a pre-v2.2
+  database opens and migrates losslessly; export (5.3) produces plaintext by
+  explicit user action only.*
+- **5.5 Labs graduation.** Meeting and Companion have shipped behind
+  deterministic gates but there is no written bar for removing the badge.
+  Define it (real-world hours logged, the PRD §9-P2/P4 bars re-checked against
+  actual sessions, zero known trust-breaking defects) and then either
+  graduate each mode or record in this document why not. A Labs badge with no
+  exit criteria is not caution, it is a fossil.
+- **5.6 Spikes** *(go/no-go decisions, not commitments):*
+  - **Entities.** The structural fix for fact-key drift — a *Sarah* to hang
+    facts on, so "what do we know about Acme?" stops being a similarity
+    search ([14-MEMORY.md](./14-MEMORY.md) §6). Output: a design doc and a
+    schema sketch, not code.
+  - **Local STT** (whisper.cpp) for the always-on case *(carried from 4.4)*.
+  - **Lexical index caching** — only if the spike's profiling says a real
+    store gets near the measured 10k-row/141 ms line; the benchmark says this
+    is years away for a typical user, so the default is no.
 
-**Acceptance:** parity gate passes; a v1.5.x database migrates losslessly and
-every v1 flow works unchanged; a fresh install onboards through the retitled
-tour.
+**Train acceptance:** parity gate passes; chat runs on the second provider end
+to end; a memory can arrive from a document, be exported, and be restored; the
+store is encrypted at rest; Meeting and Companion each have a written verdict.
 
-## Phase 2 — v2.1 "Copilots" (nearest adjacencies, both sides of the table)
+## Later trains (v2.3+) — sequenced, not yet scheduled
 
-- **2.1 Meeting Copilot.** First `proactive` trigger policy: salience
-  classification of finalized turns (unanswered question, action item, claim
-  the corpus can inform). New card types: context, open-question, action-item.
-  Sensitivity dial (summoned-only ↔ eager) + cooldowns. End-of-session meeting
-  summary report. *Acceptance: PRD §9-P2 — a real meeting yields ≥1 useful
-  contribution and zero annoying ones at defaults.*
-- **2.2 Interviewer Assist.** Inputs: own JD pack + candidate resume doc.
-  Reuses `interviewer.ts` (suggested/follow-up questions) and `feedback.ts`
-  (evaluation draft); adds the coverage tracker. Same overlay, opposite chair.
-  *Acceptance: a full interview run yields a usable evaluation draft.*
-- **2.3 Multi-provider v1.** A second provider (Anthropic or Google) lands on
-  the Phase-1 seam for `chat` + `vision`, with per-capability provider/model
-  selection in Settings → Providers and per-provider keys. Realtime STT and
-  speech stay OpenAI-only until a peer capability exists (PRD §6.7 degradation
-  rules apply). Embedding-provider switching ships only with the re-index flow.
-  *Acceptance: a full interview + meeting session runs end-to-end with chat on
-  the second provider; capability gaps surface clearly instead of erroring.*
+In rough order of expected value to the daily cases (meetings, solo), which is
+the ordering rule [00-VISION.md](./00-VISION.md) sets:
 
-Phase 2 also completes the identity shift in public: README, screenshots, and
-store copy present the mode catalog, not an interview tool.
-
-## Phase 3 — v2.2 "Voice" (dialogue becomes natural)
-
-- **3.1 Realtime speech-to-speech.** Upgrade voice output from turn-based MP3
-  TTS to the Realtime GA speech path: streaming audio out, barge-in (user
-  speech interrupts playback), output-device picker. Main-process socket, same
-  key-isolation rules as `realtime.ts`.
-- **3.2 Tutor mode.** Context packs of `kind='subject'`; teach/quiz/drill loop
-  generalized from `sparringManager.ts` onto the engine's `dialogue` policy —
-  mock/sparring migrate onto the same loop here, retiring their bespoke paths.
-  Progress lands in Reports.
-- **3.3 Summon anywhere.** Global push-to-talk: hold a hotkey, speak to
-  BrainCue from any mode (or no session), grounded answer via overlay or voice.
-
-**Acceptance:** PRD §9-P3 — tutoring feels conversational (no dead air > 2s);
-sparring/mock users see no feature loss after migrating onto the engine loop.
-
-## Phase 4 — v3.0 "Memory & presence" (the companion)
-
-Deliberately last: it depends on voice (P3), memory, and interjection tuning.
-
-- **4.1 Memory subsystem.** Post-session extraction of durable facts into a
-  local memory store; a review UI (view / edit / delete — PRD principle:
-  memory belongs to the user); memory chunks join retrieval.
-- **4.2 Interjection policy engine.** The presence dial (silent observer ↔
-  chatty), cooldowns, and do-not-disturb heuristics. The hardest product
-  problem in the plan; ship behind Labs until §9-P4 holds.
-- **4.3 Companion + game buddy.** Ambient session type; game buddy = companion
-  + the existing region-capture Vision path pointed at the game.
-- **4.4 Cost governance v2.** Session budgets with warnings; evaluate local
-  STT (whisper.cpp) for the always-on case — a spike with a go/no-go, not a
-  commitment.
-
-**Acceptance:** PRD §9-P4 — unprompted correct recall across sessions; "knows
-when to shut up" in real use.
+- **Speaker diarization** *(promoted from Deferred).* Meetings are the daily
+  case and every continuity feature sharpens with speaker identity: archives
+  already attribute verbatim quotes from transcript rows and deliberately pass
+  unrecognized speaker labels through unflattened, so diarization lands
+  without a format change. Gate on a capability spike (quality of local vs
+  cloud diarization) before committing.
+- **Tutor** *(carried 3.2).* `kind='subject'` Spaces exist and run today as a
+  quiet ambient activity; the upgrade is a real teach/quiz/drill dialogue loop
+  on the engine's `dialogue` policy, migrating mock/sparring onto the same
+  loop and retiring their bespoke paths. Progress lands in Insights.
+- **Realtime speech-to-speech** *(carried 3.1).* Upgrade voice from
+  sentence-streamed TTS to the Realtime GA speech path: streaming audio out,
+  tighter barge-in. Main-process socket, same key-isolation rules as
+  `realtime.ts`.
+- **Interviewer Assist** *(carried 2.2).* Own-JD pack + candidate résumé;
+  reuses `interviewer.ts` and `feedback.ts`, adds the coverage tracker. Same
+  overlay, opposite chair. Worth revisiting the priority honestly: interviews
+  are one activity now, and this serves the least-daily one.
+- **Game buddy vision** *(carried 4.3 remainder).* Companion + the existing
+  region-capture Vision path pointed at the game.
 
 ## Parallel track — brand & docs
 
-Runs alongside every phase: tagline decision (open, see
-[00-VISION.md](./00-VISION.md) §6), README/media refresh at each phase
-boundary, docs/*.md kept current with the code (per the existing convention),
+Runs alongside every phase: tagline decision (still open, see
+[00-VISION.md](./00-VISION.md) §6), README/media refresh at each release
+boundary (`npm run media` now rebuilds the whole set from the real app —
+[21-MEDIA.md](./21-MEDIA.md)), docs/*.md kept current with the code,
 changelog entry per release train.
 
 ## Deferred / later (unscheduled, carried or new)
 
 - Rebindable hotkeys; multi-display region capture (carried from v1 plan)
-- Vector store swap to LanceDB / sqlite-vec (carried)
+- Vector store swap to LanceDB / sqlite-vec (carried; the recall benchmark
+  says lexical index caching comes first, and neither is near)
 - Realtime STT / speech from non-OpenAI providers, and local model support
-  (Ollama-style) for chat — once the provider layer is proven on cloud peers
-- Speaker diarization for multi-participant meetings
+  (Ollama-style) for chat — once the provider layer is proven on a cloud peer
 - A mode/plugin SDK (third-party modes) — only after the engine API stabilizes
 - Linux polish; mobile companion app — no current plans
 
@@ -162,4 +187,5 @@ changelog entry per release train.
 - Typecheck + build pass; unit tests green; parity gate at phase boundaries.
 - The milestone's primary flow works end-to-end in the running app.
 - No API key in renderer, logs, or repo; privacy invariants intact.
+- Invariant tests are mutation-checked.
 - Docs updated: session log entry + affected `docs/*.md`.
