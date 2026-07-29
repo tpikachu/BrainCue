@@ -19,6 +19,7 @@ Closes #
 - [ ] `npm run typecheck` · `npm run test` · `npm run build` all pass locally
 - [ ] New/changed behavior has tests
 - [ ] Docs updated if this changes behavior described in `docs/`
+- [ ] `docs/BOARD.md` row updated if this starts or finishes a board milestone
 - [ ] No native `<select>` / native `title` tooltips in app windows; IPC added
       via the 4-step contract (see CONTRIBUTING.md)
 - [ ] I ran what I could and stated what I couldn't (e.g. "Windows only")

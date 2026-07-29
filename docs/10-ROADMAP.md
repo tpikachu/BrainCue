@@ -5,16 +5,24 @@
 > [01-PRD.md](./01-PRD.md). Phases ship as release trains (v2.0, v2.1, …);
 > milestones within a phase are independently landable PRs. The changelog is
 > the authoritative record of what shipped when; this document is the
-> plan-shaped view of the same history, plus what comes next.
+> plan-shaped view of the same history, plus what comes next. The live
+> position of the current train is [BOARD.md](BOARD.md).
 
 ## Where we are (2026-07-29 — v2.1.0 shipped)
 
-Delivery ran ahead of the original phase ordering — voice, memory, and the
-companion landed before Interviewer Assist, Tutor, and the second provider.
-And v2.1 added a layer the original plan never named: **activities** (the user
-says what a call is, the engine derives the mode — one list, not two) and
-**continuity** (a Space is where a conversation is kept; kept conversations
-ground the next one). Original milestone numbers are kept for reference.
+A **phase** is a planned train of milestones, numbered continuously since the
+v2 program began: Phase 1 shipped as v2.0, Phases 2–4 were planned as v2.1
+through v3.0, and a milestone number like `2.3` means *phase 2, milestone 3*.
+Delivery ran ahead of that ordering — voice, memory, and the companion landed
+before Interviewer Assist, Tutor, and the second provider — so Phases 1–4 no
+longer have sections of their own: their milestones live in the table below
+with their fate, and the changelog holds the shipped record. The first phase
+that is still a *plan* is [Phase 5](#phase-5--v22-trust-the-local-first-promise-made-good),
+the v2.2 train. v2.1 also added a layer the original plan never named:
+**activities** (the user says what a call is, the engine derives the mode —
+one list, not two) and **continuity** (a Space is where a conversation is
+kept; kept conversations ground the next one) — those rows carry a dash
+instead of a milestone number.
 ✅ shipped · 🧪 shipped behind a Labs badge · ⬜ open.
 
 | Milestone | Status |
@@ -69,6 +77,10 @@ Rules of the v2 era, all still in force:
    which mutant kills them.
 
 ## Phase 5 — v2.2 "Trust" (the local-first promise, made good)
+
+The fifth phase of the v2 program, shipping as release **v2.2.0** — the first
+phase that is entirely ahead of us (Phases 1–4 are accounted for in the
+status table above). Its live position is tracked on [the board](BOARD.md).
 
 v2.1 made continuity and memory the core of the product. The next release
 hardens the promises that core rests on. The pitch is *local-first, your data,

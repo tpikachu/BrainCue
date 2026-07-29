@@ -1,10 +1,12 @@
-# The current train
+# The board
 
-The live board for the release currently being built. The
+The shared board for the release currently being built. The
 [Roadmap](10-ROADMAP.md) says what the train contains and why; the
 [changelog](../changelog/) says what shipped after the fact; **this file says
-where the train is right now** — deliberately unnumbered, because unlike the
-numbered design docs it changes with every PR and resets every release.
+where the train is right now** — which milestones are in flight, which PR
+carries each one, and what was decided along the way. Deliberately unnumbered,
+because unlike the numbered design docs it changes with every PR and resets
+every release.
 
 **Rules of the board:**
 
@@ -12,12 +14,27 @@ numbered design docs it changes with every PR and resets every release.
   same PR** — the board must never describe a state the tree has left.
 - Only decisions that changed the plan go in the decision log, with a date and
   a one-line reason. Design rationale lives in the design docs.
-- When the train ships: statuses collapse into `changelog/<version>.md` and
-  the roadmap's status table, the decision log's survivors move into the docs
-  they affected, and this file resets for the next train.
+- Work arrives here through the flow in
+  [CONTRIBUTING.md](../CONTRIBUTING.md): issue → triage → accepted →
+  milestone + a row below.
 
 Statuses: ⬜ not started · 🔨 in progress · 🔍 in review · ✅ merged ·
 🚫 dropped (reason in Notes).
+
+## The release ritual
+
+When a train ships, in this order — each step feeds the next:
+
+1. **Record it.** Write `changelog/<version>.md` and bump `package.json` — the
+   one PR allowed to do either.
+2. **Enhance the Roadmap.** Update its status table, re-triage *Later trains*
+   and *Deferred* — this is the moment the big picture gets its periodic
+   revision, with the just-shipped train as evidence.
+3. **Reset this board.** New train header and milestones drawn from the
+   Roadmap; surviving decision-log entries move into the design docs they
+   affected; the old table is deleted (the changelog now holds that record).
+4. **Roll the GitHub milestone.** Close the shipped version's milestone,
+   create the next one, re-target any issues that carried over.
 
 ---
 

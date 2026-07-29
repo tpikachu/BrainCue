@@ -6,8 +6,43 @@ screen-share-invisible overlay. That shape creates a few unusual rules — most 
 this document is those rules, because they're the ones that aren't obvious from
 reading the code.
 
-New here? [`docs/README.md`](docs/README.md) is the map, and
-[`docs/00-VISION.md`](docs/00-VISION.md) explains what we're building and why.
+## Read this first
+
+In order — each answers a question the previous one raises, and together they
+take about twenty minutes:
+
+1. [`docs/00-VISION.md`](docs/00-VISION.md) — what we're building and why.
+2. [`docs/10-ROADMAP.md`](docs/10-ROADMAP.md) — the big picture: release
+   trains, milestones, and what is deliberately deferred.
+3. [`docs/BOARD.md`](docs/BOARD.md) — **the shared board**: which release is
+   being built *right now*, milestone by milestone. Check it before proposing
+   or picking up work, so you don't build what's already in flight.
+4. [`docs/README.md`](docs/README.md) — the map of the design docs. The "How
+   v2 works" section is essential before touching any shared path.
+
+## Where work comes from
+
+Three layers, one direction of flow:
+
+- **Roadmap** — the big picture. Enhanced at release boundaries; changing it
+  is a proposal, not a PR.
+- **Board** — the current train. Every in-flight milestone has a row; a PR
+  that starts, finishes, or drops one updates its row **in the same PR**.
+- **Changelog** — the record, written only when a release ships.
+
+**To propose a feature or enhancement:** open a
+[feature request issue](https://github.com/tpikachu/BrainCue/issues/new/choose)
+*before writing code*. Say which roadmap milestone your idea serves — or make
+the case for changing the roadmap; "neither" is usually a sign it belongs in
+*Deferred*. A maintainer triages it: accepted proposals get the `accepted`
+label, a version milestone, and (if scheduled for the current train) a board
+row. Then it's ready to build against.
+
+**Labels and milestones:** `kind:*` says what an issue *is* (bug, feature);
+`triage` → `accepted` / `blocked` say where it stands; `bounty:*` and `eval:*`
+belong to the GitTensor pipeline below — don't set them yourself. Version
+targeting uses GitHub **milestones** (v2.2.0, …), which close when the train
+ships. There are no priority labels: the board's ordering is the priority.
 
 ## Getting set up
 
