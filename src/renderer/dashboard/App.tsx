@@ -76,12 +76,15 @@ const APP_NAV = [
   ...(DEV ? [{ to: '/dev', label: 'DB Explorer', Icon: DatabaseIcon, tour: 'nav-dev' }] : []),
 ];
 
-// Pages launched from Home's mode/tool cards. They have no sidebar entry of
-// their own, so while one is open the Home nav item stays highlighted and a
+// Pages launched from Home's activity/tool cards. They have no sidebar entry
+// of their own, so while one is open the Home nav item stays highlighted and a
 // breadcrumb bar provides the way back — a card-launched page reads as "inside
 // Home", not orphaned.
+//
+// Named for the activity, not the engine mode behind it: "Interview Copilot"
+// was a product name from when the app WAS one.
 const HOME_LAUNCHED: Record<string, string> = {
-  '/interview': 'Interview Copilot',
+  '/interview': 'Interview',
   '/mock': 'Practice · Mock interview',
   '/sparring': 'Practice · Sparring drill',
   ...(FLAGS.jobSearch ? { '/tailor': 'Tailor Resume' } : {}),

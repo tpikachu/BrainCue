@@ -234,7 +234,7 @@ Channel constants live in `EVENTS` (`src/shared/ipc.ts`); payload types are in
 | `contribution:done` | `{ contributionId }` | overlay (stream finished — completed or aborted) |
 | `contribution:reset` | `{ contributionId }` | overlay (regenerate: clear that card's body, keep the card) |
 
-Memory additions (Prompt 8): `memory:list` / `memory:review` (approve with
+Memory additions: `memory:list` / `memory:review` (approve with
 optional edits, or reject) / `memory:update` / `memory:archive` /
 `memory:delete` (removes the row AND its embedding) /
 `memory:set-pack-enabled` (per-Space opt-out); `settings:set` accepts
@@ -242,7 +242,7 @@ optional edits, or reject) / `memory:update` / `memory:archive` /
 ride the `session:context` / `contribution:patch` payloads as a separate
 `memories` array so "data sent" always shows every memory used.
 
-Meeting Copilot additions (Prompt 7): `session:start` accepts `presence`
+Meeting Copilot additions: `session:start` accepts `presence`
 (summoned|quiet|balanced|active) for ambient modes; `session:meeting-report`
 returns `{ contributionId, report: MeetingReport }` (get-or-generate);
 `contributions:update` edits a persisted contribution's
@@ -250,7 +250,7 @@ title/body/meta/status (the meeting report's action items / open questions
 stay editable). Ambient meeting cards broadcast ONLY the generic
 `contribution:*` events — no legacy `answer-*` twins.
 
-Voice/summon additions (Prompt 9): request channels `voice:summon` (the
+Voice/summon additions: request channels `voice:summon` (the
 push-to-talk press — state-dependent: idle→listen, listening→send,
 speaking→interrupt), `voice:commit`, `voice:cancel`, `voice:interrupt`,
 `voice:playback-done` (`{ generation }`), `voice:get-prefs` /
@@ -273,7 +273,7 @@ disagree. Sessions started without an activity (mock and sparring rehearsals)
 fall back to the interview pipeline. The `session:save-prompt` broadcast carries
 `activity` alongside `mode` so the prompt names the thing that ended.
 
-Companion additions (Prompt 10): `session:start` gains `companionPresence`
+Companion additions: `session:start` gains `companionPresence`
 (off|on_demand|assistive|proactive — the InterjectionPolicy posture; the
 engine-level `presence` is its coarse projection) and `budgetCents`
 (hard session budget, null = no cap; absent = the companion-prefs default).

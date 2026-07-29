@@ -8,7 +8,7 @@ export interface TourStep {
   body: string;
 }
 
-/** First-run walkthrough. Steps spotlight sidebar entries or Home's mode cards
+/** First-run walkthrough. Steps spotlight sidebar entries or Home's activity cards
  *  by `data-tour`; when a target isn't on-screen (e.g. replaying the tour from
  *  Settings), that step gracefully falls back to a centered card. */
 export const TOUR_STEPS: TourStep[] = [
@@ -29,7 +29,7 @@ export const TOUR_STEPS: TourStep[] = [
   {
     target: 'nav-library',
     title: '3 · Build the Library',
-    body: 'The Library holds what BrainCue should know about the active profile: its Spaces — one per context, like a meeting with its agenda or a job with its JD — its documents, and its Memory. Everything is parsed and indexed locally, so contributions are grounded in YOUR real world instead of invented.',
+    body: 'The Library holds what BrainCue should know about the active profile: its Spaces and its documents. A Space is one recurring context — a standup with its agenda, a role with its JD — and it is also where a conversation is KEPT: everything you choose to remember is filed into one, so the tenth standup starts where the ninth ended. Everything is parsed and indexed locally.',
   },
   {
     target: 'nav-home',
@@ -42,23 +42,23 @@ export const TOUR_STEPS: TourStep[] = [
     body: 'Start listening for a live session · Talk to BrainCue to ask by voice · Share screen to capture a region and solve it · Add context to create a Space. Nothing captures anything until you explicitly start it.',
   },
   {
-    target: 'mode-interview',
-    title: 'Interview Copilot',
+    target: 'activity-interview',
+    title: 'Interview',
     body: 'You’re the candidate. BrainCue hears the interviewer’s questions and streams grounded answer cues into the Cue Card — with the format (key points, explanation, STAR story) switchable live, mid-answer.',
   },
   {
-    target: 'mode-practice',
+    target: 'activity-practice',
     title: 'Practice',
     body: 'Rehearse out loud before the real thing: a mock interviewer asks questions with a voice, or a sparring drill coaches every spoken answer. The safest way to see BrainCue work.',
   },
   {
-    target: 'mode-meeting',
-    title: 'Meeting Copilot · Labs',
+    target: 'activity-meeting',
+    title: 'Meetings & calls · Labs',
     body: 'Sits in quietly and surfaces context, open questions, action items, and decisions — only when it’s confident. A Presence dial (summoned → quiet → balanced → active) sets explicit thresholds, so “how much it talks” is a number you choose, not a vibe.',
   },
   {
-    target: 'mode-companion',
-    title: 'Companion · Labs',
+    target: 'activity-companion',
+    title: 'Games & solo work · Labs',
     body: 'An ambient presence while you work: it remembers what you saved, flags tasks, and offers context — through deterministic gates you control. Set a posture (Off is a hard mute), quiet hours, and a hard per-session spend cap. Silence and small talk never cost a model call.',
   },
   {
@@ -72,7 +72,7 @@ export const TOUR_STEPS: TourStep[] = [
   {
     target: 'nav-memory',
     title: 'Memory — off until you say so',
-    body: 'BrainCue can remember things across sessions, but nothing is remembered silently: memories are proposed after a session and only the ones you approve here are ever recalled. Each belongs to a Space or to you generally, so you can see exactly what each context knows — and correct or forget any of them, right from the card that used it.',
+    body: 'Two different things get kept, and this page holds both switches. A SUMMARY of each conversation — what it was about, what was decided, who committed to what — is filed into its Space, so the next conversation there starts where the last one ended; that is on by default. LONG-TERM MEMORY is standing claims about YOU (“keeps updates under a minute”), and it is off until you turn it on: memories are only ever proposed, and only the ones you approve here are recalled. Both need a Space — a conversation with none is not kept at all.',
   },
   {
     target: 'nav-sessions',
@@ -82,7 +82,7 @@ export const TOUR_STEPS: TourStep[] = [
   {
     target: 'nav-settings',
     title: 'Stay invisible — and in control',
-    body: 'Privacy Mode (Ctrl+Shift+H) hides every window from screen capture; you can also hide the app from the taskbar. Settings → Danger zone resets settings or wipes all local data. More modes — Interviewer Assist and Tutor — are on the way; Home’s Labs strip shows what’s coming.',
+    body: 'Privacy Mode (Ctrl+Shift+H) hides every window from screen capture; you can also hide the app from the taskbar. Settings → Danger zone resets settings or wipes all local data. More to come — interviewing someone, and guided tutoring; Home’s Labs strip shows what’s next.',
   },
   {
     title: 'You’re set 🚀',

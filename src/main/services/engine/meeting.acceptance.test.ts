@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { EVENTS } from '@shared/ipc';
 
 /**
- * Meeting Copilot ACCEPTANCE suite (Prompt 7) — a deterministic transcript
+ * Meeting Copilot ACCEPTANCE suite — a deterministic transcript
  * fixture through the REAL engine (sql.js db, real persistence, real trigger
  * policy), with the providers scripted. Pins the mode's contract:
  *  - greetings/small talk: silence, and the classifier is never even called

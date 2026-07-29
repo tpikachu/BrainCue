@@ -7,7 +7,7 @@ layout: null
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>BrainCue — the AI that's in the room with you</title>
-<meta name="description" content="A local-first desktop companion that hears the conversation you're actually in — interview, meeting, or your working day — and contributes through a floating, screen-share-invisible Cue Card, or its own voice." />
+<meta name="description" content="A local-first desktop companion that hears the conversation you're actually in — a standup, a client call, an interview — contributes through a floating, screen-share-invisible Cue Card, and remembers each conversation in the Space it happened in." />
 <link rel="canonical" href="https://tpikachu.github.io/BrainCue/" />
 <meta property="og:title" content="BrainCue — the AI that's in the room with you" />
 <meta property="og:description" content="Local-first. Screen-share-invisible. Bring your own AI key." />
@@ -266,7 +266,8 @@ layout: null
     <span class="spacer"></span>
     <a class="navlink" href="#demo">Demo</a>
     <a class="navlink" href="#how">How it works</a>
-    <a class="navlink" href="#modes">Modes</a>
+    <a class="navlink" href="#activities">Activities</a>
+    <a class="navlink" href="#memory">Memory</a>
     <a class="navlink" href="#docs">Docs</a>
     <a class="navlink" href="#contribute">Contribute</a>
     <a class="ghost" href="https://github.com/tpikachu/BrainCue">GitHub ↗</a>
@@ -300,9 +301,10 @@ layout: null
 
     <h1>The AI that's <span class="it">in the room</span> with you</h1>
     <p class="lede">
-      BrainCue hears the conversation you're actually in — an interview, a meeting,
-      or just your working day — and contributes through a floating,
-      <b>screen-share-invisible</b> Cue Card, or its own voice.
+      BrainCue hears the conversation you're actually in — a standup, a client
+      call, an interview — contributes through a floating,
+      <b>screen-share-invisible</b> Cue Card, and files what mattered back into
+      the Space it happened in, so the next one starts where the last ended.
     </p>
     <div class="cta">
       <a class="btn primary" href="https://github.com/tpikachu/BrainCue/releases">Download</a>
@@ -315,9 +317,16 @@ layout: null
       <span role="listitem">MIT · open source</span>
     </div>
   </div>
+  <!-- NOTE: docs/images/*.png and docs/media/*.gif were captured from v1.5.3 and
+       are STALE — they show the old mode-first dashboard (a "MODES" heading,
+       "Interview Copilot" cards, no profile switcher, no Memory nav). Refresh
+       them from the real app before the next release:
+         E2E_CAPTURE=1 npx playwright test e2e/screenshots.capture.spec.ts
+         E2E_CAPTURE=1 npx playwright test e2e/media.capture.spec.ts
+       See e2e/README.md § Capturing marketing media. -->
   <div class="stage">
     <img class="primary-shot" src="images/home.png" width="940" fetchpriority="high"
-         alt="The BrainCue dashboard: primary actions, a capture-status row, and the mode cards." />
+         alt="The BrainCue dashboard: primary actions, a capture-status row, and cards for what it can sit in on." />
     <img class="float-shot" src="images/cue-card.png" loading="lazy"
          alt="The floating Cue Card with a completed, cited answer." />
   </div>
@@ -379,7 +388,7 @@ layout: null
     <p class="eyebrow r"><span class="no">02</span> How it works</p>
     <h2 class="r">One pipeline, <em class="flair">four moves</em></h2>
     <p class="lede r" style="margin-bottom:38px">
-      Everything BrainCue does is the same engine cycle. Modes just tune the
+      Everything BrainCue does is the same engine cycle. The activity you pick tunes the
       thresholds — how eager it is, what it grounds in, and where the answer goes.
     </p>
     <div class="steps r">
@@ -407,55 +416,108 @@ layout: null
   </div>
 </section>
 
-<!-- ── MODES ────────────────────────────────────────────────── -->
-<section id="modes">
+<!-- ── ACTIVITIES ───────────────────────────────────────────── -->
+<section id="activities">
   <div class="wrap">
-    <p class="eyebrow r"><span class="no">03</span> One engine, many modes</p>
-    <h2 class="r">Modes are presets, <em class="flair">not separate products</em></h2>
+    <p class="eyebrow r"><span class="no">03</span> One start flow</p>
+    <h2 class="r">You say what the call is. <em class="flair">Never which mode to run.</em></h2>
     <p class="lede r" style="margin-bottom:36px">
-      Each mode is a configuration over the same engine — so what it learns in
-      one, it keeps in all.
+      One question opens every session — <i>what&rsquo;s this call?</i> Everything
+      else follows from the answer: what it listens to, when it speaks up, how it
+      frames you, and what shape its summary takes afterwards.
     </p>
 
     <div class="grid r">
       <div class="card">
-        <h3>Interview Copilot <span class="badge b-ship">Shipped</span></h3>
-        <p class="who">You're the candidate</p>
-        <p>Detects the interviewer's questions and streams grounded answer cues into the Cue Card — retellable live as key points, an explanation, or a STAR story.</p>
-      </div>
-      <div class="card">
-        <h3>Practice <span class="badge b-ship">Shipped</span></h3>
-        <p class="who">You're rehearsing</p>
-        <p>A mock interviewer asks out loud with a real voice, or a sparring drill coaches every spoken answer — then reports on how you did.</p>
-      </div>
-      <div class="card">
-        <h3>Meeting Copilot <span class="badge b-labs">Labs</span></h3>
-        <p class="who">You're a participant</p>
+        <h3>Meeting or call <span class="badge b-labs">Labs</span></h3>
+        <p class="who">A standup, a client call, a sync</p>
         <p>Sits in quietly and surfaces context, unanswered questions, action items, and decisions — only above a confidence threshold you set.</p>
       </div>
       <div class="card">
-        <h3>Companion <span class="badge b-labs">Labs</span></h3>
-        <p class="who">You're working or thinking</p>
-        <p>An ambient presence with memory: flags tasks, offers context, recalls what you saved — behind deterministic gates, quiet hours, and a hard spend cap.</p>
+        <h3>Project discussion <span class="badge b-labs">Labs</span></h3>
+        <p class="who">Work you talk about often</p>
+        <p>Recalls what was decided in earlier conversations about it, what is still open, and what just got committed to.</p>
       </div>
-      <div class="card dim">
-        <h3>Interviewer Assist <span class="badge b-soon">Coming soon</span></h3>
-        <p class="who">You're the one asking</p>
-        <p>Suggests questions and follow-ups, tracks competency coverage as the interview runs, and drafts the evaluation afterwards.</p>
+      <div class="card">
+        <h3>Interview <span class="badge b-ship">Shipped</span></h3>
+        <p class="who">You&rsquo;re the candidate</p>
+        <p>Detects each question and streams a grounded answer cue into the Cue Card — retellable live as key points, an explanation, or a STAR story.</p>
       </div>
-      <div class="card dim">
-        <h3>Tutor <span class="badge b-soon">Coming soon</span></h3>
-        <p class="who">You're learning something</p>
-        <p>Voice dialogue and drills grounded in whatever material you give it — notes, a textbook chapter, a spec.</p>
+      <div class="card">
+        <h3>Study or tutoring <span class="badge b-labs">Labs</span></h3>
+        <p class="who">You&rsquo;re learning something</p>
+        <p>Pulls up the part of your own material that bears on what was just said. Full voice dialogue and drills are still to come.</p>
+      </div>
+      <div class="card">
+        <h3>Personal <span class="badge b-labs">Labs</span></h3>
+        <p class="who">A landlord, a bank, a doctor</p>
+        <p>Keeps the background straight across a long-running thing in your life, and catches what you agreed to.</p>
+      </div>
+      <div class="card">
+        <h3>Game &middot; Just me <span class="badge b-labs">Labs</span></h3>
+        <p class="who">Playing, or thinking out loud</p>
+        <p>An ambient presence that stays out of the way — behind deterministic gates, quiet hours, and a hard spend cap.</p>
       </div>
     </div>
+
+    <p class="lede r" style="margin-top:34px">
+      Underneath, these run three engine modes over one pipeline. The mode is
+      <b>derived, never chosen</b> — picking a mode <i>and</i> a category was the
+      same question asked twice, and the two answers could disagree.
+      <a href="18-ACTIVITIES.html">How that works &rarr;</a>
+    </p>
   </div>
 </section>
 
-<!-- ── WHY ──────────────────────────────────────────────────── -->
+<!-- ── MEMORY ───────────────────────────────────────────────── -->
+<section id="memory">
+  <div class="wrap">
+    <p class="eyebrow r"><span class="no">04</span> Continuity</p>
+    <h2 class="r">The tenth standup knows about <em class="flair">the previous nine</em></h2>
+    <p class="lede r" style="margin-bottom:36px">
+      A <b>Space</b> is one recurring context — <i>Tuesday standup</i>,
+      <i>Senior engineer &middot; Acme</i>, <i>House move</i> — holding the
+      documents that ground it. It is also where a conversation is kept. When a
+      session ends you choose whether to keep it, and where. With no Space,
+      nothing is summarised and nothing is remembered: it helped live, and leaves
+      only its transcript.
+    </p>
+
+    <div class="grid r" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+      <div class="card">
+        <h3>Session summary <span class="badge b-ship">On by default</span></h3>
+        <p class="who">What that conversation <i>was</i></p>
+        <p>
+          &ldquo;Phase two is blocked on renewal pricing. Priya is chasing legal.&rdquo;
+          Written in a shape that fits the activity — a meeting leaves decisions and
+          action items; an interview leaves what they asked and what you claimed.
+          Filed into its Space, retrievable by the next conversation there, and
+          deleted with its session.
+        </p>
+      </div>
+      <div class="card">
+        <h3>Long-term memory <span class="badge b-soon">Off until you allow it</span></h3>
+        <p class="who">What is true about <i>you</i></p>
+        <p>
+          &ldquo;Never commits to dates in standup.&rdquo; A standing claim about a
+          person — and a wrong one would be repeated forever, so nothing is ever
+          remembered silently. Memories are <b>proposed</b> after a session and only
+          the ones you approve are ever recalled. Editable and deletable, one at a time.
+        </p>
+      </div>
+    </div>
+
+    <p class="lede r" style="margin-top:34px">
+      Two promises, two defaults, two switches. Turning memory off means unused,
+      not deleted — re-enable it and what you approved comes back intact.
+      <a href="16-CONTINUITY.html">The full contract &rarr;</a>
+    </p>
+  </div>
+</section>
+
 <section id="why">
   <div class="wrap">
-    <p class="eyebrow r"><span class="no">04</span> Why BrainCue</p>
+    <p class="eyebrow r"><span class="no">05</span> Why BrainCue</p>
     <h2 class="r">Things a cloud assistant <em class="flair">structurally can't do</em></h2>
     <div class="feat r" style="margin-top:34px">
       <div>
@@ -494,7 +556,7 @@ layout: null
 <!-- ── A LOOK INSIDE ────────────────────────────────────────── -->
 <section id="tour">
   <div class="wrap">
-    <p class="eyebrow r"><span class="no">05</span> A look inside</p>
+    <p class="eyebrow r"><span class="no">06</span> A look inside</p>
     <h2 class="r">The whole app, <em class="flair">not just the highlight reel</em></h2>
     <div class="gallery r" style="margin-top:34px">
       <figure>
@@ -528,7 +590,7 @@ layout: null
 <!-- ── DOCS ─────────────────────────────────────────────────── -->
 <section id="docs">
   <div class="wrap">
-    <p class="eyebrow r"><span class="no">06</span> Documentation</p>
+    <p class="eyebrow r"><span class="no">07</span> Documentation</p>
     <h2 class="r">Built <em class="flair">docs-first</em></h2>
     <p class="lede r" style="margin-bottom:36px">
       The design documents below are the source of truth the implementation
@@ -539,9 +601,18 @@ layout: null
       <div class="docs-col card">
         <h3>Start here</h3>
         <ul>
-          <li><a href="00-VISION.html">Vision</a><small>The north star: ambient companion, mode catalog, principles</small></li>
+          <li><a href="00-VISION.html">Vision</a><small>The north star: ambient companion, and the product principles</small></li>
           <li><a href="01-PRD.html">Product spec</a><small>Domain model, the engine, per-mode requirements</small></li>
           <li><a href="10-ROADMAP.html">Roadmap</a><small>Phases, release trains, and the development rules</small></li>
+        </ul>
+      </div>
+      <div class="docs-col card">
+        <h3>How v2 works</h3>
+        <ul>
+          <li><a href="18-ACTIVITIES.html">Activities</a><small>The one thing the user picks, and why the mode picker went</small></li>
+          <li><a href="17-SPACES-AND-PROFILE.html">Spaces &amp; profile</a><small>What a Space is and what it holds</small></li>
+          <li><a href="19-ACTIVE-PROFILE.html">Active profile</a><small>One profile at a time, scoping the whole dashboard</small></li>
+          <li><a href="16-CONTINUITY.html">Continuity</a><small>Session summaries, long-term memory, and the difference</small></li>
         </ul>
       </div>
       <div class="docs-col card">
@@ -550,7 +621,7 @@ layout: null
           <li><a href="02-ARCHITECTURE.html">Architecture</a><small>Processes, data flow, module boundaries</small></li>
           <li><a href="12-ENGINE-PLAN.html">Engine plan</a><small>The six-stage pipeline every mode configures</small></li>
           <li><a href="03-WINDOWS.html">Windows</a><small>Main, renderer, and the capture-excluded overlay</small></li>
-          <li><a href="11-UX-NAVIGATION.html">UX &amp; navigation</a><small>The mode-first layout</small></li>
+          <li><a href="11-UX-NAVIGATION.html">UX &amp; navigation</a><small>Home as launcher, the one start flow, the nav split</small></li>
         </ul>
       </div>
       <div class="docs-col card">
@@ -579,7 +650,7 @@ layout: null
 <!-- ── CONTRIBUTE ───────────────────────────────────────────── -->
 <section id="contribute">
   <div class="wrap">
-    <p class="eyebrow r"><span class="no">07</span> Built in the open</p>
+    <p class="eyebrow r"><span class="no">08</span> Built in the open</p>
     <h2 class="r">Every PR gets <em class="flair">a scorecard</em>, not a shrug</h2>
     <p class="lede r" style="margin-bottom:36px">
       BrainCue runs a published, automated evaluation pipeline on every pull
@@ -610,7 +681,7 @@ layout: null
 <!-- ── DOWNLOAD ─────────────────────────────────────────────── -->
 <section id="download">
   <div class="wrap">
-    <p class="eyebrow r"><span class="no">08</span> Get it</p>
+    <p class="eyebrow r"><span class="no">09</span> Get it</p>
     <h2 class="r">Download</h2>
     <p class="lede r">
       Grab the latest installer from the releases page. Builds are currently

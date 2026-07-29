@@ -79,11 +79,11 @@ AI_Inter/
 │  │  │  │  ├─ persona.ts       # the ONE companion-personality prompt source
 │  │  │  │  ├─ modes/           # interview.mode.ts  meeting.mode.ts  companion.mode.ts
 │  │  │  │  ├─ trigger/         # reactiveQuestion  summoned  meetingHeuristics  salience  ambientPolicy  presence
-│  │  │  │  │                   # + companion (Prompt 10): interjectionPolicy  companionSalience  companionPresence
+│  │  │  │  │                   # + companion: interjectionPolicy  companionSalience  companionPresence
 │  │  │  │  ├─ companion/       # costMeter.ts (visible estimate + budget gates)
 │  │  │  │  └─ persistence/enginePersistence.ts
-│  │  │  ├─ memory/             # local memory (Prompt 8): extractor  memoryService  recall  sensitiveFilter
-│  │  │  ├─ voice/              # voice/summon layer (Prompt 9)
+│  │  │  ├─ memory/             # local memory: extractor  memoryService  recall  sensitiveFilter
+│  │  │  ├─ voice/              # voice/summon layer
 │  │  │  │  ├─ dialogueController.ts  # explicit FSM: idle/listening/thinking/speaking/interrupted/paused/error
 │  │  │  │  ├─ voiceService.ts        # orchestrator: PTT buffer, STT, routing, sentence-chunked TTS
 │  │  │  │  ├─ quickAnswer.ts         # no-session quick ask (spoken-style persona)

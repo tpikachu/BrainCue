@@ -34,8 +34,11 @@ const firstName = (name: string): string => name.trim().split(/\s+/)[0] || name;
  *  disabled cards. Primary actions up top, an honest permission/status row,
  *  recent activity, and the activity cards as secondary presets — each opens
  *  the one start flow with that activity preselected (docs/18-ACTIVITIES.md).
- *  Planned modes are flag-gated into a compact Labs strip — never dead-looking
- *  cards. */
+ *  What is not built yet is flag-gated into a compact Labs strip — never
+ *  dead-looking cards.
+ *
+ *  Everything here is scoped to the ACTIVE profile
+ *  (docs/19-ACTIVE-PROFILE.md), greeting included. */
 export default function HomePage() {
   const navigate = useNavigate();
   const { settings } = useSettingsStore();
@@ -47,12 +50,20 @@ export default function HomePage() {
   const [micState, setMicState] = useState<'granted' | 'prompt' | 'denied' | 'unknown'>('unknown');
   const [activeSpace, setActiveSpace] = useState<string | null>(null);
 
+  // Scoped to the active profile like every other profile surface
+  // (docs/19-ACTIVE-PROFILE.md). This was the last unscoped read in the
+  // dashboard: Home greets you by name and then listed someone else's calls
+  // underneath it.
   useEffect(() => {
+    if (!profile) {
+      setRecent([]);
+      return;
+    }
     void api.session
-      .list()
+      .list(profile.id)
       .then((all) => setRecent((all as SessionListItem[]).slice(0, 4)))
       .catch(() => setRecent([]));
-  }, [session]);
+  }, [session, profile]);
 
   // Best-effort mic permission state (Chromium supports querying 'microphone').
   useEffect(() => {
@@ -80,11 +91,14 @@ export default function HomePage() {
       .catch(() => setActiveSpace(null));
   }, [session]);
 
+  // Named for what you would DO, not for the engine mode behind it — the same
+  // vocabulary as the activity picker, so the roadmap and the product read as
+  // one list rather than two.
   const labs = [
-    { label: 'Interviewer Assist', on: FLAGS.interviewerAssist, Icon: ClipboardCheckIcon },
-    { label: 'Meeting Copilot', on: FLAGS.meeting, Icon: UsersIcon },
-    { label: 'Tutor', on: FLAGS.tutor, Icon: GraduationCapIcon },
-    { label: 'Companion', on: FLAGS.companion, Icon: SparklesIcon },
+    { label: 'Interviewing someone', on: FLAGS.interviewerAssist, Icon: ClipboardCheckIcon },
+    { label: 'Meetings & calls', on: FLAGS.meeting, Icon: UsersIcon },
+    { label: 'Guided tutoring', on: FLAGS.tutor, Icon: GraduationCapIcon },
+    { label: 'Games & solo work', on: FLAGS.companion, Icon: SparklesIcon },
     { label: 'Talk to BrainCue', on: FLAGS.voice, Icon: MicIcon },
   ].filter((l) => !l.on); // shipped ones graduate to real cards/actions below
 
@@ -107,11 +121,12 @@ export default function HomePage() {
                 <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-400" />
               </span>
               <span className="text-sm font-medium text-green-200">
+                {/* What the user SAID it was. v1 rows carry no activity, and
+                    the engine mode is not a name anyone chose — so they fall
+                    back to the neutral sentence rather than to a mode name. */}
                 {session.activity
                   ? `${activityConfig(session.activity).label} is live`
-                  : session.mode === 'meeting'
-                    ? 'Meeting Copilot is live'
-                    : 'Companion is live'}
+                  : 'A session is live'}
               </span>
             </span>
             <span className="text-sm text-green-300">Cards stream to the Cue Card</span>
@@ -139,7 +154,7 @@ export default function HomePage() {
         >
           <span className="flex items-center gap-3 text-sm text-amber-200">
             <SettingsIcon className="h-4 w-4" />
-            Add your OpenAI API key to unlock every mode.
+            Add your OpenAI API key — nothing can listen or answer without it.
           </span>
           <span className="text-sm text-amber-300">Open Settings →</span>
         </Link>
@@ -263,12 +278,12 @@ export default function HomePage() {
       </h3>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {FLAGS.meeting && (
-          <ModeCard
+          <ActivityCard
             Icon={UsersIcon}
             title={ACTIVITIES.meeting.label}
             desc="Sits in quietly and surfaces context, open questions, action items, and decisions — only when confident. Remembers each call, so the next one starts where this one ended."
             labs
-            tour="mode-meeting"
+            tour="activity-meeting"
             onClick={() => {
               setStartActivity('meeting');
               setStartOpen(true);
@@ -276,40 +291,40 @@ export default function HomePage() {
           />
         )}
         {FLAGS.companion && (
-          <ModeCard
+          <ActivityCard
             Icon={SparklesIcon}
             title={`${ACTIVITIES.solo.label} · ${ACTIVITIES.game.label}`}
             desc="An ambient presence while you work or play: remembers what you saved, flags tasks, offers context — only through deterministic gates you control."
             labs
-            tour="mode-companion"
+            tour="activity-companion"
             onClick={() => {
               setStartActivity('solo');
               setStartOpen(true);
             }}
           />
         )}
-        <ModeCard
+        <ActivityCard
           Icon={MicIcon}
           title={ACTIVITIES.job.label}
           desc="You're the candidate. BrainCue hears the questions and streams grounded answer cues into the Cue Card."
-          tour="mode-interview"
+          tour="activity-interview"
           onClick={() => {
             setStartActivity('job');
             setStartOpen(true);
           }}
         />
-        <ModeCard
+        <ActivityCard
           Icon={MockIcon}
           title="Practice"
           desc="Rehearse out loud: an AI interviewer asks with a voice, and every answer gets coached."
-          tour="mode-practice"
+          tour="activity-practice"
         >
           <div className="mt-3 flex gap-2">
             <PracticeLink to="/mock" label="Mock interview" />
             <PracticeLink to="/sparring" label="Sparring drill" />
           </div>
-        </ModeCard>
-        <ModeCard
+        </ActivityCard>
+        <ActivityCard
           Icon={BoltIcon}
           title="Solve from screen"
           desc="Ctrl+Shift+S drag-selects a region; Ctrl+Shift+Enter solves what's on the clipboard — anytime, into the Cue Card."
@@ -394,7 +409,7 @@ function StatusChip({
   );
 }
 
-function ModeCard({
+function ActivityCard({
   to,
   onClick,
   Icon,

@@ -5,10 +5,11 @@
 <h1 align="center">BrainCue</h1>
 
 <p align="center">
-  <strong>The AI that's in the room with you.</strong><br />
-  BrainCue hears the conversation you're actually in — an interview, a meeting,
-  a study session — and contributes through a floating,
-  <em>screen-share-invisible</em> Cue Card, or its own voice.<br />
+  <strong>The AI that's in the room with you — and remembers being there.</strong><br />
+  BrainCue hears the conversation you're actually in — a standup, a client call,
+  an interview, a study session — contributes through a floating,
+  <em>screen-share-invisible</em> Cue Card, and files what mattered back into the
+  Space it happened in, so the next one starts where the last one ended.<br />
   Local-first. Bring your own AI key.
 </p>
 
@@ -20,27 +21,63 @@
   <img alt="Built with Electron" src="https://img.shields.io/badge/Electron-React%20%C2%B7%20TypeScript-47848F?style=flat-square" />
 </p>
 
-## One engine, many modes
+## You pick an activity, not a mode
 
-BrainCue is one conversation engine — *listen → decide when to contribute →
-ground in your documents → respond via overlay or voice* — with modes as
-presets over it:
+There is one start flow for every conversation. You say **what the call is** —
+never which engine to run — and everything else follows from that: what it
+listens to, when it speaks up, how it frames you, and what shape its summary
+takes afterwards.
 
-| Mode | You are… | BrainCue… | Status |
-| --- | --- | --- | --- |
-| **Interview Copilot** | the candidate | detects questions, streams grounded answer cues | ✅ shipped |
-| **Practice** | rehearsing | plays interviewer with a voice, coaches every answer | ✅ shipped |
-| **Meeting Copilot** | a participant | quietly surfaces context, unanswered questions, action items | 🧪 Labs |
-| **Companion** | working / gaming | ambient presence with memory; knows when *not* to talk | 🧪 Labs |
-| **Interviewer Assist** | the one asking | suggests questions & follow-ups, tracks coverage, drafts the eval | 🔜 planned |
-| **Tutor** | learning something | voice dialogue + drills grounded in any material you give it | 🔜 planned |
+| Activity | You are… | BrainCue… |
+| --- | --- | --- |
+| **Meeting or call** | in a standup, a client call, a sync | sits in quietly; surfaces context, open questions, action items, decisions |
+| **Project discussion** | talking about ongoing work | recalls what was decided before, and what is still open |
+| **Interview** | the candidate | hears each question and streams a grounded answer cue, framed as you |
+| **Study or tutoring** | learning something | pulls up the part of your material that bears on what was just said |
+| **Personal** | dealing with a landlord, a bank, a doctor | keeps the background straight and catches what you agreed to |
+| **Game** · **Just me** | playing, or thinking out loud | an ambient presence that stays out of the way |
+| **Something else** | anything the list misses | contributes only when it is confident |
 
-The vision and full plan live in [docs/00-VISION.md](docs/00-VISION.md) and
+Underneath, these run three engine modes over **one** pipeline — *listen →
+decide whether to contribute → ground in your documents → respond*. The mode is
+derived, never chosen, because picking a mode *and* a category was the same
+question asked twice ([docs/18-ACTIVITIES.md](docs/18-ACTIVITIES.md)).
+Interviewing someone and guided tutoring are still to come; the vision and plan
+live in [docs/00-VISION.md](docs/00-VISION.md) and
 [docs/10-ROADMAP.md](docs/10-ROADMAP.md).
 
-## See it in action — Interview Copilot, the first mode
+## Spaces, and the two things it remembers
 
-<!-- Media below shows the interview mode; assets to be refreshed as new modes land. -->
+A **Space** is one recurring context — *Tuesday standup*, *Senior engineer ·
+Acme*, *House move* — holding the documents that ground it. It is also **where a
+conversation is kept**: when a session ends you choose whether to keep it, and
+in which Space. With no Space, nothing is summarised and nothing is remembered
+— the session helped live and leaves only its transcript.
+
+Two different things get kept, with two different defaults, because they make
+two very different promises:
+
+| | **Session summary** | **Long-term memory** |
+| --- | --- | --- |
+| Answers | "what happened in that call?" | "what should you always know about me?" |
+| Example | *"Phase two is blocked on renewal pricing. Priya is chasing legal."* | *"Never commits to dates in standup."* |
+| Default | **on** | **off** — until you turn it on |
+| Review | none | **every item, one at a time** |
+| Scope | its Space, always | its Space, or profile-wide |
+| Lifetime | deleted with its session | outlives it |
+
+A summary is a précis of a conversation you chose to run, from a transcript
+already on your disk. A memory is a *standing claim about a person* — and a
+wrong one is repeated forever, which is why nothing is ever remembered
+silently: memories are only ever **proposed**, and only the ones you approve are
+recalled. Details in [docs/16-CONTINUITY.md](docs/16-CONTINUITY.md).
+
+## See it in action
+
+<!-- Captured from the real app (see e2e/README.md#capturing-marketing-media).
+     The clips below are from the interview activity, which is the easiest one
+     to film end-to-end; the pipeline they show is the same one every activity
+     runs. -->
 
 <p align="center">
   <img src="docs/media/cuecard-stream.gif" width="360" alt="The floating Cue Card: the interviewer's question is transcribed live, then a grounded, cited answer streams in." />
@@ -96,8 +133,10 @@ The vision and full plan live in [docs/00-VISION.md](docs/00-VISION.md) and
   recording**: there for you, invisible to everyone else.
 - 🗣️ **A voice of its own** — push-to-talk from anywhere: ask by voice and hear
   the answer back, with barge-in when you talk over it.
-- 🧠 **Memory you approve** — it can remember across sessions, but nothing is
-  kept silently: memories are proposed, and only ones you approve are recalled.
+- 🧠 **Continuity you control** — each conversation you keep is summarised into
+  its Space, so the tenth standup is grounded in the previous nine. Long-term
+  memory is separate, off by default, and reviewed item by item: nothing is ever
+  remembered silently.
 - ⌨️ **Global hotkeys** — toggle the Cue Card, solve a copied problem, or
   drag-select a region of the screen to read and answer.
 - 🔒 **Local-first & private** — data lives in a local database; your API key is
@@ -162,12 +201,17 @@ implementation follows, not a write-up produced afterwards.
 📖 **[Read them as a site](https://tpikachu.github.io/BrainCue/)** ·
 📁 **[Browse them here](docs/)** ([index with descriptions](docs/README.md))
 
-Start with the [Vision](docs/00-VISION.md) (the north star and mode catalog),
-the [PRD](docs/01-PRD.md) (domain model and per-mode requirements), and the
-[Roadmap](docs/10-ROADMAP.md) (phases + the development rules). The
-[Engine plan](docs/12-ENGINE-PLAN.md) describes the six-stage pipeline every
-mode configures; [Architecture](docs/02-ARCHITECTURE.md),
-[Database](docs/04-DATABASE.md), [IPC map](docs/05-IPC-MAP.md), and
+Start with the [Vision](docs/00-VISION.md) (the north star), the
+[PRD](docs/01-PRD.md) (domain model and requirements), and the
+[Roadmap](docs/10-ROADMAP.md) (phases + the development rules). For how v2
+actually works: [Activities](docs/18-ACTIVITIES.md) (one list, no mode picker),
+[Spaces & profile](docs/17-SPACES-AND-PROFILE.md),
+[Active profile](docs/19-ACTIVE-PROFILE.md), and
+[Continuity](docs/16-CONTINUITY.md) (summaries, memory, and why a Space is where
+a conversation is kept). The [Engine plan](docs/12-ENGINE-PLAN.md) describes the
+six-stage pipeline every mode configures;
+[Architecture](docs/02-ARCHITECTURE.md), [Database](docs/04-DATABASE.md),
+[IPC map](docs/05-IPC-MAP.md), and
 [API key security](docs/07-API-KEY-SECURITY.md) cover the rest.
 
 ## Getting started
@@ -219,9 +263,15 @@ the pre-push gate (`typecheck` + `test` + `build`), the IPC contract, and the
 privacy/security invariants that must not regress.
 
 ## Project status
-Actively developed. The interview modes shipped end-to-end (v1.5.x): profiles,
-live sessions with grounded answers, the Cue Card, region/clipboard solve,
-practice with an AI voice, and coaching reports. The project is now widening
-into the **ambient companion** described in [docs/00-VISION.md](docs/00-VISION.md) —
-see [docs/10-ROADMAP.md](docs/10-ROADMAP.md) for what's next and the
-[changelog](changelog/) for what ships in each release.
+
+Actively developed, currently **v2.0.x**. The interview path shipped end-to-end
+in v1.5 (profiles, live grounded answers, the Cue Card, region/clipboard solve,
+practice with an AI voice, coaching reports) and is still fully supported — it
+just no longer defines the product. v2 made meetings and solo sessions the daily
+case: one activity picker instead of a mode picker, Spaces as the unit of
+context *and* of memory, per-activity summaries, a reviewed long-term memory,
+voice, and one active profile scoping the whole dashboard.
+
+Next up is interviewing someone and guided tutoring — see
+[docs/10-ROADMAP.md](docs/10-ROADMAP.md) for what's planned and the
+[changelog](changelog/) for what shipped in each release.

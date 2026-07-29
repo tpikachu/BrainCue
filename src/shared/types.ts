@@ -189,7 +189,7 @@ export type ContributionKind =
  *  (trigger/presence.ts) — never a vague slider feeding a prompt. */
 export type Presence = 'summoned' | 'quiet' | 'balanced' | 'active';
 
-// --- Local memory (v2 Prompt 8) ---------------------------------------------
+// --- Local memory ------------------------------------------------------------
 // Memory belongs to the user: candidates are extracted conservatively AFTER
 // consent, reviewed explicitly, and only approved items ever ground answers.
 
@@ -715,7 +715,7 @@ export interface ContributionResetEvent {
   contributionId: string;
 }
 
-// --- Voice / summon layer (v2, Prompt 9) ------------------------------------
+// --- Voice / summon layer ---------------------------------------------------
 // Voice is an OUTPUT SURFACE over the generic contribution pipeline, not a
 // mode: a summon transcribes the user's speech, routes it as a direct ask
 // (live session) or a quick ask (default Space), and the reply streams to the
@@ -758,7 +758,7 @@ export interface VoiceAudioEvent {
   last: boolean;
 }
 
-// --- Companion (v2, Prompt 10) ----------------------------------------------
+// --- Companion ---------------------------------------------------------------
 // Companion is an EXPLICITLY started session (no background listening before
 // consent). Its posture is a CompanionPresence — richer than the engine's
 // Presence dial because "off" (hard mute) and "on demand" (summon-only) are

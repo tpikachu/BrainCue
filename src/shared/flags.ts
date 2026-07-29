@@ -1,8 +1,11 @@
-/** Feature flags for modes/surfaces that are designed but not shipped.
- *  Planned things are GATED here rather than rendered as dead-looking cards —
- *  flipping a flag is the release switch when its prompt lands (Meeting in
- *  Prompt 7, Memory in 8, Voice in 9, Companion in 10). Shared so main-process
- *  mode registration can consult the same source of truth later. */
+/** Feature flags for modes/surfaces that are designed but not shipped, plus one
+ *  that is shipped and deliberately quarantined (`jobSearch`).
+ *
+ *  Planned things are GATED here rather than rendered as dead-looking cards, and
+ *  flipping a flag is the release switch. An activity whose mode is off is not
+ *  offered at all rather than downgraded into another mode — see
+ *  `activities.ts`, which reads these. Shared so main-process mode registration
+ *  can consult the same source of truth. */
 export const FLAGS = {
   /** Interviewer Assist mode (question suggestions, coverage tracking). */
   interviewerAssist: false,
@@ -12,15 +15,15 @@ export const FLAGS = {
   meeting: true,
   /** Tutor mode (voice dialogue + drills over your material). */
   tutor: false,
-  /** Companion mode (ambient presence with memory) — Prompt 10. Shipped
-   *  behind its scripted evaluation harness (companion.eval.test.ts: zero
+  /** Companion mode (ambient presence with memory). Shipped behind its
+   *  scripted evaluation harness (companion.eval.test.ts: zero
    *  low-confidence interruptions, dedupe-in-cooldown, provenance-correct
    *  recall, hard mute, teardown); surfaces with a Labs badge while it
    *  collects real-world hours. */
   companion: true,
-  /** Long-term memory (Library tab + status chip + engine recall). Shipped
-   *  with the review-first substrate (Prompt 8): consent is still OFF by
-   *  default per user — this flag only surfaces the UI. */
+  /** Long-term memory (its own nav section + status chip + engine recall).
+   *  Shipped with the review-first substrate: consent is still OFF by default
+   *  per user — this flag only surfaces the UI. */
   memory: true,
   /** "Talk to BrainCue" — the voice/summon layer: global push-to-talk, spoken
    *  replies with barge-in, no-session quick ask. Voice is an output surface

@@ -89,6 +89,28 @@ segments are concatenated. Still scenes hold a single frame for `holdSec`;
 the streaming scene plays at `fps` and freezes its last frame for
 `tailHoldSec` so the payoff stays readable.
 
+### The memory scenes
+
+Scenes `07-memory-review` and `08-memory-approved` show the continuity loop, and
+they run it for real rather than staging it:
+
+- `loadSamples()` seeds a finished, **unkept** conversation in the sample
+  standup Space (`src/main/services/samples/sampleData.ts`). It is left unkept
+  on purpose — keeping it is the user's decision, and watching that decision run
+  is the scene.
+- The spec then calls `session.remember(...)`, which archives the conversation
+  into its Space and extracts memory candidates through the real pipeline, and
+  screenshots the review queue *before* anything is approved.
+- It approves one via `memory.review(id, 'approve')` and screenshots again. That
+  pair of frames is the whole point: proposed → approved is the difference
+  between a suggestion and something that will be recalled.
+
+Memory is consent-gated **off** by default, which is correct and would leave the
+scene empty, so the spec turns it on explicitly first — the same switch a user
+flips on the Memory page. Both scenes are skipped (and dropped from the
+manifest) if extraction returns nothing, so a model that proposes zero
+candidates yields a shorter video rather than two blank frames.
+
 The spec writes numbered PNGs to `docs/media/frames/<clip>/` (scratch —
 gitignored); the script turns them into `docs/media/<clip>.gif` and
 `<clip>.mp4`. Only the built `.gif`/`.mp4` are committed.

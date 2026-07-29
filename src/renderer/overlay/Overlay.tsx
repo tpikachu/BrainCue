@@ -78,7 +78,7 @@ export default function Overlay() {
 
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // Voice/summon runtime (Prompt 9): dialogue state mirror, push-to-talk
+  // Voice/summon runtime: dialogue state mirror, push-to-talk
   // capture + VAD, and speech playback. Inert while the flag is off.
   const { voice, prefs: voicePrefs, level: voiceLevel, toggleMute, savePrefs } = useVoice(FLAGS.voice);
 

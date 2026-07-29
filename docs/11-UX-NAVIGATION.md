@@ -1,7 +1,21 @@
-# UX & Navigation — the mode-first layout
+# UX & Navigation
 
 > Status: design set 2026-07-21; implemented as roadmap milestone 1.3. Spec:
 > [01-PRD.md](./01-PRD.md) · Plan: [10-ROADMAP.md](./10-ROADMAP.md).
+>
+> **⚠ Two parts of this document are superseded — read this first.** The body
+> below is written *mode-first*, and it no longer describes the shipped app:
+>
+> 1. **There is no mode picker.** The user picks an **activity** ("What's this
+>    call?") and the engine derives the mode — [18-ACTIVITIES.md](./18-ACTIVITIES.md).
+>    Where this file says "mode card" or "mode launcher", read *activity*.
+> 2. **The profile is picked once, in the sidebar,** which splits the nav into a
+>    profile-scoped group and a global one —
+>    [19-ACTIVE-PROFILE.md](./19-ACTIVE-PROFILE.md).
+>
+> The full notices, with the reasoning, are at the end of this file. The
+> problem analysis and the section structure in §§1–3 still hold, which is why
+> the document is kept rather than rewritten.
 
 ## 1. The problem with the current layout
 

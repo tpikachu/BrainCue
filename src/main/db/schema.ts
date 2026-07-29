@@ -315,7 +315,7 @@ export const sessionReports = sqliteTable('session_reports', {
 // with a stable lifecycle. Interview answers DUAL-WRITE here alongside
 // ai_answers (which stays the parity source of truth) until the overlay and
 // reports consume contributions directly.
-// Local memory (v2 Prompt 8): ONE lifecycle table — a row is a
+// Local memory: ONE lifecycle table — a row is a
 // MemoryCandidate while status='pending' and a MemoryItem once 'approved'.
 // The embedding lives ON the row (with its identity), so deleting a memory
 // deletes its vector in the same statement — nothing orphaned, and memory

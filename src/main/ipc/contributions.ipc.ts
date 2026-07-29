@@ -4,8 +4,8 @@ import { handle } from './helpers';
 import { contributionsRepo } from '../db/repositories/contributions.repo';
 
 /** Review surface for persisted contributions: meeting reports' action items
- *  and open questions stay editable after the session (Prompt 7); the fuller
- *  review lifecycle (accept/dismiss flows) grows with Memory (Prompt 8). */
+ *  and open questions stay editable after the session; the fuller review
+ *  lifecycle (accept/dismiss flows) grows with Memory. */
 export function registerContributionsIpc(): void {
   handle(
     IPC.contributions.update,

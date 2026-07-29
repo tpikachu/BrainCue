@@ -258,19 +258,57 @@ test('@capture dashboard walkthrough (demo scenes + grounded gif)', async ({ das
     if (r[0]) await api.mock.end(r[0].id);
   });
 
+  // ── Scene 6 · Continuity: keep a conversation, review what it proposed ────
+  //
+  // The sample data seeds one finished, UNKEPT conversation in the standup
+  // Space (services/samples/sampleData.ts). Keeping it here runs the real
+  // pipeline — summarise into the Space, extract memory candidates — so these
+  // frames show actual output rather than a mocked-up screen.
+  //
+  // Memory is consent-gated OFF, which is the correct default and would make
+  // this scene empty; the capture turns it on explicitly, exactly as a user
+  // would on the Memory page before any of this can happen.
+  const kept = await dashboard.evaluate(async (pid) => {
+    const api = (window as any).api;
+    await api.settings.set({ memoryEnabled: true, sessionArchiveEnabled: true });
+    const sessions = await api.session.list(pid);
+    const sample = sessions.find((s: any) => s.jobTitle?.includes('standup') || s.jobCompany?.includes('Atlas'));
+    if (!sample) return null;
+    return api.session.remember(sample.id, sample.jobId ?? null);
+  }, profileId);
+  console.log(`demo/07-memory: kept the sample conversation → ${JSON.stringify(kept)}`);
+
+  if (kept && kept.memories > 0) {
+    // Proposed, not remembered — the review queue, before anything is approved.
+    await go('#/memory');
+    await dashboard.waitForTimeout(900);
+    await snap(dashboard, 'demo/07-memory-review');
+
+    // …and approved. One click is the whole difference between "suggested" and
+    // "will be recalled", so the pair of frames is the point of the scene.
+    await dashboard.evaluate(async (pid) => {
+      const api = (window as any).api;
+      const [first] = await api.memory.list(pid, { status: 'pending' });
+      if (first) await api.memory.review(first.id, 'approve');
+    }, profileId);
+    await go('#/home');
+    await go('#/memory'); // remount so the table refetches
+    await dashboard.waitForTimeout(900);
+    await snap(dashboard, 'demo/08-memory-approved');
+  }
+
   // ── Scene 7 · Settings (the trust story: local key, privacy, providers) ───
   await go('#/settings');
   await dashboard.waitForTimeout(600);
-  await snap(dashboard, 'demo/08-settings');
+  await snap(dashboard, 'demo/09-settings');
 
   // ── Scene 8 · Outro: back on the launcher ─────────────────────────────────
-  // (Two scenes are deliberately absent: Sessions — a mock session never
-  // persists, so it would show an empty table and read as broken — and the
-  // mock workspace mid-run, which renders its start form rather than a live
-  // view when the session was started via IPC.)
+  // (One scene is deliberately absent: the mock workspace mid-run, which
+  // renders its start form rather than a live view when the session was
+  // started via IPC.)
   await go('#/home');
   await dashboard.waitForTimeout(600);
-  await snap(dashboard, 'demo/09-outro');
+  await snap(dashboard, 'demo/10-outro');
 
   // The manifest is the assembly contract for build-media.mjs --manifest.
   // Scenes whose capture was skipped (see 07-session) must not be listed —
@@ -285,13 +323,15 @@ test('@capture dashboard walkthrough (demo scenes + grounded gif)', async ({ das
         height: 800,
         scenes: [
           { dir: '01-home', holdSec: 3.2, caption: 'BrainCue - the AI that is in the room with you' },
-          { dir: '02-start', holdSec: 4.5, caption: 'One start flow for every mode - see exactly what will be captured, before anything starts' },
-          { dir: '03-library-spaces', holdSec: 3, caption: 'Spaces collect what you know - profiles, jobs, research' },
+          { dir: '02-start', holdSec: 4.5, caption: 'Say what the call is - then see exactly what will be captured, before anything starts' },
+          { dir: '03-library-spaces', holdSec: 3, caption: 'A Space is one recurring context - a standup, a role, a move' },
           { dir: '04-library-docs', holdSec: 3, caption: 'Your documents are indexed locally - nothing uploads anywhere' },
-          { dir: '05-grounded', holdSec: 3.5, caption: 'Pick a profile - every answer is grounded in YOUR material' },
+          { dir: '05-grounded', holdSec: 3.5, caption: 'Every answer is grounded in YOUR material' },
           { dir: '06-cuecard', fps: 10, tailHoldSec: 3, caption: 'A question is heard - a cited answer streams into the screen-share-invisible Cue Card' },
-          { dir: '08-settings', holdSec: 3, caption: 'Local-first - your API key is OS-encrypted and never leaves the main process' },
-          { dir: '09-outro', holdSec: 3.2, caption: 'Free and open source - github.com/tpikachu/BrainCue' },
+          { dir: '07-memory-review', holdSec: 4.5, caption: 'Afterwards it summarises the call into its Space - and PROPOSES what it thinks is worth remembering' },
+          { dir: '08-memory-approved', holdSec: 4, caption: 'Nothing is remembered silently - only what you approve is ever recalled' },
+          { dir: '09-settings', holdSec: 3, caption: 'Local-first - your API key is OS-encrypted and never leaves the main process' },
+          { dir: '10-outro', holdSec: 3.2, caption: 'Free and open source - github.com/tpikachu/BrainCue' },
         ].filter((s) => captured(s.dir)),
       },
       null,

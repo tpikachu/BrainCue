@@ -4,7 +4,7 @@ import { IPC } from '@shared/ipc';
 import { handle } from './helpers';
 import { voiceService } from '../services/voice/voiceService';
 
-/** Voice/summon layer (v2 Prompt 9). Control channels return the resulting
+/** Voice/summon layer. Control channels return the resulting
  *  dialogue state; audio is one-way (fire-and-forget, like realtimeAudio) —
  *  raw PCM is buffered in main while listening and never echoed back. */
 export function registerVoiceIpc(): void {

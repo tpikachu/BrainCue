@@ -11,9 +11,21 @@ the fact.
 
 | Doc | What it covers |
 | --- | --- |
-| [00 · Vision](00-VISION.md) | The north star: from interview copilot to ambient conversational companion, the mode catalog, and the product principles. |
+| [00 · Vision](00-VISION.md) | The north star: from interview copilot to ambient conversational companion, and the product principles. |
 | [01 · PRD](01-PRD.md) | The product spec: domain model, the engine, and per-mode requirements. |
 | [10 · Roadmap](10-ROADMAP.md) | Phases as release trains, what lands when, and the development rules. |
+
+## How v2 works
+
+The four docs that describe what the product **is** today. Read them in order —
+each answers a question the previous one raises.
+
+| Doc | What it covers |
+| --- | --- |
+| [18 · Activities](18-ACTIVITIES.md) | The one thing the user picks. Why the mode picker was deleted, how a mode is derived, and how a Space is a saved activity. |
+| [17 · Spaces & profile](17-SPACES-AND-PROFILE.md) | What a Space is, what it holds, and where it sits relative to the profile. |
+| [19 · Active profile](19-ACTIVE-PROFILE.md) | One profile at a time: how the whole dashboard is scoped, and where that is resolved. |
+| [16 · Continuity](16-CONTINUITY.md) | The two things BrainCue keeps — a conversation's summary and long-term memory about you — how they differ, and why a Space is the only place either is kept. |
 
 ## Architecture
 
@@ -22,7 +34,7 @@ the fact.
 | [02 · Architecture](02-ARCHITECTURE.md) | The three processes, data flow, and module boundaries. |
 | [12 · Engine plan](12-ENGINE-PLAN.md) | The six-stage pipeline (sources → transcription → trigger → grounding → generation → surfaces) that every mode configures. |
 | [03 · Windows](03-WINDOWS.md) | Main, renderer, and the capture-excluded overlay window. |
-| [11 · UX & navigation](11-UX-NAVIGATION.md) | The mode-first layout: Home as launcher, modes as cards. |
+| [11 · UX & navigation](11-UX-NAVIGATION.md) | The layout: Home as launcher, the one start flow, and the split between global and profile-scoped navigation. |
 
 ## Reference
 
