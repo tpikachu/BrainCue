@@ -23,6 +23,15 @@ async function embed(content: string) {
   };
 }
 
+/**
+ * Approve a candidate — and, when it carries a factKey that already has a
+ * current value, RETIRE that value in the same step.
+ *
+ * This is the truthfulness guarantee (docs/14-MEMORY.md §4): after approval
+ * there is exactly one current row per fact, so an answer grounded in memory
+ * cannot state last month's version. The old row is stamped, not deleted — the
+ * history chain stays readable.
+ */
 export async function approveMemory(
   id: string,
   edits: { content?: string; category?: MemoryCategory; packId?: string | null } = {},
@@ -34,12 +43,32 @@ export async function approveMemory(
   if (verdict.sensitive) {
     throw new Error(`This looks like ${verdict.reason} data — BrainCue won't store it as memory.`);
   }
-  return memoriesRepo.approve(id, {
+  const packId = edits.packId !== undefined ? edits.packId : existing.packId;
+
+  // Embed BEFORE any write: a provider failure must leave the store untouched
+  // rather than half-superseded.
+  const embedding = await embed(content);
+
+  // Resolved against the SCOPE being approved into, so moving a candidate to a
+  // Space retires that Space's value — not the profile-wide one it no longer
+  // belongs to.
+  const superseded = existing.factKey
+    ? memoriesRepo.currentByFactKey(existing.profileId, packId, existing.factKey)
+    : null;
+
+  const approved = memoriesRepo.approve(id, {
     content,
     category: edits.category ?? existing.category,
-    packId: edits.packId !== undefined ? edits.packId : existing.packId,
-    embedding: await embed(content),
+    packId,
+    embedding,
   });
+
+  if (superseded && superseded.id !== id) {
+    memoriesRepo.supersede(superseded.id, id);
+    memoriesRepo.setRevision(id, superseded.revision + 1);
+    return memoriesRepo.get(id)!;
+  }
+  return approved;
 }
 
 export async function updateMemory(

@@ -1,7 +1,7 @@
 # 14 · Long-term memory
 
-How BrainCue's per-profile long-term memory stores what it learns, how it
-retrieves it, and how the user stays in control of it.
+How BrainCue's per-profile long-term memory stores what it learns, how it stays
+*true* over time, how it retrieves it, and how the user stays in control of it.
 
 Driving requirement: a profile should accumulate a durable, correctable picture
 of a person's work — good enough that an answer grounded in it is right about
@@ -17,11 +17,11 @@ the session summary, and they are not the same thing — see
 
 | Piece | Where |
 | --- | --- |
-| `memories` table — per profile, Space-scoped or profile-wide, category, provenance (`sourceRefs`), confidence, importance, sensitive flag, approval `status`, inline embedding + **embedding identity** (provider/model/dim), `createdAt`/`updatedAt`/`lastUsedAt`/`expiresAt` | `db/schema.ts` |
+| `memories` table — per profile, Space-scoped or profile-wide, category, provenance (`sourceRefs`), confidence, importance, sensitive flag, approval `status`, fact identity + validity + lineage, inline embedding + **embedding identity** (provider/model/dim), `createdAt`/`updatedAt`/`lastUsedAt`/`expiresAt` | `db/schema.ts` |
 | Post-session extraction — LLM, zod-validated, ≤ 5 candidates, confidence floor 0.6, hard sensitive-content rejection; everything lands `pending` | `memory/extractor.ts` |
-| Recall — hybrid semantic ∪ lexical, consent-gated globally and per Space, fails soft (`[]` never breaks an answer) | `memory/recall.ts`, `memory/lexical.ts` |
+| Recall — hybrid semantic ∪ lexical, current-only, consent-gated globally and per Space, fails soft (`[]` never breaks an answer) | `memory/recall.ts`, `memory/lexical.ts` |
 | Secrets / payment / health / sensitive-personal never persisted | `memory/sensitiveFilter.ts` |
-| Review, approval, editing, scope changes | `MemoryPage.tsx` → `memory.ipc.ts` |
+| Review, approval, conflict resolution, editing, scope changes | `MemoryPage.tsx` → `memory.ipc.ts` |
 
 Three invariants hold everywhere and are each pinned by a test:
 
@@ -33,7 +33,7 @@ Three invariants hold everywhere and are each pinned by a test:
 3. **Recall never throws.** Every failure path returns `[]`. Memory improves an
    answer or is absent from it; it does not break one.
 
-## 2. Scope
+### 1.1 Scope
 
 Two independent questions, deliberately kept apart:
 
@@ -44,6 +44,16 @@ Two independent questions, deliberately kept apart:
 
 An interview Space learning "they drill into API design" should not colour a
 standup. "Prefers concise bullet answers" should colour everything.
+
+## 2. Consent
+
+Long-term memory is **off until the user turns it on**. `memoryEnabled` gates
+it globally; each Space can opt out individually. Both switches sit together on
+the Memory page, because "summaries of conversations" and "long-term memory
+about you" read as the same thing to a user and must be chosen side by side.
+
+With consent off, the extractor is never called — the model does not see the
+transcript at all. This is a real short-circuit, not a filter on the result.
 
 ## 3. Retrieval
 
@@ -75,8 +85,8 @@ its magnitude moves with corpus size — the same token scores 0.69 among 2
 memories and 2.0 among 40. An absolute IDF threshold silently stops working in
 a small store, which is precisely where a new user lives.
 
-Two filters run before any of this: **approval + scope + expiry** in
-`recallRows`, and **embedding identity** in `recall.ts` — vectors from a
+Three filters run before any of this: **approval + scope + expiry + currency**
+in `recallRows`, and **embedding identity** in `recall.ts` — vectors from a
 different provider/model/dimension are skipped until re-embedded rather than
 mis-ranked against the current space.
 
@@ -86,15 +96,66 @@ migration under test and leave this path — which decides what the app says out
 loud — unverifiable. FTS4 has no BM25 ranking, which is the only reason to want
 FTS in the first place.
 
-## 4. Consent
+## 4. Truthfulness over time
 
-Long-term memory is **off until the user turns it on**. `memoryEnabled` gates
-it globally; each Space can opt out individually. Both switches sit together on
-the Memory page, because "summaries of conversations" and "long-term memory
-about you" read as the same thing to a user and must be chosen side by side.
+A memory store that cannot retire a fact will state last month's answer with
+full confidence. That is worse than saying nothing, and it is the failure mode
+a recurring meeting produces fastest.
 
-With consent off, the extractor is never called — the model does not see the
-transcript at all. This is a real short-circuit, not a filter on the result.
+### 4.1 Fact keys
+
+A **single-valued** fact carries a `factKey` — a normalized slug like
+`project:atlas/launch-date`, `person:sarah-chen/role`, `profile:user/job-title`.
+Multi-valued and narrative memories (preferences, stories, workflows) leave it
+null and keep coexisting as before.
+
+The extractor emits keys under a strict regex, and **a malformed key fails the
+whole candidate rather than being stored**: a wrong key silently retires a good
+memory, so the prompt tells the model to omit it when unsure and the schema
+enforces the shape.
+
+### 4.2 The supersession invariant
+
+> At most **one** row per `(profileId, packId, factKey)` may have
+> `supersededBy IS NULL`. That row is the current answer.
+
+Approving a new value for a key that already has one **retires the old row in
+the same step**: `validTo` and `supersededBy` are stamped, its embedding is
+cleared, and the new row's `revision` is promoted. The old row is never
+deleted — `history(profileId, factKey)` reads the chain newest-first.
+
+Three properties this is built to guarantee:
+
+- **Enforced at the repository layer.** `recallRows` filters on
+  `supersededBy IS NULL`, so no caller can ground an answer in a replaced fact
+  by forgetting a check.
+- **Belt and braces.** The superseded row's vector is dropped too, so it is
+  unreachable even by a future retrieval path that forgets the filter.
+- **Scoped per Space.** A value approved into a Space retires that Space's
+  value, never the profile-wide one it does not belong to.
+
+### 4.3 Consolidation, and who decides
+
+Before persisting, a keyed candidate is compared against the current value:
+
+| Case | What happens |
+| --- | --- |
+| Identical (normalized) | Nothing stored. The existing memory is stamped as freshly confirmed — a restatement is evidence the fact is still live, not a new fact. |
+| Contradicts | Stored as a **pending candidate**. Approving it is what supersedes the old value. |
+| New | Normal pending candidate. |
+
+**The extractor never supersedes anything on its own.** A model that silently
+retires the user's memories is not a feature. `memory:conflicts` pairs each
+such candidate with what it would replace, and the review queue shows both: the
+card is labelled *replaces a saved fact*, the current value is shown struck
+through, and the button reads **Replace** rather than Approve. Discovering
+afterwards that an answer quietly changed is how a memory store loses trust.
+
+This sits alongside the older exact-restatement guard (`alreadyKnown`), which
+stops a recurring meeting re-proposing something the user has *already
+answered* in any status. The two answer different questions — "you already
+decided this" versus "this changed" — and the keyed check runs first, because
+letting the text-match guard shadow it would swallow the re-confirmation.
 
 ## 5. Scale
 
@@ -120,17 +181,15 @@ rather than nerves.
 Recorded honestly, because the shape of what is missing matters as much as what
 is here.
 
-- **Contradiction.** Nothing dedupes a *changed* fact. "Launch is in March" and
-  "launch moved to May" both persist, both match, and ranking picks one.
-  Exact-sentence dedupe exists (`alreadyKnown`) and stops a recurring meeting
-  re-proposing what you already answered — but it matches normalised text, so a
-  new value for an old fact reads as a new memory. This is the most significant
-  gap; the fix is a normalised fact key plus supersession, keeping the old row
-  as history and letting recall see only the current one.
 - **No entities.** `category: 'person'` is a string on a sentence; there is no
   *Sarah* to hang facts on, so "what do we know about Acme?" is a similarity
   search that misses anything phrased differently.
 - **No authoring.** IPC exposes review / update / archive / delete but no
   *create* and no *import*. The user cannot say "here is what you should know
-  about me", which is the fastest way to make memory useful on day one.
+  about me", which is the fastest way to make memory useful on day one. The
+  storage side is ready for it: `sourceKind` already distinguishes
+  `extracted` / `authored` / `imported` / `derived`.
 - **No export.** Memory is local and has no backup or portability story.
+- **Fact keys depend on the model choosing consistently.** Nothing yet
+  reconciles `project:atlas/launch-date` with `project:atlas/launch`, so two
+  spellings of one fact would coexist. Entities are the structural fix.

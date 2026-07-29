@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { useProfileStore } from '../../store/useProfileStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
-import type { Job, MemoryItem } from '@shared/types';
+import type { Job, MemoryConflict, MemoryItem } from '@shared/types';
 import { Badge, Button, Card, Field, Page, SearchInput, Select, Switch, TextInput } from '../../components/ui';
 
 /**
@@ -26,6 +26,8 @@ export default function MemoryPage() {
   const { settings, load: loadSettings } = useSettingsStore();
   const [pending, setPending] = useState<MemoryItem[]>([]);
   const [approved, setApproved] = useState<MemoryItem[]>([]);
+  // candidateId → the current value approving it would retire.
+  const [conflicts, setConflicts] = useState<Map<string, MemoryItem>>(new Map());
   const [query, setQuery] = useState('');
   // '' = every scope, 'global' = remembered everywhere, otherwise a Space id.
   // A Space's memory is a different body of knowledge from another's, and the
@@ -52,6 +54,11 @@ export default function MemoryPage() {
         packId,
       }),
     );
+    // Which of those candidates would REPLACE something rather than add to it.
+    // Fetched unscoped and matched by id: a conflict is a property of the
+    // candidate, not of the filter the user happens to be looking through.
+    const pairs: MemoryConflict[] = await api.memory.conflicts(pid);
+    setConflicts(new Map(pairs.map((c) => [c.candidate.id, c.current])));
     const { items } = await api.jobs.page(pid, '', 100, 0);
     setSpaces(items as Job[]);
   };
@@ -202,11 +209,20 @@ export default function MemoryPage() {
             </p>
           ) : (
             <div className="mb-6 space-y-2">
-              {pending.map((m) => (
+              {pending.map((m) => {
+                // A candidate can be an ADDITION or a REPLACEMENT, and the two
+                // deserve different words. Approving a replacement retires
+                // something you previously said yes to, so the thing being
+                // retired is shown here, at the moment of the decision —
+                // discovering it afterwards, when an answer has quietly
+                // changed, is how a memory store loses trust.
+                const replaces = conflicts.get(m.id);
+                return (
                 <Card key={m.id} className="!py-3">
                   <div className="mb-2 flex items-center gap-2 text-xs text-neutral-500">
                     <Badge>{m.category}</Badge>
                     <Badge tone="blue">{spaceTitle(m.packId)}</Badge>
+                    {replaces && <Badge tone="amber">replaces a saved fact</Badge>}
                     <span>confidence {(m.confidence * 100).toFixed(0)}%</span>
                     {m.sourceRefs?.map((r) => (
                       <span key={r.id} className="text-neutral-600">
@@ -214,6 +230,19 @@ export default function MemoryPage() {
                       </span>
                     ))}
                   </div>
+                  {replaces && (
+                    <div className="mb-2 rounded border border-amber-500/25 bg-amber-500/5 px-2.5 py-1.5">
+                      <div className="text-[11px] uppercase tracking-wider text-amber-600/90">
+                        Currently saved
+                      </div>
+                      <div className="text-sm text-neutral-400 line-through decoration-neutral-600">
+                        {replaces.content}
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-neutral-500">
+                        Kept as history, not deleted — but it stops being used in answers.
+                      </div>
+                    </div>
+                  )}
                   <TextInput
                     value={edits[m.id] ?? m.content}
                     aria-label="Memory candidate text"
@@ -230,14 +259,15 @@ export default function MemoryPage() {
                         )
                       }
                     >
-                      Approve
+                      {replaces ? 'Replace' : 'Approve'}
                     </Button>
                     <Button variant="ghost" onClick={() => void act(() => api.memory.review(m.id, 'reject'))}>
                       Reject
                     </Button>
                   </div>
                 </Card>
-              ))}
+                );
+              })}
             </div>
           )}
 

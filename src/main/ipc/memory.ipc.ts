@@ -33,6 +33,19 @@ export function registerMemoryIpc(): void {
       memoriesRepo.list({ profileId, status, query, packId }),
   );
 
+  /** Pending candidates that would REPLACE a current fact, paired with what
+   *  they'd replace. Review shows both; nothing is superseded automatically. */
+  handle(IPC.memory.conflicts, z.object({ profileId: z.string().min(1) }), ({ profileId }) =>
+    memoriesRepo.conflicts(profileId),
+  );
+
+  /** What a fact says now and what it used to say. Never feeds recall. */
+  handle(
+    IPC.memory.history,
+    z.object({ profileId: z.string().min(1), factKey: z.string().min(1).max(80) }),
+    ({ profileId, factKey }) => memoriesRepo.history(profileId, factKey),
+  );
+
   handle(
     IPC.memory.review,
     z.object({

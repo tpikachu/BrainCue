@@ -14,6 +14,7 @@ import type {
   ContributionResetEvent,
   InterviewBrief,
   MeetingReport,
+  MemoryConflict,
   MemoryItem,
   Presence,
   SparringFeedback,
@@ -275,6 +276,13 @@ const api = {
       profileId: string,
       opts: { status?: string; query?: string; packId?: string | null } = {},
     ) => invoke<MemoryItem[]>(IPC.memory.list, { profileId, ...opts }),
+    /** Pending candidates that would replace a fact the profile already holds,
+     *  each paired with the value it would retire. */
+    conflicts: (profileId: string) =>
+      invoke<MemoryConflict[]>(IPC.memory.conflicts, { profileId }),
+    /** A fact's revision chain, newest first. */
+    history: (profileId: string, factKey: string) =>
+      invoke<MemoryItem[]>(IPC.memory.history, { profileId, factKey }),
     review: (
       id: string,
       action: 'approve' | 'reject',

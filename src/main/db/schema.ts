@@ -339,6 +339,22 @@ export const memories = sqliteTable(
     importance: real('importance').notNull().default(0.5),
     sensitive: integer('sensitive').notNull().default(0),
     status: text('status').notNull().default('pending'), // MemoryStatus
+    // ── Truthfulness over time (docs/14-MEMORY.md §4) ──────────────────────
+    // A single-valued fact ("project:atlas/launch-date") carries a factKey.
+    // INVARIANT: at most ONE row per (profile_id, pack_id, fact_key) may have
+    // superseded_by IS NULL — that row is the current answer. Approving a new
+    // value stamps valid_to + superseded_by on the old one instead of deleting
+    // it, so history survives and recall still sees exactly one truth.
+    // Free-text memories (a preference in prose, a story) leave factKey null
+    // and keep the pre-existing many-rows behavior.
+    factKey: text('fact_key'),
+    validFrom: integer('valid_from').notNull().default(now),
+    validTo: integer('valid_to'), // null = still true
+    supersededBy: text('superseded_by'), // → memories.id; null = current
+    // How the row got here: extracted from a session, authored by the user,
+    // imported from a document, or derived by consolidation.
+    sourceKind: text('source_kind').notNull().default('extracted'), // MemorySourceKind
+    revision: integer('revision').notNull().default(1),
     // Embedding (populated on approval) + its identity — vectors from a
     // different provider/model are ignored at recall until re-embedded.
     embedProvider: text('embed_provider'),
@@ -353,6 +369,9 @@ export const memories = sqliteTable(
   (t) => ({
     byProfile: index('memories_profile_idx').on(t.profileId),
     byStatus: index('memories_status_idx').on(t.status),
+    // The supersession lookup: "is there a current row for this fact?" runs on
+    // every keyed candidate, so it must not scan the profile.
+    byFactKey: index('memories_fact_key_idx').on(t.profileId, t.factKey, t.supersededBy),
   }),
 );
 

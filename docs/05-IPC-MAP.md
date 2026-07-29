@@ -237,7 +237,11 @@ Channel constants live in `EVENTS` (`src/shared/ipc.ts`); payload types are in
 Memory additions: `memory:list` / `memory:review` (approve with
 optional edits, or reject) / `memory:update` / `memory:archive` /
 `memory:delete` (removes the row AND its embedding) /
-`memory:set-pack-enabled` (per-Space opt-out); `settings:set` accepts
+`memory:set-pack-enabled` (per-Space opt-out) /
+`memory:conflicts` (pending candidates that would replace a fact the profile
+already holds, each paired with the value it would retire — see
+[14 · Memory](14-MEMORY.md) §4) / `memory:history` (a fact's revision chain,
+newest first; never feeds recall); `settings:set` accepts
 `memoryEnabled` (the global consent switch, default off). Recalled memories
 ride the `session:context` / `contribution:patch` payloads as a separate
 `memories` array so "data sent" always shows every memory used.

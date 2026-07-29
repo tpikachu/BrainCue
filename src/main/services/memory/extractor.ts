@@ -38,6 +38,15 @@ export const extractionSchema = z.object({
         scope: z.enum(['profile', 'space']).default('profile'),
         confidence: z.number().min(0).max(1),
         importance: z.number().min(0).max(1).default(0.5),
+        /** Set ONLY for single-valued facts, so a new value can supersede the
+         *  old one instead of coexisting with it (docs/14-MEMORY.md §4). The
+         *  shape is enforced: a malformed key fails the whole candidate rather
+         *  than being stored, because a wrong key retires a good memory. */
+        factKey: z
+          .string()
+          .regex(/^[a-z0-9]+:[a-z0-9-]+\/[a-z0-9-]+$/)
+          .max(80)
+          .nullish(),
       }),
     )
     .max(5)
@@ -45,7 +54,7 @@ export const extractionSchema = z.object({
 });
 
 const SYSTEM = `You extract AT MOST 5 durable memory candidates from a finished session transcript. Return STRICT JSON:
-{"candidates": [{"category": "preference"|"person"|"project"|"goal"|"decision"|"fact"|"workflow"|"custom", "content": string, "scope": "profile"|"space", "confidence": 0..1, "importance": 0..1}]}
+{"candidates": [{"category": "preference"|"person"|"project"|"goal"|"decision"|"fact"|"workflow"|"custom", "content": string, "scope": "profile"|"space", "confidence": 0..1, "importance": 0..1, "factKey": string|null}]}
 
 A good candidate is something the USER would clearly want remembered next time: a stable preference, a recurring person, an ongoing project, a goal, a decision they made, a workflow. Write "content" as one self-contained sentence.
 
@@ -53,7 +62,10 @@ BE CONSERVATIVE:
 - Fewer is better; return {"candidates": []} when nothing is clearly durable.
 - NEVER include secrets, credentials, payment data, government IDs, health details, or sensitive personal attributes (religion, politics, orientation, immigration, criminal record) — not even paraphrased.
 - scope "space" only when the fact is specific to THIS meeting/job context; otherwise "profile".
-- confidence reflects how explicitly the transcript supports it. When in doubt, lower.`;
+- confidence reflects how explicitly the transcript supports it. When in doubt, lower.
+
+SET "factKey" ONLY for a fact that can have exactly ONE current value, so a later value replaces this one rather than sitting beside it. Format: "domain:subject/attribute", lowercase kebab — e.g. "project:atlas/launch-date", "person:sarah-chen/role", "profile:user/job-title". Same fact = same key across sessions, so choose the obvious slug and reuse it.
+OMIT "factKey" (or null) for anything multi-valued or narrative: preferences, stories, workflows, observations. A wrong key silently retires a good memory, so when unsure, omit it.`;
 
 const normalize = (text: string): string =>
   text
@@ -145,7 +157,28 @@ export async function extractMemoryCandidates(sessionId: string): Promise<number
     if (c.confidence < MEMORY_CONFIDENCE_FLOOR) continue;
     if (checkSensitive(c.content).sensitive) continue; // hard privacy gate — never stored
     const packId = c.scope === 'space' ? session.packId : null;
+
+    // ── Consolidation (docs/14-MEMORY.md §4) ──────────────────────────────
+    // A keyed candidate is compared against the CURRENT value of that fact:
+    //   identical   → the fact was restated, not changed. Stamp it as freshly
+    //                 confirmed and store nothing.
+    //   contradicts → fall through to a normal pending candidate. Approving it
+    //                 is what supersedes the old value; the extractor never
+    //                 retires anything on its own.
+    const current = c.factKey
+      ? memoriesRepo.currentByFactKey(session.profileId, packId, c.factKey)
+      : null;
+    if (current && normalize(current.content) === normalize(c.content)) {
+      memoriesRepo.markUsed([current.id], Date.now()); // re-confirmed, not re-stored
+      continue;
+    }
+
+    // The general guard still applies to everything, keyed or not: an exact
+    // restatement the user has ALREADY answered (in any status) must not be
+    // raised again. A keyed contradiction gets past it because its text
+    // genuinely differs — which is the whole point.
     if (alreadyKnown(known, c.content, packId)) continue;
+
     const id = memoriesRepo.insertCandidate({
       profileId: session.profileId,
       packId,
@@ -154,6 +187,8 @@ export async function extractMemoryCandidates(sessionId: string): Promise<number
       confidence: c.confidence,
       importance: c.importance,
       sourceRefs: [{ type: 'session', id: sessionId }],
+      factKey: c.factKey ?? null,
+      sourceKind: 'extracted',
     });
     // Within one extraction too: a model can repeat itself across candidates.
     known.push(memoriesRepo.get(id)!);

@@ -184,10 +184,20 @@ Local memory, ONE lifecycle table: a row is a MemoryCandidate while
 atomically and memory vectors can never leak into document retrieval. Scope:
 `pack_id` null = global to the profile, set = one Space. Sensitive content is
 rejected before insert (see 07). Never synced anywhere.
-| id | profile_id FK cascade | pack_id FK cascade (null=global) | category | content | source_refs (json) | confidence | importance | sensitive | status | embed_provider | embed_model | embed_dim | embed_vector (blob) | created_at | updated_at | last_used_at | expires_at |
+| id | profile_id FK cascade | pack_id FK cascade (null=global) | category | content | source_refs (json) | confidence | importance | sensitive | status | fact_key | valid_from | valid_to | superseded_by | source_kind | revision | embed_provider | embed_model | embed_dim | embed_vector (blob) | created_at | updated_at | last_used_at | expires_at |
 
 `jobs.memory_enabled` (0011) is the per-Space opt-out; the global consent
 switch is the `memory_enabled` settings key (default off).
+
+**Truthfulness columns (0015, purely additive).** A single-valued fact carries
+a `fact_key`; at most ONE row per `(profile_id, pack_id, fact_key)` may have
+`superseded_by IS NULL`, and that row is the current answer. Approving a new
+value stamps `valid_to` + `superseded_by` on the old one and clears its vector
+— the row survives as history but can never be recalled again. `recallRows`
+enforces this at the repository layer. Index `memories_fact_key_idx` on
+`(profile_id, fact_key, superseded_by)` keeps the "is there a current row for
+this fact?" lookup off a profile scan. Existing rows default to current /
+`extracted` / revision 1. See [14 · Memory](14-MEMORY.md) §4.
 
 ### `settings`
 Key/value singleton store.
