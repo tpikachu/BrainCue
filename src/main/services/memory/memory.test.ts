@@ -69,7 +69,8 @@ import { memoriesRepo } from '../../db/repositories/memories.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
 import { extractMemoryCandidates, extractionSchema } from './extractor';
 import { approveMemory, updateMemory } from './memoryService';
-import { recallMemories } from './recall';
+import { buildIndex, hasExactAnchor, lexicalScore, tokenize } from './lexical';
+import { MEMORY_MIN_SCORE, recallMemories } from './recall';
 
 let seq = 0;
 const T0 = 1_700_000_000_000;
@@ -328,5 +329,118 @@ describe('scoped hybrid recall', () => {
     settingsRepo.set(SETTINGS_KEYS.memoryEnabled, '1');
     const off = seedPack(pid, 0);
     expect(await recallMemories(pid, 'concise bullets', off, T0)).toEqual([]);
+  });
+});
+
+/**
+ * Lexical scoring — the half of retrieval embeddings are bad at.
+ *
+ * fakeVec only encodes three topics, so a memory about a ticket id embeds to
+ * near-nothing — which is exactly the real-world case: identifiers, versions,
+ * and figures blur under embedding. These tests pin the behaviour that lets
+ * such a memory come back when the query names it.
+ */
+describe('lexical scoring', () => {
+  it('keeps identifiers whole AND splits them, and drops stopwords', () => {
+    const t = tokenize('What about ticket ATL-4471 for the v2.0.1 release?');
+    expect(t).toContain('atl-4471'); // whole identifier
+    expect(t).toContain('4471'); // …and its parts, for partial recall
+    expect(t).toContain('v2.0.1');
+    expect(t).not.toContain('the');
+    expect(t).not.toContain('what');
+  });
+
+  it('weights a rare token far above a common one', () => {
+    const corpus = [
+      'The team discussed the roadmap in the meeting.',
+      'The team discussed the roadmap again today.',
+      'The team discussed the roadmap at length.',
+      'Ticket ATL-4471 tracks the checkout regression.',
+    ];
+    const index = buildIndex(corpus);
+    const q = tokenize('ATL-4471');
+    expect(lexicalScore(q, corpus[3], index)).toBeGreaterThan(0.9);
+    expect(lexicalScore(q, corpus[0], index)).toBe(0);
+    // "roadmap" appears in three of four documents, so it discriminates little.
+    expect(index.idf.get('roadmap')!).toBeLessThan(index.idf.get('atl-4471')!);
+  });
+
+  it('anchors on rarity by document frequency, not corpus-size-dependent idf', () => {
+    // The same token must anchor in a 2-memory store and a 40-memory one; an
+    // absolute idf threshold silently stops working in small corpora.
+    const small = buildIndex([
+      'Ticket ATL-4471 tracks the checkout regression.',
+      'A note about teams.',
+    ]);
+    const large = buildIndex([
+      'Ticket ATL-4471 tracks the checkout regression.',
+      ...Array.from({ length: 39 }, (_, i) => `Routine note number ${i} about the weekly sync.`),
+    ]);
+    for (const index of [small, large]) {
+      expect(hasExactAnchor(tokenize('ATL-4471'), 'Ticket ATL-4471 tracks it', index)).toBe(true);
+    }
+    // A word the corpus repeats is not an anchor, however long: "note" appears
+    // in 39 of the 40 memories, so sharing it says nothing.
+    expect(
+      hasExactAnchor(tokenize('note'), 'Routine note number 5 about the weekly sync.', large),
+    ).toBe(false);
+    // Short words never anchor even when rare — "api" appears once here and
+    // still cannot pull a memory in on its own.
+    expect(hasExactAnchor(tokenize('api'), 'A note about the api.', small)).toBe(false);
+  });
+});
+
+describe('hybrid recall', () => {
+  // fakeVec maps text to a topic vector; anything with NO topic word lands on
+  // the same near-zero point, so two topicless strings score cosine 1.0 against
+  // each other. Every fixture below therefore carries a topic word, which is
+  // what makes "the semantic score is genuinely low" a real condition rather
+  // than an artifact.
+  it('recalls a memory the semantic floor alone would discard', async () => {
+    const pid = seedProfile();
+    // Topic 'stripe/api' — the query has no topic word, so their cosine is far
+    // below the floor. Exactly the real case: an identifier the embedding blurs.
+    seedApproved(pid, 'Ticket ATL-4471 tracks the stripe api checkout regression.');
+    seedApproved(pid, 'Prefers concise bullet answers in meetings.');
+    seedApproved(pid, 'The deadline for the quarterly report is Friday.');
+
+    const out = await recallMemories(pid, 'status of ATL-4471', null, T0);
+    expect(out).toHaveLength(1);
+    expect(out[0].content).toContain('ATL-4471');
+    expect(out[0].score).toBeLessThan(MEMORY_MIN_SCORE); // semantic alone would have dropped it
+  });
+
+  it('still ranks a strong semantic match first', async () => {
+    const pid = seedProfile();
+    seedApproved(pid, 'Prefers concise bullet answers in meetings.');
+    seedApproved(pid, 'Ticket ATL-4471 tracks the stripe api checkout regression.');
+
+    const out = await recallMemories(pid, 'concise bullet preference', null, T0);
+    expect(out[0].content).toContain('concise bullet');
+  });
+
+  it('does not surface a memory sharing only common words', async () => {
+    const pid = seedProfile();
+    seedApproved(pid, 'The team met about the stripe api plan.');
+    seedApproved(pid, 'The team met again about the stripe api plan.');
+
+    // No rare shared token, and the topic words differ → neither path fires.
+    const out = await recallMemories(pid, 'quarterly budget spreadsheet', null, T0);
+    expect(out).toEqual([]);
+  });
+
+  it('a lexically perfect match still needs the query to name something specific', async () => {
+    const pid = seedProfile();
+    // Every memory mentions the team and the plan, so those tokens are common
+    // in THIS corpus and single out nothing.
+    seedApproved(pid, 'The team agreed the plan for the stripe api rollout.');
+    seedApproved(pid, 'The team revisited the plan for the stripe api rollout.');
+    seedApproved(pid, 'The team signed off the plan for the stripe api work.');
+
+    // Lexically this is a *perfect* match — every query token is present — and
+    // semantically it is nowhere near. It must still return nothing: the
+    // lexical path exists to surface exact anchors (an id, a figure, a name),
+    // not to let a vague query drag in every memory that shares its filler.
+    expect(await recallMemories(pid, 'team plan', null, T0)).toEqual([]);
   });
 });

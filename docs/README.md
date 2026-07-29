@@ -26,6 +26,7 @@ each answers a question the previous one raises.
 | [17 · Spaces & profile](17-SPACES-AND-PROFILE.md) | What a Space is, what it holds, and where it sits relative to the profile. |
 | [19 · Active profile](19-ACTIVE-PROFILE.md) | One profile at a time: how the whole dashboard is scoped, and where that is resolved. |
 | [16 · Continuity](16-CONTINUITY.md) | The two things BrainCue keeps — a conversation's summary and long-term memory about you — how they differ, and why a Space is the only place either is kept. |
+| [14 · Long-term memory](14-MEMORY.md) | How memory is stored, scoped, consented to, and retrieved — including why recall runs a lexical path alongside the semantic one, and what is still missing. |
 
 ## Architecture
 
