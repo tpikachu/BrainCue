@@ -3,7 +3,7 @@ import { api } from '../lib/api';
 import { FLAGS } from '@shared/flags';
 import { ACTIVITIES, ACTIVITY_ORDER, DEFAULT_ACTIVITY, activity, isInterviewSpace } from '@shared/activities';
 import type { CompanionSpaceOverrides, ContextPackKind, Job } from '@shared/types';
-import { Button, Field, Modal, Select, TextArea, TextInput } from '../components/ui';
+import { Button, Field, Modal, Select, Switch, TextArea, TextInput } from '../components/ui';
 import { UploadIcon } from '../components/icons';
 
 type Notice = { tone: 'ok' | 'err'; text: string } | null;
@@ -54,6 +54,9 @@ export function JobFormModal({
   const [tailored, setTailored] = useState<string | null>(null);
   const [tailoring, setTailoring] = useState(false);
   const [tailorNotice, setTailorNotice] = useState<Notice>(null);
+  // The answer to the offer, applied when the Space is saved — so a brand-new
+  // Space is created AND tailored in one action.
+  const [tailorWanted, setTailorWanted] = useState(false);
 
   // Reset the form to the (edited) job each time the modal opens.
   useEffect(() => {
@@ -69,6 +72,7 @@ export function JobFormModal({
     setKind((job?.kind as ContextPackKind) ?? initialKind ?? DEFAULT_ACTIVITY);
     setCompanion(job?.companionPrefs ?? {});
     setTailored(job?.tailoredResume ?? null);
+    setTailorWanted(false); // an offer, re-asked per visit — never a sticky default
     setTailorNotice(null);
     setJdNotice(null);
     setNotice(null);
@@ -135,9 +139,35 @@ export function JobFormModal({
       }
       if (res.companyError) {
         setNotice({ tone: 'err', text: `Saved, but reading the link failed: ${res.companyError}` });
-      } else {
-        onClose();
+        return;
       }
+
+      // The offer, answered above, applied now that the Space exists. Kept
+      // inside save() so "Create & tailor" is one action for a Space that did
+      // not exist a moment ago — and so a tailoring failure cannot roll back a
+      // Space that was saved perfectly well. The modal stays open in that case,
+      // saying exactly which half worked.
+      if (tailorWanted && !tailored && isInterviewSpace(kind) && form.jdText.trim()) {
+        setTailoring(true);
+        try {
+          const { job: t, indexError } = await api.jobs.tailorResume((res.job as Job).id);
+          setTailored(t.tailoredResume);
+          onSaved(t);
+          if (indexError) {
+            setTailorNotice({
+              tone: 'err',
+              text: 'Tailored, but indexing failed — re-save this Space to retry.',
+            });
+            return;
+          }
+        } catch (e) {
+          setNotice({ tone: 'err', text: `Space saved, but tailoring failed: ${(e as Error).message}` });
+          return;
+        } finally {
+          setTailoring(false);
+        }
+      }
+      onClose();
     } catch (e) {
       setNotice({ tone: 'err', text: (e as Error).message });
     } finally {
@@ -289,64 +319,76 @@ export function JobFormModal({
           />
         </Field>
 
-        {/* A tailored résumé is a document about ONE role at ONE company, so it
-            lives on the Space that already holds that role's JD — right under
-            it. Offered only for interview Spaces, and only once there is a JD
-            to tailor against: without one the option is an empty promise. */}
-        {isInterviewSpace(kind) && (
-          <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-neutral-200">Tailored résumé</p>
-                <p className="mt-0.5 text-xs text-neutral-500">
-                  {tailored
-                    ? 'Kept with this Space. Interviews here are grounded in this version instead of your base résumé — everywhere else still uses the original.'
-                    : 'Rewrite your résumé against this job description and keep it here. Only interviews in this Space use it; nothing is invented — it re-frames what your résumé already says.'}
-                </p>
-                {tailorNotice && (
-                  <p
-                    className={`mt-2 text-xs ${tailorNotice.tone === 'err' ? 'text-amber-400' : 'text-emerald-400'}`}
-                  >
-                    {tailorNotice.text}
+        {/* Offered by the job description, not by a permanently-present card.
+            A tailored résumé only means anything once there is something to
+            tailor against, so the offer arrives WITH the JD — paste it, or
+            fetch it from a link, and the question appears. Asking before that
+            is asking about nothing; a disabled control sitting there from the
+            start is worse, because it reads as a feature that is broken.
+
+            It is a question, not a button, because the answer applies when the
+            Space is saved — which is what lets a brand-new Space be created and
+            tailored in one action instead of demanding two passes. */}
+        {isInterviewSpace(kind) && !!form.jdText.trim() && (
+          <div className="rise-enter rounded-lg border border-indigo-500/20 bg-indigo-500/[0.06] p-3">
+            {tailored ? (
+              <>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-neutral-200">Tailored résumé ✓</p>
+                    <p className="mt-0.5 text-xs text-neutral-500">
+                      Kept with this Space. Interviews here are grounded in this version — every
+                      other conversation still uses your original.
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
+                    <Button variant="ghost" loading={tailoring} disabled={tailoring} onClick={tailorResume}>
+                      Redo
+                    </Button>
+                    <button
+                      type="button"
+                      className="text-[11px] text-neutral-500 hover:text-neutral-300"
+                      onClick={clearTailored}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-xs text-indigo-300 hover:text-indigo-200">
+                    Read it
+                  </summary>
+                  <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap rounded bg-black/30 p-2 text-[11px] leading-relaxed text-neutral-300">
+                    {tailored}
+                  </pre>
+                </details>
+              </>
+            ) : (
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-neutral-200">
+                    Tailor your résumé to this job description?
                   </p>
-                )}
+                  <p className="mt-0.5 text-xs text-neutral-500">
+                    BrainCue rewrites your résumé for this role and keeps it here, with this Space.
+                    Only interviews in this Space use it. Nothing is invented — it re-frames what
+                    your résumé already says.
+                  </p>
+                </div>
+                <Switch
+                  checked={tailorWanted}
+                  onChange={setTailorWanted}
+                  onLabel="Yes"
+                  offLabel="No"
+                />
               </div>
-              <div className="flex shrink-0 flex-col items-end gap-1.5">
-                <Button
-                  variant={tailored ? 'ghost' : 'default'}
-                  loading={tailoring}
-                  disabled={tailoring || !job?.id || !form.jdText.trim()}
-                  title={
-                    !job?.id
-                      ? 'Create the Space first, then tailor'
-                      : !form.jdText.trim()
-                        ? 'Add the job description first'
-                        : 'Rewrite your résumé for this role'
-                  }
-                  onClick={tailorResume}
-                >
-                  {tailored ? 'Redo' : 'Tailor'}
-                </Button>
-                {tailored && (
-                  <button
-                    type="button"
-                    className="text-[11px] text-neutral-500 hover:text-neutral-300"
-                    onClick={clearTailored}
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-            </div>
-            {tailored && (
-              <details className="mt-2">
-                <summary className="cursor-pointer text-xs text-indigo-300 hover:text-indigo-200">
-                  Read it
-                </summary>
-                <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap rounded bg-black/30 p-2 text-[11px] leading-relaxed text-neutral-300">
-                  {tailored}
-                </pre>
-              </details>
+            )}
+            {tailorNotice && (
+              <p
+                className={`mt-2 text-xs ${tailorNotice.tone === 'err' ? 'text-amber-400' : 'text-emerald-400'}`}
+              >
+                {tailorNotice.text}
+              </p>
             )}
           </div>
         )}
@@ -471,8 +513,21 @@ export function JobFormModal({
             <Button variant="ghost" onClick={onClose}>
               Cancel
             </Button>
-            <Button variant="primary" onClick={save} loading={saving}>
-              {form.companyUrl.trim() ? 'Save & research' : editing ? 'Save changes' : 'Create'}
+            {/* The label states what pressing it will actually do. Tailoring is
+                a slow model call, so a button that just said "Create" would
+                look hung for the length of it. */}
+            <Button variant="primary" onClick={save} loading={saving || tailoring}>
+              {tailoring
+                ? 'Tailoring your résumé…'
+                : tailorWanted && !tailored
+                  ? editing
+                    ? 'Save & tailor'
+                    : 'Create & tailor'
+                  : form.companyUrl.trim()
+                    ? 'Save & research'
+                    : editing
+                      ? 'Save changes'
+                      : 'Create'}
             </Button>
           </div>
         </div>
