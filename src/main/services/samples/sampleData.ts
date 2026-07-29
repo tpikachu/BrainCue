@@ -4,8 +4,26 @@ import { jobsRepo } from '../../db/repositories/jobs.repo';
 import { parseResume, parseJobDescription } from '../openai/parsing';
 import { reindexProfile, indexJob } from '../rag/indexProfile';
 import { apiKeyStore } from '../security/apiKey';
-import { isInterviewSpace } from '@shared/activities';
+import { isInterviewSpace, modeFor } from '@shared/activities';
 import type { ContextPackKind } from '@shared/types';
+
+/**
+ * The demo world.
+ *
+ * This is both the "Load sample data" button AND the world every screenshot and
+ * every second of the demo video is captured from (docs/21-MEDIA.md). Those are
+ * deliberately the same thing: a fixture that exists only for the marketing
+ * capture is exactly how a product film drifts from the product — the video
+ * shows a populated, articulate app and the user's first run shows an empty one.
+ * Anyone who watches the video can press one button and be standing in the same
+ * room.
+ *
+ * The rule that keeps it honest: **nothing downstream is fabricated here.** No
+ * archives, no summaries, no memories are written directly. What is seeded is
+ * only the raw input a user would have produced — a résumé, some Spaces, and
+ * finished conversations with transcripts. Every derived artifact in the video
+ * is produced by the real pipeline at capture time, from this input.
+ */
 
 /** A realistic sample résumé so users can try the full flow without their own. */
 const SAMPLE_RESUME = `Alex Rivera — Senior Software Engineer
@@ -41,32 +59,35 @@ gRPC, GraphQL, AWS, Kubernetes, Terraform, system design, distributed systems.
 EDUCATION
 B.S. Computer Science — UC Berkeley (2015)`;
 
-interface SampleJob {
+interface SampleSpace {
+  /** Stable handle used by the conversations below and by the capture spec. */
+  key: string;
+  /** What this Space IS (shared/activities.ts). */
+  kind: ContextPackKind;
   title: string;
   company: string;
   jdText: string;
   notes?: string;
-  /** What this Space IS (shared/activities.ts). Defaults to `job` for the
-   *  interview samples below. */
-  kind?: ContextPackKind;
 }
 
 /**
- * The recurring meeting — deliberately FIRST, and deliberately not an
- * interview.
+ * Seven Spaces across five activities.
  *
- * Sample data is the first thing a new user sees, and it used to be three job
- * Spaces and nothing else, which said "this is an interview tool" before they
- * had done anything. It is also the only Space here that can demonstrate what
- * BrainCue is actually for: something you sit in on every week, that accumulates.
+ * Order matters: sample data is the first thing a new user sees, and when it was
+ * three job Spaces and nothing else it said "this is an interview tool" before
+ * they had done anything. The recurring meeting is first, the interviews are in
+ * the middle, and a house move is in there because the claim "any conversation"
+ * is either true in the sample data or it is marketing.
  */
-const SAMPLE_MEETING: SampleJob = {
-  kind: 'meeting',
-  title: 'Tuesday standup — Atlas',
-  company: 'Atlas platform team',
-  notes:
-    'Priya runs it. Keep updates under a minute. Never commit to dates in the room — take them away and confirm.',
-  jdText: `Tuesday standup — Atlas platform team
+const SAMPLE_SPACES: SampleSpace[] = [
+  {
+    key: 'standup',
+    kind: 'meeting',
+    title: 'Tuesday standup — Atlas',
+    company: 'Atlas platform team',
+    notes:
+      'Priya runs it. Keep updates under a minute. Never commit to dates in the room — take them away and confirm.',
+    jdText: `Tuesday standup — Atlas platform team
 
 Purpose: a 15-minute sync on the Atlas migration. Not a status theatre — the
 point is to surface blockers early enough that someone can act on them.
@@ -83,24 +104,36 @@ Current state:
 - Phase one shipped in June. Phase two is scoped but not started.
 - The renewal pricing sign-off from legal is the standing blocker on phase two.
 - Budget is fixed through September.`,
-};
-
-/** A finished conversation in that Space, so the "keep it → summarise → suggest
- *  a memory" loop can be seen without waiting to have a real meeting first.
- *  Left UNKEPT on purpose: pressing Keep is the user's decision, and watching
- *  it run is the point. */
-const SAMPLE_TRANSCRIPT: { speaker: string; text: string }[] = [
-  { speaker: 'them', text: 'Morning everyone — quick standup on the Atlas migration.' },
-  { speaker: 'them', text: 'Phase two is still blocked on the renewal pricing sign-off from legal.' },
-  { speaker: 'them', text: 'Keep updates concise please, under a minute each.' },
-  { speaker: 'you', text: 'I can take the legal chase, but I want to see the September budget first.' },
-  { speaker: 'them', text: 'Fine. Sam, can you pull the budget before Thursday?' },
-  { speaker: 'them', text: 'And we commit to nothing before Friday.' },
-];
-
-/** A few realistic interview scenarios for common SWE targets. */
-const SAMPLE_JOBS: SampleJob[] = [
+  },
   {
+    key: 'atlas',
+    kind: 'project',
+    title: 'Atlas migration',
+    company: 'Platform team',
+    notes: 'Phase 2 cannot start before legal signs off. Mei owns the infra cutover plan.',
+    jdText: `Atlas migration — project brief
+
+Goal: move the billing and entitlement services off the legacy monolith onto the
+Atlas platform, without a customer-visible outage and without a pricing change.
+
+Scope:
+- Phase one (done, June): read paths moved behind a proxy; dual-write in place.
+- Phase two: writes cut over, legacy tables frozen, proxy removed.
+- Out of scope: the reporting warehouse, which moves next year.
+
+Decisions already made:
+- Dual-write stays for one full billing cycle after cutover, then is deleted.
+- No customer-visible pricing change during the migration — this is why legal
+  sign-off on renewal pricing gates phase two.
+- Rollback is a proxy flag flip, not a data restore.
+
+Open threads:
+- Who owns the entitlement cache invalidation after the proxy is removed.
+- Whether the September freeze applies to internal-only services.`,
+  },
+  {
+    key: 'google',
+    kind: 'job',
     title: 'Software Engineer, L4',
     company: 'Google',
     notes:
@@ -124,6 +157,8 @@ Responsibilities:
 - Contribute to system design reviews and mentor junior engineers.`,
   },
   {
+    key: 'amazon',
+    kind: 'job',
     title: 'Software Development Engineer II (SDE II)',
     company: 'Amazon',
     notes:
@@ -147,6 +182,8 @@ Responsibilities:
 - Embody Amazon's Leadership Principles in how you build and collaborate.`,
   },
   {
+    key: 'stripe',
+    kind: 'job',
     title: 'Senior Frontend Engineer',
     company: 'Stripe',
     notes:
@@ -168,19 +205,157 @@ We're looking for:
 - Strong understanding of browser performance, state management, and testing.
 - Care about developer experience and craft; clear written communication.`,
   },
+  {
+    key: 'consensus',
+    kind: 'subject',
+    title: 'Distributed systems',
+    company: 'MIT 6.824',
+    notes: 'Exam in November. Weakest on consensus — Raft leader election especially.',
+    jdText: `Distributed systems — working notes
+
+Where I am: through the Raft paper and lab 2A. Comfortable with the log
+replication argument, shaky on the election-restriction proof.
+
+The parts that keep not sticking:
+- Why a candidate with a shorter log cannot win an election (the
+  up-to-date check compares last term first, then index).
+- What exactly commitment means across a term boundary, and why a leader may
+  not commit an entry from a previous term by counting replicas alone.
+- The difference between the state machine safety property and log matching.
+
+Next: lab 2B, then re-read section 5.4.`,
+  },
+  {
+    key: 'move',
+    kind: 'personal',
+    title: 'House move',
+    company: 'Sam — the agent',
+    notes: 'Completion is 12 September. Do not agree to a date on a call without checking the survey.',
+    jdText: `House move — background
+
+Buying at 14 Fenwick Road; chain of three. Completion currently pencilled for
+12 September.
+
+Who is who:
+- Sam — the estate agent, calls on Fridays.
+- Ellen — the solicitor, only emails.
+- The seller is waiting on their own purchase, which is the real risk.
+
+Things already agreed:
+- The survey money is spent; the damp report came back clear.
+- The seller pays for the boiler service before completion.
+- Nothing is agreed on the fixtures list yet.`,
+  },
+];
+
+interface SampleConversation {
+  /** Which Space this happened in (`SampleSpace.key`). */
+  space: string;
+  daysAgo: number;
+  minutes: number;
+  /** Left unkept — the user pressing Keep is the demo, so it must not be
+   *  pre-pressed. See `keepable` below. */
+  turns: { speaker: string; text: string }[];
+}
+
+/**
+ * Finished conversations, all left UNKEPT.
+ *
+ * Keeping one is what runs the archive + memory-extraction pipeline, and that
+ * decision belongs to whoever is sitting in front of the app — so it is never
+ * pre-pressed here. The capture spec keeps the two older standups (producing
+ * real archives and real memory candidates), and leaves the most recent one
+ * alone so the video can show the decision being made.
+ *
+ * The two older standups are written so that a fact CHANGES between them:
+ * phase two is a September start in the first and slips to October in the
+ * second. That is the whole reason they exist. It gives the extractor a genuine
+ * contradiction to find, so the Replace/supersede scene in the video shows real
+ * output rather than a staged screen — and if the model does not spot it, the
+ * scene is dropped rather than faked (docs/21-MEDIA.md § Scenes that may not
+ * appear).
+ */
+const SAMPLE_CONVERSATIONS: SampleConversation[] = [
+  {
+    space: 'standup',
+    daysAgo: 21,
+    minutes: 12,
+    turns: [
+      { speaker: 'them', text: 'Morning — standup on the Atlas migration.' },
+      { speaker: 'them', text: 'Phase one is done. Phase two is scoped and we are starting it in September.' },
+      { speaker: 'them', text: 'The one thing in the way is the renewal pricing sign-off from legal.' },
+      { speaker: 'you', text: 'I can take the legal chase if someone else owns the cutover plan.' },
+      { speaker: 'them', text: 'Mei owns the cutover plan. Alex owns the legal chase.' },
+      { speaker: 'them', text: 'Reminder that budget is fixed through September, so nothing that costs money.' },
+    ],
+  },
+  {
+    space: 'standup',
+    daysAgo: 7,
+    minutes: 14,
+    turns: [
+      { speaker: 'them', text: 'Standup. Quick one, Priya has a hard stop.' },
+      { speaker: 'them', text: 'Legal came back and they want another two weeks on renewal pricing.' },
+      { speaker: 'them', text: 'So phase two is not starting in September. We are moving it to October.' },
+      { speaker: 'you', text: 'That pushes the dual-write window into the December freeze.' },
+      { speaker: 'them', text: 'Noted. Mei, can you re-cut the cutover plan against an October start?' },
+      { speaker: 'them', text: 'And nobody commits to a customer-facing date until legal is actually signed.' },
+    ],
+  },
+  {
+    space: 'standup',
+    daysAgo: 0,
+    minutes: 11,
+    turns: [
+      { speaker: 'them', text: 'Morning everyone — quick standup on the Atlas migration.' },
+      { speaker: 'them', text: 'Phase two is still blocked on the renewal pricing sign-off from legal.' },
+      { speaker: 'them', text: 'Keep updates concise please, under a minute each.' },
+      { speaker: 'you', text: 'I can take the legal chase, but I want to see the September budget first.' },
+      { speaker: 'them', text: 'Fine. Sam, can you pull the budget before Thursday?' },
+      { speaker: 'them', text: 'And we commit to nothing before Friday.' },
+    ],
+  },
+  {
+    space: 'atlas',
+    daysAgo: 11,
+    minutes: 34,
+    turns: [
+      { speaker: 'them', text: 'This is the design review for the phase two cutover.' },
+      { speaker: 'you', text: 'The proposal is to keep dual-write for one full billing cycle, then delete it.' },
+      { speaker: 'them', text: 'What is the rollback if entitlements go wrong after the proxy is removed?' },
+      { speaker: 'you', text: 'Flip the proxy flag back. It is not a data restore, which is the point of keeping dual-write.' },
+      { speaker: 'them', text: 'Agreed. Write that down — rollback is a flag flip, not a restore.' },
+      { speaker: 'them', text: 'Open question nobody owns yet: entitlement cache invalidation once the proxy is gone.' },
+    ],
+  },
+  {
+    space: 'move',
+    daysAgo: 4,
+    minutes: 9,
+    turns: [
+      { speaker: 'them', text: 'Hi, it is Sam — quick update on Fenwick Road.' },
+      { speaker: 'them', text: 'The seller is asking whether you could complete a week earlier, on the fifth.' },
+      { speaker: 'you', text: 'I am not agreeing to a date on the phone. Send it to Ellen and I will confirm.' },
+      { speaker: 'them', text: 'Understood. Also they want the fixtures list back this week.' },
+      { speaker: 'them', text: 'And the boiler service is booked for the week before completion, as agreed.' },
+    ],
+  },
 ];
 
 /**
- * Seed a sample profile (résumé), a recurring meeting Space with one finished
- * conversation in it, and a few realistic interview scenarios — parsing +
- * indexing them when a key is present so the user can try the full flow
- * immediately.
+ * Seed the demo world: one profile with a résumé, seven Spaces across five
+ * activities, and five finished conversations waiting to be kept.
  *
+ * Parsing + indexing run when a key is present, so retrieval works immediately.
  * Structured JD parsing runs on interview Spaces ONLY: it extracts requirements
  * and responsibilities, and running it over a standup agenda produces confident
  * nonsense (shared/activities.ts, `isInterviewSpace`).
  */
-export async function loadSampleData(): Promise<{ profileId: string; jobs: number }> {
+export async function loadSampleData(): Promise<{
+  profileId: string;
+  jobs: number;
+  conversations: number;
+}> {
   const hasKey = apiKeyStore.isPresent();
 
   const profile = profilesRepo.create({
@@ -195,59 +370,80 @@ export async function loadSampleData(): Promise<{ profileId: string; jobs: numbe
   if (hasKey) profilesRepo.update(profile.id, { parsedResume: await parseResume(SAMPLE_RESUME) });
   await reindexProfile(profile.id);
 
-  const spaces = [SAMPLE_MEETING, ...SAMPLE_JOBS];
-  let meetingSpaceId: string | null = null;
-  for (const j of spaces) {
-    const kind = j.kind ?? 'job';
+  const spaceIds = new Map<string, string>();
+  for (const s of SAMPLE_SPACES) {
     const job = jobsRepo.create({
       profileId: profile.id,
-      kind,
-      title: j.title,
-      company: j.company,
+      kind: s.kind,
+      title: s.title,
+      company: s.company,
       jdUrl: null,
-      jdText: j.jdText,
+      jdText: s.jdText,
       companyUrl: null,
-      notes: j.notes ?? null,
+      notes: s.notes ?? null,
     });
-    if (kind === 'meeting') meetingSpaceId = job.id;
-    if (hasKey && isInterviewSpace(kind)) {
-      jobsRepo.update(job.id, { parsedJd: await parseJobDescription(j.jdText) });
+    spaceIds.set(s.key, job.id);
+    if (hasKey && isInterviewSpace(s.kind)) {
+      jobsRepo.update(job.id, { parsedJd: await parseJobDescription(s.jdText) });
     }
     await indexJob(job.id);
   }
 
-  if (meetingSpaceId) seedSampleConversation(profile.id, meetingSpaceId);
+  const kindOf = new Map(SAMPLE_SPACES.map((s) => [s.key, s.kind]));
+  let conversations = 0;
+  for (const c of SAMPLE_CONVERSATIONS) {
+    const packId = spaceIds.get(c.space);
+    const kind = kindOf.get(c.space);
+    if (!packId || !kind) continue; // a renamed key must not seed an orphan session
+    seedSampleConversation(profile.id, packId, kind, c);
+    conversations++;
+  }
 
-  return { profileId: profile.id, jobs: spaces.length };
+  return { profileId: profile.id, jobs: SAMPLE_SPACES.length, conversations };
 }
 
 /**
- * A finished, unkept session in the sample meeting Space.
+ * One finished, unkept session with its transcript.
  *
  * Written straight to the tables rather than through sessionManager: there is
  * no audio to transcribe and no model to call, and the point is only to give
  * the continuity loop something real to act on. Left `stopped` and unkept, so
  * the archive and the memory suggestions are produced by the real pipeline when
  * the user decides to keep it — not fabricated here.
+ *
+ * `mode` is derived through `modeFor`, never hardcoded: a project discussion and
+ * a standup both run the meeting engine today, and a seeded session that
+ * disagreed with the catalog would be a fixture quietly asserting a mapping the
+ * app does not use.
  */
-function seedSampleConversation(profileId: string, packId: string): void {
+function seedSampleConversation(
+  profileId: string,
+  packId: string,
+  kind: ContextPackKind,
+  c: SampleConversation,
+): void {
   const id = crypto.randomUUID();
-  const startedAt = Date.now() - 7 * 24 * 60 * 60 * 1000; // "last Tuesday"
+  const startedAt = Date.now() - c.daysAgo * 24 * 60 * 60 * 1000;
+  const endedAt = startedAt + c.minutes * 60 * 1000;
   db()
     .insert(schema.sessions)
     .values({
       id,
       profileId,
       packId,
-      activity: 'meeting',
-      mode: 'meeting',
+      activity: kind,
+      mode: modeFor(kind),
       kind: 'live',
       status: 'stopped',
+      startedAt,
       createdAt: startedAt,
-      endedAt: startedAt + 11 * 60 * 1000,
+      endedAt,
     })
     .run();
-  SAMPLE_TRANSCRIPT.forEach((turn, i) =>
+  // Spread the turns across the real duration so the archive reads in sequence
+  // and the Sessions list shows a believable length.
+  const step = Math.max(1, Math.floor((endedAt - startedAt) / (c.turns.length + 1)));
+  c.turns.forEach((turn, i) =>
     db()
       .insert(schema.transcriptChunks)
       .values({
@@ -256,7 +452,7 @@ function seedSampleConversation(profileId: string, packId: string): void {
         speaker: turn.speaker,
         text: turn.text,
         isFinal: 1,
-        createdAt: startedAt + i * 30_000, // ordered, so the archive reads in sequence
+        createdAt: startedAt + (i + 1) * step,
       })
       .run(),
   );

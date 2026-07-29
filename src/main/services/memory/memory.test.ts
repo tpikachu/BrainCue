@@ -190,6 +190,49 @@ describe('extraction gates', () => {
     expect(rows.some((r) => r.content.includes('hunter2'))).toBe(false);
   });
 
+  /**
+   * The prompt has to carry the keys, or supersede is unreachable in practice.
+   *
+   * `factKey` only supersedes when two extractions choose the SAME slug. Sent
+   * nothing but a transcript, the model picks a plausible one each time —
+   * `project:atlas/phase-two-start` on Tuesday and
+   * `project:atlas/phase-2-start-date` next Tuesday — and a near-miss key reads
+   * as a brand-new fact, so both values are remembered at once. Every test
+   * around supersede seeds the matching key by hand, so all of them pass while
+   * the real path never fires. This is the one that would notice.
+   */
+  it('tells the model which fact keys it already holds, so a changed value can replace one', async () => {
+    const pid = seedProfile();
+    const packId = seedPack(pid);
+    seedApproved(pid, 'Phase two of Atlas starts in September.', {
+      factKey: 'project:atlas/phase-two-start',
+    });
+    // A retired value must NOT be offered — naming it invites a revival.
+    const retired = seedApproved(pid, 'Phase two of Atlas starts in August.', {
+      factKey: 'project:atlas/phase-two-start-old',
+    });
+    memoriesRepo.supersede(retired, 'someone-else', T0);
+    // Free-text memories have no key and nothing to reuse.
+    seedApproved(pid, 'Prefers concise updates in standup.');
+
+    const sid = seedSession(pid, packId, [
+      'Legal need two more weeks.',
+      'So phase two moves to October.',
+    ]);
+    let prompt = '';
+    h.chatJson = async (req: { system: string; user: string }) => {
+      prompt = `${req.system}\n${req.user}`;
+      return { candidates: [] };
+    };
+    await extractMemoryCandidates(sid);
+
+    expect(prompt).toContain('project:atlas/phase-two-start = Phase two of Atlas starts in September.');
+    expect(prompt).not.toContain('project:atlas/phase-two-start-old');
+    expect(prompt).not.toContain('Prefers concise updates in standup.');
+    // And the instruction that makes the list mean something.
+    expect(prompt).toMatch(/reuse its factKey EXACTLY/i);
+  });
+
   it('an invalid extraction shape stores nothing', async () => {
     const pid = seedProfile();
     const sid = seedSession(pid, null, ['Turn one.', 'Turn two.']);

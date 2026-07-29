@@ -64,8 +64,41 @@ BE CONSERVATIVE:
 - scope "space" only when the fact is specific to THIS meeting/job context; otherwise "profile".
 - confidence reflects how explicitly the transcript supports it. When in doubt, lower.
 
-SET "factKey" ONLY for a fact that can have exactly ONE current value, so a later value replaces this one rather than sitting beside it. Format: "domain:subject/attribute", lowercase kebab — e.g. "project:atlas/launch-date", "person:sarah-chen/role", "profile:user/job-title". Same fact = same key across sessions, so choose the obvious slug and reuse it.
+SET "factKey" ONLY for a fact that can have exactly ONE current value, so a later value replaces this one rather than sitting beside it. Format: "domain:subject/attribute", lowercase kebab — e.g. "project:atlas/launch-date", "person:sarah-chen/role", "profile:user/job-title".
+If a KNOWN FACT below is about the same thing, reuse its factKey EXACTLY — even when the new value contradicts it. That contradiction is the point: it is how a changed fact replaces the old one instead of both being believed at once. Do not invent a near-miss variant of a key that already exists.
 OMIT "factKey" (or null) for anything multi-valued or narrative: preferences, stories, workflows, observations. A wrong key silently retires a good memory, so when unsure, omit it.`;
+
+/** Keys shown to the extractor. Enough to cover a real profile's single-valued
+ *  facts, small enough that the prompt cost stays flat as memory grows. */
+const KNOWN_FACT_LIMIT = 40;
+
+/**
+ * Tell the extractor which single-valued facts it already holds.
+ *
+ * Without this the model sees only the transcript, so "reuse the obvious slug"
+ * is a coin flip between `project:atlas/phase-two-start` and
+ * `project:atlas/phase-2-start-date`. Two independent extractions rarely agree,
+ * a near-miss key looks brand new, and both values are then remembered side by
+ * side — which means supersede, `validTo`, and the whole Replace path could
+ * essentially never fire in the field, no matter how plainly a transcript said
+ * the fact had changed.
+ *
+ * Only keyed memories are listed, and only their key + current value: the
+ * question being answered is "have I seen this fact before", not "what else do
+ * I know". Superseded rows are left out — offering a retired value as a target
+ * would invite the model to revive it.
+ */
+function knownFactsBlock(known: MemoryItem[]): string {
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const m of known) {
+    if (!m.factKey || m.supersededBy || seen.has(m.factKey)) continue;
+    seen.add(m.factKey);
+    lines.push(`- ${m.factKey} = ${m.content}`);
+    if (lines.length >= KNOWN_FACT_LIMIT) break;
+  }
+  return lines.length ? `KNOWN FACTS (reuse these keys when a value changes):\n${lines.join('\n')}\n\n` : '';
+}
 
 const normalize = (text: string): string =>
   text
@@ -133,12 +166,17 @@ export async function extractMemoryCandidates(sessionId: string): Promise<number
   if (turns.length < 2) return 0; // nothing durable comes out of a one-liner
 
   const transcript = turns.map((t) => `${t.speaker}: ${t.text}`).join('\n');
+
+  // Everything this profile already has to say about, in any scope and any
+  // state. Built once: the candidate set is at most 5 and this list is small.
+  const known = memoriesRepo.list({ profileId: session.profileId });
+
   let parsed: z.infer<typeof extractionSchema>;
   try {
     const raw = await providerFor('chat').json<unknown>({
       task: 'parsing',
       system: SYSTEM,
-      user: `Transcript:\n${transcript}`,
+      user: `${knownFactsBlock(known)}Transcript:\n${transcript}`,
       maxOutputTokens: 600,
     });
     const result = extractionSchema.safeParse(raw);
@@ -147,10 +185,6 @@ export async function extractMemoryCandidates(sessionId: string): Promise<number
   } catch {
     return 0; // extraction failure → nothing (never a partial guess)
   }
-
-  // Everything this profile already has to say about, in any scope and any
-  // state. Built once: the candidate set is at most 5 and this list is small.
-  const known = memoriesRepo.list({ profileId: session.profileId });
 
   let saved = 0;
   for (const c of parsed.candidates) {

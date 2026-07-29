@@ -46,6 +46,7 @@ each answers a question the previous one raises.
 | [06 · Provider services](06-OPENAI-SERVICE.md) | Transcription, answers, embeddings, and speech behind the provider seam. |
 | [07 · API key security](07-API-KEY-SECURITY.md) | Where the key lives, and why it never reaches the renderer. |
 | [08 · Folder structure](08-FOLDER-STRUCTURE.md) | Where code goes and why. |
+| [21 · Media](21-MEDIA.md) | The demo film, the GIFs and the screenshots: the storyboard, the style rules, how they are captured from the real app, and the checklist before any of it ships. |
 
 ## Process & history
 
@@ -68,6 +69,13 @@ each answers a question the previous one raises.
 
 ## Media
 
-`media/` holds the demo GIFs and video used by the landing page and the root
-README. See [`../e2e/README.md`](../e2e/README.md#capturing-marketing-media) for
-how those assets are produced.
+`media/` holds the demo film and the GIFs; `images/` holds the screenshots. Both
+are used by the landing page and the root README, and both are recordings of the
+real app — nothing is mocked up in a design tool.
+
+```bash
+npm run media          # capture everything, then build everything
+```
+
+[**21 · Media**](21-MEDIA.md) is the guide: the storyboard, the style rules,
+what every asset is for, and what has to be true before any of it ships.

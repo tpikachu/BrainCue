@@ -38,6 +38,10 @@ takes afterwards.
 | **Game** · **Just me** | playing, or thinking out loud | an ambient presence that stays out of the way |
 | **Something else** | anything the list misses | contributes only when it is confident |
 
+<p align="center">
+  <img src="docs/media/activities.gif" width="900" alt="The eight activities: meeting or call, project discussion, interview, study or tutoring, personal, game, just me, something else." />
+</p>
+
 Underneath, these run three engine modes over **one** pipeline — *listen →
 decide whether to contribute → ground in your documents → respond*. The mode is
 derived, never chosen, because picking a mode *and* a category was the same
@@ -79,13 +83,20 @@ recalled. Details in [docs/16-CONTINUITY.md](docs/16-CONTINUITY.md).
 
 ## See it in action
 
-<!-- Captured from the real app (see e2e/README.md#capturing-marketing-media).
-     The clips below are from the interview activity, which is the easiest one
-     to film end-to-end; the pipeline they show is the same one every activity
-     runs. -->
+<p align="center">
+  <a href="docs/media/braincue-demo.mp4"><b>▶ Watch the demo</b></a><br />
+  <sub>Every feature, end to end — recorded from the real app, against the sample
+  data you can load with one click.</sub>
+</p>
+
+<!-- Captured from the real app; the loops below are cut from the film itself,
+     so a GIF here and the same moment in the video are always the same take.
+     See docs/21-MEDIA.md. They are from the interview activity, which is the
+     easiest one to film end-to-end; the pipeline they show is the same one
+     every activity runs. -->
 
 <p align="center">
-  <img src="docs/media/cuecard-stream.gif" width="360" alt="The floating Cue Card: the interviewer's question is transcribed live, then a grounded, cited answer streams in." />
+  <img src="docs/media/cuecard-stream.gif" width="420" alt="The floating Cue Card: the interviewer's question is transcribed live, then a grounded, cited answer streams in." />
   <br /><sub><b>Live, in real time</b> — the question is heard, and a grounded, cited answer streams into the Cue Card.</sub>
 </p>
 
@@ -95,11 +106,21 @@ recalled. Details in [docs/16-CONTINUITY.md](docs/16-CONTINUITY.md).
 </p>
 
 <p align="center">
-  <a href="docs/media/braincue-demo.mp4"><b>▶ Watch the demo</b></a> — a captioned walkthrough, captured from the real app.
+  <img src="docs/media/memory-loop.gif" width="900" alt="The memory loop: the call happens, you keep it, it proposes candidates, you approve them, and the next conversation knows — replacing a fact when it changes rather than believing both." />
+  <br /><sub><b>It proposes. You decide.</b> — a conversation only becomes memory if you say so, one item at a time.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/media/grounding.gif" width="900" alt="Documents indexed on your machine; only the matching pieces plus the question are sent, and the answer in the Cue Card names its source." />
+  <br /><sub><b>Your documents never leave</b> — only the matching lines do, and every answer says where it came from.</sub>
 </p>
 
 <table>
   <tr>
+    <td width="33%" align="center" valign="top">
+      <img src="docs/media/grounded-answer.gif" width="240" alt="An answer streaming into the Cue Card, built from the user's own résumé and the job description, with its sources named." />
+      <br /><sub><b>Grounded in your story</b><br />your material · with its sources</sub>
+    </td>
     <td width="33%" align="center" valign="top">
       <img src="docs/media/format-switch.gif" width="240" alt="Re-tell any answer as key points, an explanation, or a STAR story — switched live." />
       <br /><sub><b>Re-tell it your way</b><br />key points · explanation · STAR story</sub>
@@ -108,17 +129,8 @@ recalled. Details in [docs/16-CONTINUITY.md](docs/16-CONTINUITY.md).
       <img src="docs/media/coding-solve.gif" width="240" alt="A captured coding problem is solved in the Cue Card with an optimal solution and complexity analysis." />
       <br /><sub><b>Live coding rounds</b><br />optimal solution + complexity</sub>
     </td>
-    <td width="33%" align="center" valign="top">
-      <img src="docs/media/mock-interview.gif" width="240" alt="An AI interviewer asks a question aloud and BrainCue answers it in the Cue Card." />
-      <br /><sub><b>Practice mode</b><br />the AI asks · BrainCue answers</sub>
-    </td>
   </tr>
 </table>
-
-<p align="center">
-  <img src="docs/media/interview-grounded.gif" width="640" alt="The session page: pick a profile, and each session is grounded in its own documents — résumé, job description, company research." />
-  <br /><sub><b>Grounded in your story</b> — every session draws on its own documents (résumé, JD, company research), parsed and indexed on your machine.</sub>
-</p>
 
 ---
 

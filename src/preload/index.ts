@@ -70,7 +70,8 @@ const api = {
         IPC.data.stats,
       ),
     wipeAll: () => invoke<{ wiped: boolean }>(IPC.data.wipeAll),
-    loadSamples: () => invoke<{ profileId: string; jobs: number }>(IPC.data.loadSamples),
+    loadSamples: () =>
+      invoke<{ profileId: string; jobs: number; conversations: number }>(IPC.data.loadSamples),
   },
   window: {
     minimize: () => invoke<{ ok: true }>(IPC.window.minimize),

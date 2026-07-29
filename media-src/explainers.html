@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>BrainCue — explainers</title>
+<!--
+  The DRAWN half of the media set.
+
+  Everything in docs/images and most of docs/media is a recording of the app.
+  These are not: they are diagrams that explain a claim the app makes, which is
+  a different job from showing the app making it. Keeping the two visibly
+  different is the whole discipline — a screenshot must never be an
+  illustration, and an illustration must never pass as a screenshot. That is why
+  these have their own look, and why none of them contains a fake screenshot of
+  a BrainCue window.
+
+  One file, several explainers, chosen by ?e=<name>. Every animation runs on the
+  same LOOP_MS cycle so the capture is a fixed length and the GIF loops cleanly.
+
+  Render:  node scripts/build-explainers.mjs
+  See:     docs/21-MEDIA.md § The explainers
+-->
+<style>
+  :root {
+    --bg: #0b0d14;
+    --panel: #12151f;
+    --hair: rgba(255, 255, 255, 0.09);
+    --ink: #f3f4f8;
+    --dim: #9aa0b4;
+    --faint: #6a7186;
+    --accent: #818cf8;
+    --accent-deep: #4f46e5;
+    --good: #34d399;
+    --warn: #fbbf24;
+    --loop: 8s;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 1200px; height: 675px; overflow: hidden;
+    background: var(--bg); color: var(--ink);
+    font: 400 15px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  body::before {
+    /* One soft light source, so the frame is not a flat black rectangle. */
+    content: ''; position: fixed; inset: -20%;
+    background: radial-gradient(48% 42% at 50% 6%, rgba(99, 102, 241, 0.2), transparent 70%);
+    pointer-events: none;
+  }
+  section { display: none; position: absolute; inset: 0; padding: 40px 56px; }
+  section.on { display: block; }
+
+  h1 { font-size: 30px; font-weight: 700; text-align: center; letter-spacing: -0.4px; }
+  .sub { margin-top: 9px; text-align: center; color: var(--dim); font-size: 15px; }
+  .foot {
+    position: absolute; left: 0; right: 0; bottom: 44px;
+    text-align: center; font-size: 22px; font-weight: 600; color: var(--dim);
+  }
+  .foot b { color: var(--ink); font-weight: 700; }
+  .foot .hl { color: var(--accent); font-weight: 700; }
+
+  .tag {
+    display: inline-block; padding: 4px 11px; border-radius: 6px;
+    font-size: 11px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase;
+  }
+
+  /* ── Step rail, shared by the flow explainers ──────────────────────────── */
+  .rail { display: flex; align-items: stretch; gap: 14px; margin-top: 46px; }
+  .step {
+    position: relative; flex: 1; min-width: 0;
+    background: var(--panel); border: 1px solid var(--hair); border-radius: 14px;
+    padding: 18px 16px 16px; opacity: 0.42;
+    animation: lift var(--loop) linear infinite;
+  }
+  .step .n {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; border-radius: 7px; margin-bottom: 11px;
+    background: rgba(129, 140, 248, 0.14); color: var(--accent);
+    font-size: 12px; font-weight: 700;
+  }
+  .step h3 { font-size: 16px; font-weight: 650; letter-spacing: -0.1px; }
+  .step p { margin-top: 6px; font-size: 13px; color: var(--faint); line-height: 1.5; }
+  .step .quote {
+    margin-top: 10px; padding: 9px 11px; border-radius: 9px;
+    background: rgba(255, 255, 255, 0.035); border-left: 2px solid var(--accent);
+    font-size: 12.5px; color: var(--dim); font-style: italic;
+  }
+  .arrow { align-self: center; color: var(--faint); font-size: 19px; flex: none; }
+
+  /* Each step lights for one quarter/fifth of the loop; `--i` sets its slot and
+     `--n` how many slots there are. Keeping the timing in CSS variables means
+     the capture never has to know anything about the animation. */
+  @keyframes lift {
+    0%, 100% { opacity: 0.42; transform: translateY(0); border-color: var(--hair); }
+    /* the real timing is applied per-step below via animation-delay */
+  }
+  .step { animation: none; }
+  .step.lit {
+    opacity: 1;
+    border-color: rgba(129, 140, 248, 0.55);
+    box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.18), 0 18px 46px -22px rgba(79, 70, 229, 0.9);
+    transform: translateY(-3px);
+    transition: all 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .step { transition: all 0.45s cubic-bezier(0.22, 1, 0.36, 1); }
+
+  /* ── Grounding ─────────────────────────────────────────────────────────── */
+  .ground { display: grid; grid-template-columns: 300px 1fr 340px; gap: 26px; margin-top: 42px; align-items: start; }
+  .stack { display: flex; flex-direction: column; gap: 9px; }
+  .doc {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--panel); border: 1px solid var(--hair); border-radius: 11px;
+    padding: 12px 13px; font-size: 13.5px; color: var(--dim);
+  }
+  .doc .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+  .doc.hit { border-color: rgba(52, 211, 153, 0.5); color: var(--ink); background: rgba(52, 211, 153, 0.07); }
+  .doc.hit .dot { background: var(--good); }
+  .pipe { text-align: center; padding-top: 26px; }
+  .pipe .lbl { font-size: 12px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--faint); }
+  .beam {
+    height: 2px; margin: 14px 0; border-radius: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    background-size: 220% 100%;
+    animation: flow var(--loop) linear infinite;
+  }
+  @keyframes flow { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--hair); border-radius: 14px; padding: 16px;
+  }
+  .card .q { font-size: 13px; color: var(--faint); }
+  .card .a { margin-top: 10px; font-size: 14px; line-height: 1.6; }
+  .card .cite {
+    margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--hair);
+    font-size: 12px; color: var(--good);
+  }
+
+  /* ── Activities ────────────────────────────────────────────────────────── */
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 44px; }
+  .act {
+    background: var(--panel); border: 1px solid var(--hair); border-radius: 14px;
+    padding: 18px 16px; opacity: 0.5;
+    transition: all 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .act.lit {
+    opacity: 1; border-color: rgba(129, 140, 248, 0.55); transform: translateY(-4px);
+    box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.18), 0 18px 46px -22px rgba(79, 70, 229, 0.9);
+  }
+  .act .ico { font-size: 21px; }
+  .act h3 { margin-top: 9px; font-size: 15px; font-weight: 650; }
+  .act p { margin-top: 5px; font-size: 12.5px; color: var(--faint); }
+</style>
+</head>
+<body>
+
+<!-- ── memory-loop ────────────────────────────────────────────────────────── -->
+<section data-e="memory-loop">
+  <h1>Nothing is remembered silently.</h1>
+  <p class="sub">A conversation only becomes memory if you say so — one item at a time.</p>
+  <div class="rail" data-steps>
+    <div class="step">
+      <div class="n">1</div>
+      <h3>The call happens</h3>
+      <p>Transcribed live, on your machine.</p>
+      <div class="quote">“Phase two moves to October.”</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="step">
+      <div class="n">2</div>
+      <h3>You keep it</h3>
+      <p>Filed into its Space. Skip this and nothing is kept at all.</p>
+    </div>
+    <div class="arrow">→</div>
+    <div class="step">
+      <div class="n">3</div>
+      <h3>It proposes</h3>
+      <p>Candidates, not memories. Each one waits.</p>
+      <div class="quote">Phase two starts in October</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="step">
+      <div class="n">4</div>
+      <h3>You approve</h3>
+      <p>Approve, edit, or reject. Only approved facts are ever recalled.</p>
+    </div>
+    <div class="arrow">→</div>
+    <div class="step">
+      <div class="n">5</div>
+      <h3>Next week it knows</h3>
+      <p>And when the fact changes, it replaces — it does not believe both.</p>
+    </div>
+  </div>
+  <p class="foot">It <span class="hl">proposes</span>. You <b>decide</b>. That is the whole contract.</p>
+</section>
+
+<!-- ── grounding ──────────────────────────────────────────────────────────── -->
+<section data-e="grounding">
+  <h1>Answers come from your material.</h1>
+  <p class="sub">Indexed on your machine — only the matching pieces are ever sent.</p>
+  <div class="ground">
+    <div>
+      <span class="tag" style="background:rgba(129,140,248,.14);color:var(--accent)">On your disk</span>
+      <div class="stack" style="margin-top:13px" data-docs>
+        <div class="doc"><span class="dot"></span>Résumé — Alex Rivera</div>
+        <div class="doc"><span class="dot"></span>Job description — Google L4</div>
+        <div class="doc"><span class="dot"></span>Standup agenda — Atlas</div>
+        <div class="doc"><span class="dot"></span>Project brief — migration</div>
+        <div class="doc"><span class="dot"></span>Approved memories</div>
+      </div>
+    </div>
+    <div class="pipe">
+      <div class="lbl">matched locally</div>
+      <div class="beam"></div>
+      <div class="lbl">top matches + the question</div>
+      <div class="beam"></div>
+      <div class="lbl" style="color:var(--good)">grounded answer</div>
+    </div>
+    <div>
+      <span class="tag" style="background:rgba(52,211,153,.12);color:var(--good)">In the Cue Card</span>
+      <div class="card" style="margin-top:13px">
+        <div class="q">“Tell me about a performance win.”</div>
+        <div class="a">
+          Checkout service redesign — cut p99 from <b>1.2s to 280ms</b>, lifting
+          conversion 3.4%. Go, gRPC, Postgres.
+        </div>
+        <div class="cite">▪ from your résumé · Northwind, 2021–present</div>
+      </div>
+    </div>
+  </div>
+  <p class="foot">Your documents never leave. <span class="hl">The matching lines</span> do.</p>
+</section>
+
+<!-- ── activities ─────────────────────────────────────────────────────────── -->
+<section data-e="activities">
+  <h1>You pick what the conversation is.</h1>
+  <p class="sub">Never which mode to run — that is derived, so it can never disagree with you.</p>
+  <div class="grid" data-acts>
+    <div class="act"><div class="ico">🗓️</div><h3>Meeting or call</h3><p>A standup, a client call, a weekly sync.</p></div>
+    <div class="act"><div class="ico">🧩</div><h3>Project discussion</h3><p>Work you talk about every week.</p></div>
+    <div class="act"><div class="ico">🎯</div><h3>Interview</h3><p>You are the candidate.</p></div>
+    <div class="act"><div class="ico">📚</div><h3>Study or tutoring</h3><p>Material you are learning.</p></div>
+    <div class="act"><div class="ico">🏠</div><h3>Personal</h3><p>A landlord, a doctor, a bank.</p></div>
+    <div class="act"><div class="ico">🎮</div><h3>Game</h3><p>A companion that stays out of the way.</p></div>
+    <div class="act"><div class="ico">💭</div><h3>Just me</h3><p>Thinking out loud while you work.</p></div>
+    <div class="act"><div class="ico">✳️</div><h3>Something else</h3><p>Anything that fits none of these.</p></div>
+  </div>
+  <p class="foot">One companion. <span class="hl">Every conversation you actually have.</span></p>
+</section>
+
+<script>
+  // Show the requested explainer, then walk its highlight on a fixed cycle so
+  // the GIF loops seamlessly. Driving this from JS rather than CSS keyframes
+  // keeps every explainer on one clock — the capture records LOOP_MS and stops,
+  // and never has to know what is being animated.
+  const LOOP_MS = 8000;
+  const name = new URLSearchParams(location.search).get('e') || 'memory-loop';
+  const section = document.querySelector(`section[data-e="${name}"]`);
+  if (!section) throw new Error(`no explainer named ${name}`);
+  section.classList.add('on');
+
+  const cycle = (nodes, holdMs) => {
+    if (!nodes.length) return;
+    let i = 0;
+    const tick = () => {
+      nodes.forEach((n, k) => n.classList.toggle('lit', k === i));
+      i = (i + 1) % nodes.length;
+    };
+    tick();
+    setInterval(tick, holdMs);
+  };
+
+  const steps = [...section.querySelectorAll('[data-steps] .step')];
+  if (steps.length) cycle(steps, LOOP_MS / steps.length);
+
+  const acts = [...section.querySelectorAll('[data-acts] .act')];
+  if (acts.length) cycle(acts, LOOP_MS / acts.length);
+
+  const docs = [...section.querySelectorAll('[data-docs] .doc')];
+  if (docs.length) {
+    // Grounding is not a walk — it is a retrieval: two of five documents match,
+    // and the point is that the other three are not sent anywhere.
+    const hits = [[0, 1], [0, 4], [1, 4]];
+    let i = 0;
+    const tick = () => {
+      docs.forEach((d, k) => d.classList.toggle('hit', hits[i].includes(k)));
+      i = (i + 1) % hits.length;
+    };
+    tick();
+    setInterval(tick, LOOP_MS / hits.length);
+  }
+</script>
+</body>
+</html>

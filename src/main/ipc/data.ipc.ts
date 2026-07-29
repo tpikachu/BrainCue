@@ -62,7 +62,10 @@ export function registerDataIpc(): void {
     return { wiped: true };
   });
 
-  // Seed a sample profile + a few realistic interviews so users can try the flow.
+  // Seed the demo world: a profile with a résumé, Spaces across several
+  // activities, and finished conversations waiting to be kept. This is the same
+  // world the screenshots and the demo video are captured from — see
+  // services/samples/sampleData.ts.
   handle(IPC.data.loadSamples, NoInput, async () => {
     const res = await loadSampleData();
     broadcast(EVENTS.dataChanged, { reason: 'samples' });

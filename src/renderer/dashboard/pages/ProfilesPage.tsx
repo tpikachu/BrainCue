@@ -32,7 +32,8 @@ export default function ProfilesPage() {
     void load();
   }, [load]);
 
-  // Seed a sample profile + Google/Amazon/Stripe Spaces to try the flow.
+  // Seed the demo world — a profile, Spaces across several activities, and
+  // finished conversations to try the keep/summarise/remember loop on.
   const loadSamples = async () => {
     setLoadingSamples(true);
     try {

@@ -127,7 +127,10 @@ export function registerSessionIpc(): void {
     IPC.session.ask,
     z.object({ sessionId: z.string().min(1), questionText: z.string().min(1) }),
     ({ sessionId, questionText }) =>
-      // fire-and-forget; answer streams over events
+      // The answer streams over events as it is produced — but this promise is
+      // RETURNED, so the caller's `await` resolves only once the whole answer is
+      // done. Callers that want the streaming (the Cue Card, a capture) must not
+      // await it; the events are the live channel, this is the completion.
       sessionManager.answerQuestion(sessionId, questionText),
   );
 

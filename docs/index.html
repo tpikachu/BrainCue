@@ -317,12 +317,12 @@ layout: null
       <span role="listitem">MIT · open source</span>
     </div>
   </div>
-  <!-- Assets are captured from the real app, never mocked up. Re-capture with:
-         E2E_CAPTURE=1 npx playwright test e2e/screenshots.capture.spec.ts
-         E2E_CAPTURE=1 npx playwright test e2e/media.capture.spec.ts
-       See e2e/README.md § Capturing marketing media.
-       Still on the v1.5.3 capture (no spec produces them yet): media/coding-solve.gif,
-       format-switch.gif, mock-interview.gif, stealth-split.gif. -->
+  <!-- Assets are captured from the real app, never mocked up:  npm run media
+       See docs/21-MEDIA.md for the storyboard, the style rules and the
+       pre-publish checklist.
+       One asset cannot be automated and is captured by hand — stealth-split.gif
+       needs a real screen share to prove the Cue Card is absent from it
+       (21-MEDIA.md § the one that cannot be automated). -->
   <div class="stage">
     <img class="primary-shot" src="images/home.png" width="940" fetchpriority="high"
          alt="The BrainCue dashboard: primary actions, a capture-status row, and cards for what it can sit in on." />
@@ -338,9 +338,9 @@ layout: null
     <p class="eyebrow r"><span class="no">01</span> See it in action</p>
     <h2 class="r">Watch a question become <em class="flair">a cited answer</em></h2>
     <p class="lede r" style="margin-bottom:36px">
-      The full walkthrough, captured from the running app by the repo's own e2e
-      pipeline — the launcher, the grounding library, the start flow's
-      transparency panel, and a live answer streaming into the Cue Card.
+      Every feature, end to end, captured from the running app by the repo's own
+      e2e pipeline — what it knows before a call, what it does during one, what
+      survives afterwards, and why none of it leaves your machine.
     </p>
 
     <figure class="r">
@@ -349,7 +349,7 @@ layout: null
         Your browser can't play this video —
         <a href="media/braincue-demo.mp4">download it instead</a>.
       </video>
-      <figcaption><b>The demo</b> — every scene comes from the real app, so what you see is what ships.</figcaption>
+      <figcaption><b>The demo</b> — every scene comes from the real app, against the sample data you can load with one click.</figcaption>
     </figure>
 
     <figure class="r">
@@ -364,6 +364,24 @@ layout: null
       <figcaption><b>The same moment, two views</b> — your screen has BrainCue; the shared screen (and any recording) has nothing.</figcaption>
     </figure>
 
+    <figure class="r">
+      <img src="media/memory-loop.gif" width="940" loading="lazy"
+           alt="The memory loop: the call happens, you keep it, it proposes candidates, you approve them, and the next conversation knows — replacing a fact when it changes rather than believing both." />
+      <figcaption><b>It proposes. You decide.</b> — a conversation only becomes memory if you say so, one item at a time.</figcaption>
+    </figure>
+
+    <figure class="r">
+      <img src="media/grounding.gif" width="940" loading="lazy"
+           alt="Documents indexed on your machine; only the matching pieces plus the question are sent, and the answer in the Cue Card names its source." />
+      <figcaption><b>Your documents never leave</b> — only the matching lines do, and every answer says where it came from.</figcaption>
+    </figure>
+
+    <figure class="r">
+      <img src="media/activities.gif" width="940" loading="lazy"
+           alt="The eight activities: meeting or call, project discussion, interview, study or tutoring, personal, game, just me, something else." />
+      <figcaption><b>You pick what the conversation is</b> — never which mode to run.</figcaption>
+    </figure>
+
     <div class="media-3 r">
       <figure>
         <img src="media/format-switch.gif" loading="lazy" alt="Re-tell any answer as key points, an explanation, or a STAR story — switched live." />
@@ -374,8 +392,8 @@ layout: null
         <figcaption><b>Live coding rounds</b><br />optimal solution + complexity</figcaption>
       </figure>
       <figure>
-        <img src="media/mock-interview.gif" loading="lazy" alt="An AI interviewer asks a question aloud and BrainCue answers it in the Cue Card." />
-        <figcaption><b>Practice mode</b><br />the AI asks · BrainCue answers</figcaption>
+        <img src="media/grounded-answer.gif" loading="lazy" alt="An answer streaming into the Cue Card, built from the user's own résumé and the job description, with its sources named." />
+        <figcaption><b>Grounded in your story</b><br />your material · with its sources</figcaption>
       </figure>
     </div>
   </div>
@@ -575,6 +593,18 @@ layout: null
         <figcaption><b>Library</b> — Spaces, and the documents that ground answers</figcaption>
       </figure>
       <figure>
+        <img src="images/new-space.png" loading="lazy" alt="The New Space dialog, open on the activity picker: meeting, project discussion, interview, study, personal, game, just me, something else." />
+        <figcaption><b>New Space</b> — you say what the conversation is, not which mode to run</figcaption>
+      </figure>
+      <figure>
+        <img src="images/tailored-resume.png" loading="lazy" alt="The New Space dialog with a job description pasted in, and an offer to tailor the résumé to that role appearing beneath it." />
+        <figcaption><b>Tailoring</b> — offered by the job description, kept with that Space</figcaption>
+      </figure>
+      <figure>
+        <img src="images/documents.png" loading="lazy" alt="The Library's Documents tab: the indexed material behind every answer." />
+        <figcaption><b>Documents</b> — indexed on this machine, never uploaded</figcaption>
+      </figure>
+      <figure>
         <img src="images/memory.png" loading="lazy" alt="The Memory page: two independent switches — conversation summaries, on by default, and long-term memory about you, off until allowed — above a queue filterable by Space." />
         <figcaption><b>Memory</b> — two switches, and a queue you control</figcaption>
       </figure>
@@ -583,8 +613,16 @@ layout: null
         <figcaption><b>Cue Card</b> — always on top for you, invisible in the share</figcaption>
       </figure>
       <figure>
+        <img src="images/save-prompt.png" loading="lazy" alt="The prompt shown when a call ends: keep this conversation, and which Space it belongs to." />
+        <figcaption><b>When it ends</b> — one decision: keep it, and where</figcaption>
+      </figure>
+      <figure>
         <img src="images/sessions.png" loading="lazy" alt="The Sessions list: every past session with its transcript and report." />
         <figcaption><b>Sessions</b> — transcripts and reports, kept locally</figcaption>
+      </figure>
+      <figure>
+        <img src="images/meeting-report.png" loading="lazy" alt="A meeting report: summary, decisions, action items and open questions, quoted from the transcript." />
+        <figcaption><b>Meeting report</b> — decisions and actions, quoted from what was said</figcaption>
       </figure>
       <figure>
         <img src="images/insights.png" loading="lazy" alt="Insights: trends across sessions." />
@@ -593,6 +631,14 @@ layout: null
       <figure>
         <img src="images/settings.png" loading="lazy" alt="Settings: the OS-encrypted API key, model presets per task, and Privacy Mode." />
         <figcaption><b>Settings</b> — your key, your models, Privacy Mode</figcaption>
+      </figure>
+      <figure>
+        <img src="images/privacy.png" loading="lazy" alt="The Privacy Mode card in Settings: window content protection, on by default." />
+        <figcaption><b>Privacy Mode</b> — excluded from screen capture, on by default</figcaption>
+      </figure>
+      <figure>
+        <img src="images/help.png" loading="lazy" alt="The in-app Help page." />
+        <figcaption><b>Help</b> — the reference, in the app rather than a wiki</figcaption>
       </figure>
     </div>
   </div>
