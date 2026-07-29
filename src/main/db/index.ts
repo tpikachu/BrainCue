@@ -74,6 +74,43 @@ function backupBeforeMigrate(sqlite: Database.Database, migrationsFolder: string
   }
 }
 
+/**
+ * Say, at boot, whether the database actually matches the migrations on disk.
+ *
+ * Every schema mismatch previously surfaced as a bare SQLite error from
+ * whichever query happened to touch the new column first — "table jobs has no
+ * column named tailored_resume", thrown from an IPC handler, with nothing
+ * pointing at the real cause. Three quite different situations produced that
+ * same message: a migration that failed, a build whose `drizzle/` folder is
+ * stale, and a dev main process still running from before a migration was
+ * generated (renderer HMR keeps the new UI, so the app looks current).
+ *
+ * One line at startup distinguishes them, and it is a plain count comparison —
+ * no schema introspection to keep in sync with anything.
+ */
+function reportSchemaDrift(sqlite: Database.Database, migrationsFolder: string): void {
+  try {
+    const journal = JSON.parse(
+      readFileSync(join(migrationsFolder, 'meta', '_journal.json'), 'utf8'),
+    ) as { entries: { tag: string }[] };
+    const applied = (
+      sqlite.prepare('SELECT count(*) AS n FROM "__drizzle_migrations"').get() as { n: number }
+    ).n;
+    if (applied >= journal.entries.length) {
+      log.info(`db: schema up to date (${applied} migrations)`);
+      return;
+    }
+    const missing = journal.entries.slice(applied).map((e) => e.tag);
+    log.error(
+      `db: SCHEMA IS BEHIND — ${applied}/${journal.entries.length} migrations applied. ` +
+        `Missing: ${missing.join(', ')}. Queries touching new columns will fail. ` +
+        `If this is a dev run, restart the app fully (a renderer reload does not re-run migrations).`,
+    );
+  } catch (e) {
+    log.warn('db: could not verify schema state', e);
+  }
+}
+
 export function initDb(): BetterSQLite3Database<typeof schema> {
   if (_db) return _db;
 
@@ -105,6 +142,7 @@ export function initDb(): BetterSQLite3Database<typeof schema> {
     } catch (e) {
       log.error('db: migration failed', e);
     }
+    reportSchemaDrift(sqlite, migrationsFolder);
   }
 
   // Repair the FK actions migration 0001 created without ON DELETE clauses —
