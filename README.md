@@ -72,6 +72,11 @@ wrong one is repeated forever, which is why nothing is ever remembered
 silently: memories are only ever **proposed**, and only the ones you approve are
 recalled. Details in [docs/16-CONTINUITY.md](docs/16-CONTINUITY.md).
 
+<p align="center">
+  <img src="docs/images/memory-review.png" width="820" alt="The Memory page: three suggestions from one standup, each tagged with the Space it came from and its confidence, each waiting on an Approve or Reject." />
+  <br /><sub><b>Proposed, not remembered</b> — what one kept conversation suggested. Nothing here is recalled until you press Approve.</sub>
+</p>
+
 ## See it in action
 
 <!-- Captured from the real app (see e2e/README.md#capturing-marketing-media).

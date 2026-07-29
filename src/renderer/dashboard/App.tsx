@@ -110,8 +110,16 @@ export default function App() {
 
   // The shell owns the profile list, because the sidebar switcher scopes every
   // page under it — pages read the active profile, they no longer fetch to ask.
+  //
+  // It also re-reads it whenever MAIN says the data changed, because main can
+  // add or remove profiles without going through this store: loading sample
+  // data, and wiping everything from Settings → Danger zone. Without this the
+  // shell keeps a list the database no longer agrees with — a wipe leaves
+  // deleted profiles in the switcher, and seeding the first profile leaves the
+  // non-dismissable first-run modal covering an app that now has one.
   useEffect(() => {
     void loadProfiles();
+    return api.events.onDataChanged(() => void loadProfiles());
   }, [loadProfiles]);
 
   // Let the tray "Settings" item route the dashboard here.

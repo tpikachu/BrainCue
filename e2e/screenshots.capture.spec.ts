@@ -31,29 +31,75 @@ test('@capture marketing screenshots', async ({ dashboard }) => {
   await setApiKey(dashboard);
   await disablePrivacyMode(dashboard); // reveal windows so the shots aren't blank
 
-  // Seed a populated app: sample profile + parsed Spaces (JD + company research).
+  // Seed a populated app: sample profile, parsed Spaces, and one finished
+  // conversation in the sample standup Space.
   const { profileId } = await dashboard.evaluate(async () =>
     (window as any).api.data.loadSamples(),
   );
+
+  // Keep that conversation, so the shots below have real continuity in them:
+  // an archive filed into its Space and memory candidates waiting for review.
+  // Memory is consent-gated OFF, which is the correct default and would leave
+  // the Memory page empty — so this turns it on exactly as a user would.
+  const kept = await dashboard.evaluate(async (pid) => {
+    const api = (window as any).api;
+    await api.settings.set({ memoryEnabled: true, sessionArchiveEnabled: true });
+    const sessions = await api.session.list(pid);
+    const sample = sessions.find(
+      (s: any) => s.jobTitle?.includes('standup') || s.jobCompany?.includes('Atlas'),
+    );
+    if (!sample) return null;
+    return api.session.remember(sample.id, sample.jobId ?? null);
+  }, profileId);
+  console.log(`screenshots: kept the sample conversation → ${JSON.stringify(kept)}`);
+
+  // Reload so the renderer's stores re-read what main now holds. Settings were
+  // changed by IPC rather than through the settings store, so without this the
+  // shots contradict each other — Home's status chip would still say
+  // "Memory: off" beside a Memory page showing it on.
+  await dashboard.reload();
+  await dashboard.waitForTimeout(1500);
 
   const go = async (nav: string) => {
     await dashboard.locator(`[data-tour="nav-${nav}"]`).first().click();
     await dashboard.waitForTimeout(600);
   };
 
-  // ── Home — the launcher: primary actions, capture-status row, mode cards
-  //    (shipped, Labs, and the "coming soon" strip) ───────────────────────────
+  // ── Home — the launcher: greeting, primary actions, capture-status row, and
+  //    the activity cards (shipped, Labs, and the "coming soon" strip) ────────
   await go('home');
-  await expect(dashboard.getByRole('heading', { name: /how can braincue help/i })).toBeVisible();
+  await expect(dashboard.getByRole('heading', { name: /how can .*help|hi /i })).toBeVisible();
   await dashboard.waitForTimeout(400);
   await dashboard.screenshot({ path: IMG('home.png') });
 
-  // ── Library — profile, Spaces, documents, memory ──────────────────────────
+  // ── Library — the active profile's Spaces and documents ───────────────────
   await go('library');
   await dashboard.waitForTimeout(600);
   await dashboard.screenshot({ path: IMG('library.png') });
 
-  // ── Sessions — history across every mode ──────────────────────────────────
+  // ── Memory — the review queue and the two switches ────────────────────────
+  //    The feature that is hardest to explain in prose and easiest to show: a
+  //    suggestion sitting there, un-remembered, until it is approved.
+  await go('memory');
+  await dashboard.waitForTimeout(900);
+  await dashboard.screenshot({ path: IMG('memory.png') });
+  // …and a second shot scrolled to the review queue, where the Approve/Reject
+  // decision is actually visible. The top of the page explains the two
+  // switches; this one shows the thing they govern.
+  // A fixed scroll, not scrollIntoViewIfNeeded: the Approve row sits low but
+  // technically ON screen, so "if needed" decides nothing is needed and the
+  // shot comes out identical to the one above it.
+  await dashboard.evaluate(() => {
+    const el = Array.from(document.querySelectorAll<HTMLElement>('*')).find(
+      (e) =>
+        e.scrollHeight > e.clientHeight + 80 && /auto|scroll/.test(getComputedStyle(e).overflowY),
+    );
+    if (el) el.scrollTop = 330;
+  });
+  await dashboard.waitForTimeout(400);
+  await dashboard.screenshot({ path: IMG('memory-review.png') });
+
+  // ── Sessions — the history, filterable and scoped to this profile ─────────
   await go('sessions');
   await dashboard.waitForTimeout(600);
   await dashboard.screenshot({ path: IMG('sessions.png') });

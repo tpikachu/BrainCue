@@ -317,13 +317,12 @@ layout: null
       <span role="listitem">MIT · open source</span>
     </div>
   </div>
-  <!-- NOTE: docs/images/*.png and docs/media/*.gif were captured from v1.5.3 and
-       are STALE — they show the old mode-first dashboard (a "MODES" heading,
-       "Interview Copilot" cards, no profile switcher, no Memory nav). Refresh
-       them from the real app before the next release:
+  <!-- Assets are captured from the real app, never mocked up. Re-capture with:
          E2E_CAPTURE=1 npx playwright test e2e/screenshots.capture.spec.ts
          E2E_CAPTURE=1 npx playwright test e2e/media.capture.spec.ts
-       See e2e/README.md § Capturing marketing media. -->
+       See e2e/README.md § Capturing marketing media.
+       Still on the v1.5.3 capture (no spec produces them yet): media/coding-solve.gif,
+       format-switch.gif, mock-interview.gif, stealth-split.gif. -->
   <div class="stage">
     <img class="primary-shot" src="images/home.png" width="940" fetchpriority="high"
          alt="The BrainCue dashboard: primary actions, a capture-status row, and cards for what it can sit in on." />
@@ -507,6 +506,14 @@ layout: null
       </div>
     </div>
 
+    <figure class="r" style="margin:38px 0 0">
+      <img src="images/memory-review.png" loading="lazy" style="border-radius:var(--radius);border:1px solid var(--hairline)"
+           alt="The Memory page: three suggestions from a single standup, each tagged with the Space it came from and its confidence, each waiting on Approve or Reject." />
+      <figcaption style="color:var(--ink-faint);font-size:13.5px;margin-top:12px;text-align:center">
+        What one kept conversation proposed. Nothing here is recalled until you press Approve.
+      </figcaption>
+    </figure>
+
     <p class="lede r" style="margin-top:34px">
       Two promises, two defaults, two switches. Turning memory off means unused,
       not deleted — re-enable it and what you approved comes back intact.
@@ -560,12 +567,16 @@ layout: null
     <h2 class="r">The whole app, <em class="flair">not just the highlight reel</em></h2>
     <div class="gallery r" style="margin-top:34px">
       <figure>
-        <img src="images/start-flow.png" loading="lazy" alt="The start flow: every mode in one launcher, disabled ones marked coming soon, with a transparency panel listing exactly what will be captured." />
+        <img src="images/start-flow.png" loading="lazy" alt="The start flow: one question about what the call is, the Space it belongs to, what to listen to, and a panel listing exactly what will be captured and sent." />
         <figcaption><b>Start flow</b> — what will be captured, stated before anything starts</figcaption>
       </figure>
       <figure>
-        <img src="images/library.png" loading="lazy" alt="The Library: profiles, Spaces, and indexed documents that ground every answer." />
-        <figcaption><b>Library</b> — profiles, Spaces, and the documents that ground answers</figcaption>
+        <img src="images/library.png" loading="lazy" alt="The Library: the active profile's Spaces and the indexed documents that ground every answer." />
+        <figcaption><b>Library</b> — Spaces, and the documents that ground answers</figcaption>
+      </figure>
+      <figure>
+        <img src="images/memory.png" loading="lazy" alt="The Memory page: two independent switches — conversation summaries, on by default, and long-term memory about you, off until allowed — above a queue filterable by Space." />
+        <figcaption><b>Memory</b> — two switches, and a queue you control</figcaption>
       </figure>
       <figure>
         <img src="images/cue-card.png" loading="lazy" alt="The Cue Card overlay with a completed, cited answer." />

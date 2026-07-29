@@ -63,8 +63,16 @@ E2E_CAPTURE=1 npx playwright test e2e/screenshots.capture.spec.ts   # bash / Git
 $env:E2E_CAPTURE=1; npx playwright test e2e/screenshots.capture.spec.ts
 ```
 
-Writes `docs/images/`: `home.png`, `library.png`, `sessions.png`,
-`insights.png`, `settings.png`, `start-flow.png`, `cue-card.png`.
+Writes `docs/images/`: `home.png`, `library.png`, `memory.png`,
+`memory-review.png`, `sessions.png`, `insights.png`, `settings.png`,
+`start-flow.png`, `cue-card.png`.
+
+The two memory shots are the same page at two scroll positions: the top, where
+the two switches explain themselves, and the review queue, where the
+Approve/Reject decision is actually visible. Scrolling uses a fixed `scrollTop`
+rather than `scrollIntoViewIfNeeded` — the Approve row sits low but technically
+*on* screen, so "if needed" decides nothing is needed and both shots come out
+identical.
 
 ### Animated clips (GIF + MP4)
 

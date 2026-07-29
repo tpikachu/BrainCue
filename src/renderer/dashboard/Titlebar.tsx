@@ -23,7 +23,7 @@ export function Titlebar() {
     <div className="app-drag flex h-9 shrink-0 items-center justify-between border-b border-white/5 bg-neutral-950/80 pl-3 pr-0 backdrop-blur">
       <div className="flex items-center gap-2 text-neutral-400">
         <LogoMark className="h-4 w-4 rounded-[22%]" />
-        <span className="text-xs font-medium tracking-tight">BrainCue Copilot</span>
+        <span className="text-xs font-medium tracking-tight">BrainCue</span>
       </div>
 
       <div className="app-no-drag flex h-full items-stretch">

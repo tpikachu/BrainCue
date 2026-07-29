@@ -9,7 +9,7 @@ export default function WhatsNewPage() {
   return (
     <Page
       title="What's New"
-      subtitle="Release notes for BrainCue Copilot"
+      subtitle="Release notes for BrainCue"
       actions={<Badge tone="blue">v{APP_VERSION}</Badge>}
     >
       {RELEASES.length === 0 ? (

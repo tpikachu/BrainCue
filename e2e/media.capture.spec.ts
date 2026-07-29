@@ -82,6 +82,25 @@ async function captureStream(
   return frames;
 }
 
+/**
+ * Scroll the page's own scroll container by a fixed amount.
+ *
+ * Two things this is NOT: `scrollIntoViewIfNeeded`, which does nothing when the
+ * target is technically already on screen — the Approve row sat at y=743 of an
+ * 800px viewport, in view and squarely under the burned-in caption; and a text
+ * locator, which once waited out the entire test timeout on a table that had
+ * just remounted. This cannot hang and cannot decide the scroll is unnecessary.
+ */
+async function scrollBy(page: Page, px: number): Promise<void> {
+  await page.evaluate((amount) => {
+    const el = Array.from(document.querySelectorAll<HTMLElement>('*')).find(
+      (e) =>
+        e.scrollHeight > e.clientHeight + 80 && /auto|scroll/.test(getComputedStyle(e).overflowY),
+    );
+    if (el) el.scrollTop = amount;
+  }, px);
+}
+
 test('@capture cue-card streaming clip', async ({ dashboard }) => {
   test.skip(!hasKey, 'needs OPENAI_API_KEY — the clip is a real streamed answer');
   test.setTimeout(300_000);
@@ -160,7 +179,7 @@ test('@capture cue-card streaming clip', async ({ dashboard }) => {
  */
 test('@capture dashboard walkthrough (demo scenes + grounded gif)', async ({ dashboard }) => {
   test.skip(!hasKey, 'needs OPENAI_API_KEY to seed parsed sample data + stream an answer');
-  test.setTimeout(300_000);
+  test.setTimeout(420_000); // + the keep/extract round trip and the memory scenes
 
   await setApiKey(dashboard);
   await disablePrivacyMode(dashboard);
@@ -194,7 +213,9 @@ test('@capture dashboard walkthrough (demo scenes + grounded gif)', async ({ das
 
   // ── Scene 1 · Home, the launcher ──────────────────────────────────────────
   await go('#/home');
-  await dashboard.getByRole('heading', { name: /how can braincue help/i }).waitFor();
+  // "Hi <name> — how can I help right now?" once a profile is active; the
+  // BrainCue-named variant is only the no-profile fallback.
+  await dashboard.getByRole('heading', { name: /how can .*help|^hi /i }).first().waitFor();
   await snap(dashboard, 'demo/01-home');
   await snap(dashboard, 'interview-grounded');
 
@@ -213,15 +234,12 @@ test('@capture dashboard walkthrough (demo scenes + grounded gif)', async ({ das
   await snap(dashboard, 'demo/04-library-docs');
   await snap(dashboard, 'interview-grounded');
 
-  // ── Scene 4 · The interview workspace: profile picked, Spaces listed ──────
+  // ── Scene 4 · The interview workspace: the active profile's Spaces ────────
+  // No profile picker to drive any more — the sidebar switcher scopes the whole
+  // dashboard (docs/19-ACTIVE-PROFILE.md), so this page just shows the active
+  // profile's Spaces. The old version of this scene clicked a "Select a
+  // profile…" dropdown that no longer exists, which is exactly how captures rot.
   await go('#/interview');
-  // The profile picker is the in-window Dropdown (never a native <select>).
-  // Target its VISIBLE TEXT, not a role+name pair: the Field wraps the
-  // dropdown's <button> in a <label>, so the button's accessible name is the
-  // label ("Profile"), not its own contents — a name lookup never matches.
-  await dashboard.getByText('Select a profile…').click();
-  await dashboard.getByRole('listbox').waitFor();
-  await dashboard.getByRole('option').nth(1).click(); // 0 = the placeholder
   await dashboard.getByText(/Google|Amazon|Stripe/).first().waitFor();
   await dashboard.waitForTimeout(600);
   await snap(dashboard, 'demo/05-grounded');
@@ -272,16 +290,28 @@ test('@capture dashboard walkthrough (demo scenes + grounded gif)', async ({ das
     const api = (window as any).api;
     await api.settings.set({ memoryEnabled: true, sessionArchiveEnabled: true });
     const sessions = await api.session.list(pid);
-    const sample = sessions.find((s: any) => s.jobTitle?.includes('standup') || s.jobCompany?.includes('Atlas'));
+    const sample = sessions.find(
+      (s: any) => s.jobTitle?.includes('standup') || s.jobCompany?.includes('Atlas'),
+    );
     if (!sample) return null;
     return api.session.remember(sample.id, sample.jobId ?? null);
   }, profileId);
   console.log(`demo/07-memory: kept the sample conversation → ${JSON.stringify(kept)}`);
+  // Settings were changed by IPC, not through the settings store — reload so
+  // the Memory page renders both switches as they actually are.
+  await dashboard.reload();
+  await dashboard.waitForTimeout(1500);
 
   if (kept && kept.memories > 0) {
     // Proposed, not remembered — the review queue, before anything is approved.
+    // Scrolled so the pending card and its Approve/Reject row are in frame:
+    // the burned-in caption sits along the bottom, and the buttons ARE the
+    // scene — a shot of the two switches with the decision cropped off says
+    // nothing about how memory works.
     await go('#/memory');
     await dashboard.waitForTimeout(900);
+    await scrollBy(dashboard, 330);
+    await dashboard.waitForTimeout(400);
     await snap(dashboard, 'demo/07-memory-review');
 
     // …and approved. One click is the whole difference between "suggested" and
@@ -294,6 +324,8 @@ test('@capture dashboard walkthrough (demo scenes + grounded gif)', async ({ das
     await go('#/home');
     await go('#/memory'); // remount so the table refetches
     await dashboard.waitForTimeout(900);
+    await scrollBy(dashboard, 460); // same framing as the shot before it
+    await dashboard.waitForTimeout(400);
     await snap(dashboard, 'demo/08-memory-approved');
   }
 
