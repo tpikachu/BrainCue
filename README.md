@@ -233,19 +233,22 @@ six-stage pipeline every mode configures;
 
 ## Getting started
 ```bash
-npm install
-cp .env.example .env      # optional: put OPENAI_API_KEY for dev
-npm run db:generate       # generate the initial Drizzle migration
+npm install               # Node 20.11+; also rebuilds better-sqlite3 for Electron
 npm run dev               # launch the app with HMR
 ```
-In production you set the key in **Settings** (encrypted via OS secure storage).
+An OpenAI key is optional in dev (copy `.env.example` to `.env`, or set it in
+**Settings**, encrypted via OS secure storage) — and the first-run screen's
+**Load sample data** gives you a full world to explore without one. Full setup,
+prerequisites, and the pre-push gate: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Scripts
 | Script | Purpose |
 |---|---|
 | `npm run dev` | electron-vite dev (HMR) |
 | `npm run typecheck` | type-check main + renderer |
-| `npm run db:generate` | generate SQL migrations from the Drizzle schema |
+| `npm run test` | unit tests (vitest; DB tests run on a sql.js harness) |
+| `npm run test:e2e` | build, then drive the built app end-to-end |
+| `npm run db:generate` | generate SQL migrations **after editing** `schema.ts` (never on a fresh clone — migrations are committed) |
 | `npm run build` | typecheck + bundle |
 | `npm run icon` | regenerate app icons from `resources/icon.svg` |
 | `npm run package` / `package:win` / `package:mac` | build installer via electron-builder (auto-cleans `release/` + kills running app first) |

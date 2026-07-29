@@ -5,6 +5,9 @@
   "author": "tpikachu",
   "license": "MIT",
   "private": true,
+  "engines": {
+    "node": ">=20.11"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/tpikachu/BrainCue.git"
