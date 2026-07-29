@@ -46,15 +46,31 @@ ships. There are no priority labels: the board's ordering is the priority.
 
 ## Getting set up
 
+**Prerequisites:** Node **20.11+** (declared in `engines`; `.nvmrc` matches),
+network access for the Electron binary download during install, and — only when
+npm has no prebuilt better-sqlite3 for the pinned Electron — a C++ toolchain
+for the source rebuild (Windows: Visual Studio Build Tools + Python; macOS:
+Xcode Command Line Tools).
+
 ```bash
-npm install               # rebuilds better-sqlite3 for Electron's ABI (postinstall)
-cp .env.example .env      # optional: OPENAI_API_KEY for dev
-npm run db:generate       # generate the initial Drizzle migration
+npm install               # also rebuilds better-sqlite3 for Electron's ABI (postinstall)
 npm run dev               # launch with HMR across all three processes
 ```
 
-You need **Node 20.11+** and your own OpenAI API key. In production the key is
-set in Settings and encrypted by the OS keychain.
+That's the whole setup. Do **not** run `npm run db:generate` here — every
+migration is committed under `drizzle/` and the app applies them itself on
+launch; `db:generate` is only for after you edit `schema.ts` (see Data below),
+and running it on a fresh clone risks committing a spurious migration.
+
+An OpenAI key is **optional** for development: copy `.env.example` to `.env`
+and fill in `OPENAI_API_KEY`, or set it later in Settings, where it is
+encrypted by the OS keychain.
+
+**What you should see:** the app opens on a "Welcome to BrainCue" screen that
+asks for a profile name — click **Load sample data** instead for a ready-made
+world: seven Spaces across five activities and five finished conversations
+waiting to be kept. Everything except live transcription and answer generation
+works with no API key at all.
 
 Use `npm run dev` rather than calling `electron-vite` directly — the wrapper in
 `scripts/run-electron-vite.mjs` strips `ELECTRON_RUN_AS_NODE` and normalises a
@@ -164,15 +180,29 @@ it there.
 
 ## Tests
 
-`npm run test` runs vitest — a single file with
-`npx vitest run src/path/to/x.test.ts`.
+There are two suites, and they exist for one reason: the app's better-sqlite3
+is rebuilt for **Electron's** ABI (the `postinstall`), so it cannot load under
+plain Node — which is what vitest runs on.
 
-End-to-end tests drive the **built** Electron app over CDP; see
-[`e2e/README.md`](e2e/README.md), which also documents how the README and
-landing-page media are captured.
+- **Unit tests** — `npm run test` (single file:
+  `npx vitest run src/path/to/x.test.ts`). Anything touching the database uses
+  the harness in `src/main/test/dbHarness.ts`: `createTestDb()` runs the real
+  Drizzle migrations on **sql.js** (WASM SQLite, dev-only), so repository and
+  engine tests exercise the real schema anywhere. If you reach for
+  better-sqlite3 in a test and hit an ABI error, this is why.
+- **End-to-end tests** — `npm run test:e2e` (builds first) or
+  `npm run test:e2e:only` (reuses the last build). They drive the **built**
+  Electron app over CDP; see [`e2e/README.md`](e2e/README.md), which also
+  documents how the README and landing-page media are captured.
 
 Pure logic (trigger policies, cost accounting, personas, migrations) is unit
 tested and should stay that way — it's what lets the engine change safely.
+
+**Mutation-check tests that guard an invariant:** break the invariant on
+purpose (remove the gate, flip the condition), confirm your test fails, then
+restore it. A test that cannot fail is worse than no test; several shipped
+tests here record exactly that discovery. Say in the PR which mutant your
+test kills.
 
 ## Pull requests
 
