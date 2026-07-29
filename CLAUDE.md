@@ -60,3 +60,4 @@ Each window is created in `src/main/windows/*` and loaded via `loadRenderer.ts`.
 - Do **not** bump the version or write changelog entries unless explicitly asked.
 - Match the surrounding code's style; the shared UI kit (`src/renderer/components/ui.tsx`) and the generic `DataTable` are meant to be reused across pages rather than re-rolled.
 - `docs/` holds the design docs (PRD, architecture, IPC map, DB, OpenAI service, security). `docs/sessions/` is a running dev log (one file per day) — update it and the relevant `docs/*.md` after substantial features.
+- `docs/BOARD.md` is the shared board for the release currently being built. A PR that starts, finishes, or drops a milestone updates its row **in the same PR**; check it before picking up work so two sessions never build the same thing. When a release ships, follow the board's release ritual (changelog → roadmap refresh → board reset → milestone roll).
