@@ -17,6 +17,7 @@ import SessionsPage from './pages/SessionsPage';
 import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
 import WhatsNewPage from './pages/WhatsNewPage';
+import HelpPage from './pages/HelpPage';
 import DevDbExplorerPage from './pages/DevDbExplorerPage';
 import { Titlebar } from './Titlebar';
 import { SidebarStatus } from './SidebarStatus';
@@ -223,6 +224,7 @@ export default function App() {
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/whats-new" element={<WhatsNewPage />} />
+            <Route path="/help" element={<HelpPage />} />
             {DEV && <Route path="/dev" element={<DevDbExplorerPage />} />}
           </Routes>
         </div>

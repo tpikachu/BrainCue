@@ -169,7 +169,7 @@ export default function SettingsPage() {
 
   return (
     <Page title="Settings" width="max-w-2xl">
-      <Card className="mb-5">
+      <Card className="mb-5" data-tour="settings-key">
         <div className="mb-1 flex items-center gap-2">
           <h3 className="font-medium">OpenAI API Key</h3>
           {settings?.apiKeyPresent ? <Badge tone="green">configured</Badge> : <Badge tone="amber">not set</Badge>}
@@ -251,7 +251,7 @@ export default function SettingsPage() {
         </p>
       </Card>
 
-      <Card>
+      <Card data-tour="settings-privacy">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <span
@@ -329,11 +329,19 @@ export default function SettingsPage() {
         <div className="flex items-center justify-between gap-4">
           <div>
             <h3 className="font-medium">Getting started</h3>
-            <p className="text-xs text-neutral-500">Replay the guided tour of the app.</p>
+            <p className="text-xs text-neutral-500">
+              Replay the guided tour, or open Help for the quick start, the shortcuts, and the
+              FAQ. Help is also the “?” in the title bar, from any page.
+            </p>
           </div>
-          <Button onClick={startTour}>
-            <PlayIcon /> Replay tour
-          </Button>
+          <div className="flex shrink-0 gap-2">
+            <Link to="/help">
+              <Button variant="ghost">Help &amp; FAQ</Button>
+            </Link>
+            <Button onClick={startTour}>
+              <PlayIcon /> Replay tour
+            </Button>
+          </div>
         </div>
       </Card>
 

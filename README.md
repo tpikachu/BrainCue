@@ -269,13 +269,16 @@ privacy/security invariants that must not regress.
 
 ## Project status
 
-Actively developed, currently **v2.0.x**. The interview path shipped end-to-end
+Actively developed, currently **v2.1.x**. The interview path shipped end-to-end
 in v1.5 (profiles, live grounded answers, the Cue Card, region/clipboard solve,
 practice with an AI voice, coaching reports) and is still fully supported — it
 just no longer defines the product. v2 made meetings and solo sessions the daily
 case: one activity picker instead of a mode picker, Spaces as the unit of
 context *and* of memory, per-activity summaries, a reviewed long-term memory,
-voice, and one active profile scoping the whole dashboard.
+voice, and one active profile scoping the whole dashboard. v2.1 finished that
+shift: one activity picker instead of a mode picker, a Space as the only place a
+conversation is kept, per-activity summaries, and a Help page plus a guided tour
+that walk through all of it.
 
 Next up is interviewing someone and guided tutoring — see
 [docs/10-ROADMAP.md](docs/10-ROADMAP.md) for what's planned and the

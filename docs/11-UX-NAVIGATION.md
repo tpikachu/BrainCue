@@ -219,3 +219,46 @@ not a sidebar item).
 > where it had been listing every profile beside three tabs showing exactly one)
 > and **Settings** are global and sit below a divider under "App". See
 > [19-ACTIVE-PROFILE.md](./19-ACTIVE-PROFILE.md).
+
+---
+
+## Help, and the tour (2026-07-29)
+
+Two surfaces answer "how does this work?", and they are deliberately different
+shapes.
+
+**Help** (`/help`) is the manual, reachable from a **?** in the title bar on
+every page. It lives in the window chrome rather than the sidebar for one
+reason: the sidebar's first group is scoped to a profile, and Help is not —
+and the pages launched from Home replace the nav's context entirely, so a
+sidebar entry would be unreachable from exactly the places people get stuck.
+
+Its content is **generated from the source of truth wherever one exists**: the
+activity list from `ACTIVITIES`, the shortcut table from `SHORTCUT_DEFS`. A
+hand-typed copy of either would be wrong within a release, and wrong help is
+worse than none. The FAQ is hand-written and includes the limits — macOS system
+audio needing a virtual device, unsigned installers, Privacy Mode blanking your
+own screenshots — because an FAQ that only lists what works is marketing.
+
+**The tour** is the ninety-second version, shown once on first run. Two changes
+make it worth its length:
+
+1. **Steps navigate.** A `TourStep` now carries a `route` as well as a `target`,
+   so it opens the page and rings the actual card — the Spaces list, the two
+   memory switches, the review queue — instead of spotlighting the sidebar entry
+   that leads there. Highlighting "Library" in the nav says where to click and
+   nothing about what you would find.
+2. **It states consequences, not only capabilities.** A conversation kept with
+   no Space keeps nothing; memory does nothing until switched on; Privacy Mode
+   blanks your own screenshots too. Each of those reads as a bug when discovered
+   later and as a design when heard here.
+
+Fifteen steps grouped into four named chapters, with chapter ticks rather than
+"step 7 of 15" — a bare count reads as a chore, four chapters read as a short
+story with a visible end. A step whose anchor is missing falls back to a
+centered card, which is also what the steps about the Cue Card (a different
+window) and the save prompt (which only exists after a session) use.
+
+`Tour.test.ts` is the rot guard: every `target` must match a `data-tour` anchor
+the renderer actually renders, and every `route` must be one `App.tsx`
+registers. It also fails if the targets drift back to being mostly `nav-*`.

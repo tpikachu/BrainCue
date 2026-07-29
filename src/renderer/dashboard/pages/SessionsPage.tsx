@@ -201,6 +201,7 @@ export default function SessionsPage() {
         </div>
       )}
 
+      <div data-tour="sessions-table">
       <DataTable<SessionListItem>
         columns={columns}
         rows={pageRows}
@@ -219,6 +220,7 @@ export default function SessionsPage() {
         loading={loading}
         empty="No sessions yet. Start one from Home and save it when you stop."
       />
+      </div>
 
       {/* Report detail */}
       <Modal

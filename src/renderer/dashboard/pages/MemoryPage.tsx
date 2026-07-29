@@ -123,7 +123,7 @@ export default function MemoryPage() {
           turned off. Side by side, the difference is the point: one keeps what
           a conversation WAS, the other keeps claims about YOU, which is why
           only the second is off until you ask for it. */}
-      <Card className="mb-5 space-y-4">
+      <Card className="mb-5 space-y-4" data-tour="memory-switches">
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="font-medium text-neutral-100">Summaries of conversations</div>
@@ -192,7 +192,7 @@ export default function MemoryPage() {
 
       {/* Review queue */}
       {profileId && (
-        <>
+        <div data-tour="memory-queue">
           <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-neutral-500">
             To review {pending.length > 0 && <Badge tone="amber">{pending.length}</Badge>}
           </h3>
@@ -364,7 +364,7 @@ export default function MemoryPage() {
               </Card>
             </>
           )}
-        </>
+        </div>
       )}
     </Page>
   );

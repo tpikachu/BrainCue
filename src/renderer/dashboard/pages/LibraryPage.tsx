@@ -37,7 +37,7 @@ export default function LibraryPage() {
   return (
     <Page
       title="Library"
-      subtitle="What BrainCue knows for this profile — Spaces, documents, and memory."
+      subtitle="What BrainCue knows for this profile: the Spaces that ground it, and the documents behind them."
     >
       <div role="tablist" aria-label="Library sections" className="mb-6 flex gap-1 border-b border-white/5">
         {tabs.map((t) => (
@@ -57,8 +57,10 @@ export default function LibraryPage() {
         ))}
       </div>
 
-      {tab === 'spaces' && <SpacesTab />}
-      {tab === 'documents' && <DocumentsTab />}
+      <div data-tour="library-content">
+        {tab === 'spaces' && <SpacesTab />}
+        {tab === 'documents' && <DocumentsTab />}
+      </div>
     </Page>
   );
 }
