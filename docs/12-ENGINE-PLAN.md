@@ -34,7 +34,7 @@ tutor_prompt, memory_suggestion, summary. `Speaker → you|them|agent|unknown`
 Providers are **capability interfaces** (Chat / Embedding / RealtimeStt /
 BatchStt / Speech / Vision), never one god interface. These supersede the older
 "Context Pack (UI)" wording in 01-PRD/11-UX and the roadmap's Phase-2
-multi-provider slot (seam at Prompt 4, second provider deferred to Prompt 11).
+multi-provider slot (seam is in place; a second provider is still deferred).
 
 ## Target structure
 
@@ -51,7 +51,7 @@ src/main/services/engine/                      src/main/providers/
 its exact signature. `AnswerEvent` (delta/meta/usage) is already shared across
 answer/coding/vision and becomes the provider-neutral `ChatEvent`.
 
-## Migration sequence (rollback = boot-time DB backup, added in Prompt 2)
+## Migration sequence (rollback = the boot-time DB backup)
 
 | Mig | Contents | Risk |
 | --- | --- | --- |
@@ -64,12 +64,12 @@ anywhere; the only destructive DDL is the provably-dead `answer_style`.
 
 ## Compatibility rules
 
-- No IPC channel renamed/removed through Prompt 5; new `engine:*` +
+- No IPC channel was renamed or removed during the extraction; new `engine:*` +
   `contribution` events are additive; an adapter dual-emits legacy
   `answerDelta/Meta/Done/Reset/Followup` until the overlay migrates.
 - The interviewType/answerFormat zod enums (duplicated inline in
   session/mock/sparring/profiles `.ipc.ts`) are extracted to one shared module
-  in Prompt 2.
+  alongside it.
 - Overlay: `answerCards.ts` seeds the ContributionCard store (`isCoding` →
   `kind`); unknown kinds render a safe fallback card. Frozen e2e selectors:
   window sizes, `/Stop|Pause/` button text, the `Interviews` h3.
@@ -77,7 +77,7 @@ anywhere; the only destructive DDL is the provably-dead `answer_style`.
 ## Gates (every PR)
 
 Typecheck + build + full unit suite; phase boundaries also run
-`scripts/privacy-affinity/hardtest.js`. Baseline guardrails (Prompt 1):
+`scripts/privacy-affinity/hardtest.js`. Baseline guardrails:
 `src/main/test/architecture.test.ts` (renderer/preload/shared can never import
 OpenAI/DB/electron-main modules; built renderer bundle carries no
 `api.openai.com`/key-store/DB markers) and
@@ -85,7 +85,7 @@ OpenAI/DB/electron-main modules; built renderer bundle carries no
 gate → retrieval → stream order → persistence → stop, plus the stale-abort
 race). Test DB: real drizzle migrations on in-memory **sql.js**
 (`src/main/test/dbHarness.ts` — better-sqlite3 is Electron-ABI and can't load
-under vitest); the harness's `fixture` param is Prompt 2's migration-test
+under vitest); the harness's `fixture` param is the migration-test
 entry point.
 
 ## PR sequence

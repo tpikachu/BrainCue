@@ -3,7 +3,7 @@ import { EVENTS } from '@shared/ipc';
 import type { CompanionStatusEvent } from '@shared/types';
 
 /**
- * Companion EVALUATION HARNESS (Prompt 10) — scripted scenario fixtures driven
+ * Companion EVALUATION HARNESS — scripted scenario fixtures driven
  * through the REAL engine (sql.js db, real persistence, real InterjectionPolicy,
  * real memory recall over real vectors) with every provider scripted. Each
  * scenario measures the things that make or break trust:

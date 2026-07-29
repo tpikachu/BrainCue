@@ -40,11 +40,12 @@ CREATE TABLE sessions_new (
   \`job_id\` text,
   \`kind\` text DEFAULT 'live' NOT NULL,
   \`mode\` text DEFAULT 'interview' NOT NULL,
+  \`activity\` text,
   FOREIGN KEY (\`profile_id\`) REFERENCES \`profiles\`(\`id\`) ON UPDATE no action ON DELETE cascade,
   FOREIGN KEY (\`job_id\`) REFERENCES \`jobs\`(\`id\`) ON UPDATE no action ON DELETE set null
 );
-INSERT INTO sessions_new (id, profile_id, interview_type, status, started_at, ended_at, created_at, job_id, kind, mode)
-  SELECT id, profile_id, interview_type, status, started_at, ended_at, created_at, job_id, kind, mode FROM sessions;
+INSERT INTO sessions_new (id, profile_id, interview_type, status, started_at, ended_at, created_at, job_id, kind, mode, activity)
+  SELECT id, profile_id, interview_type, status, started_at, ended_at, created_at, job_id, kind, mode, activity FROM sessions;
 DROP TABLE sessions;
 ALTER TABLE sessions_new RENAME TO sessions;
 CREATE INDEX \`sessions_profile_idx\` ON \`sessions\` (\`profile_id\`);
@@ -69,7 +70,8 @@ CREATE INDEX \`sessions_profile_idx\` ON \`sessions\` (\`profile_id\`);
  * it doesn't name. Adding a column to `sessions`/`chunks` in a migration means
  * adding it here too. `fkRebuild.test.ts` enforces exactly that: it diffs these
  * DDLs against the real post-migration schema, so the omission that dropped
- * `sessions.mode` (added in 0008, missed here) cannot recur.
+ * `sessions.mode` (added in 0008, missed here) cannot recur — it caught
+ * `sessions.activity` (0014) on the first run after the column landed.
  */
 export function fixLegacyFkActions(sqlite: Database.Database, log: FkRebuildLog = console): boolean {
   const jobFkAction = (table: string): string | null => {

@@ -180,6 +180,34 @@ export async function disablePrivacyMode(dashboard: Page): Promise<void> {
   }
 }
 
+/**
+ * Choose a value from one of the app's dropdowns.
+ *
+ * `Select` in components/ui.tsx accepts `<option>` children and has the type
+ * signature of a native select — and then renders a `Dropdown`: a
+ * `button[aria-haspopup="listbox"]` with a `ul[role="listbox"]` of
+ * `li[role="option"]`. **There is no `<select>` element anywhere in the app.**
+ *
+ * So `locator('select')` matches nothing and `selectOption()` waits out its
+ * timeout on a control that is right there on screen. That is worth a helper
+ * rather than a comment, because reading the JSX tells you the opposite.
+ *
+ * `scope` is usually the dialog or page region; `nth` picks between several
+ * dropdowns in it (the New Space modal has five).
+ */
+export async function choose(
+  scope: Page | import('@playwright/test').Locator,
+  label: string | RegExp,
+  nth = 0,
+): Promise<void> {
+  await scope.locator('button[aria-haspopup="listbox"]').nth(nth).click();
+  await scope
+    .locator('ul[role="listbox"] li[role="option"]')
+    .filter({ hasText: label })
+    .first()
+    .click();
+}
+
 /** Inject the real API key (live tier) via the typed preload facade. No-op without a key. */
 export async function setApiKey(dashboard: Page): Promise<void> {
   const key = process.env.OPENAI_API_KEY;

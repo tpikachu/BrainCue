@@ -1,13 +1,16 @@
 import { z } from 'zod';
 import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc';
-import { handle, zId } from './helpers';
-import { zAnswerFormat, zInterviewType, zPresence, zSessionMode } from './schemas';
+import { handle, zId, zSpaceKind } from './helpers';
+import { zAnswerFormat, zInterviewType, zPresence } from './schemas';
 import { sessionManager } from '../services/session/sessionManager';
 import { engine } from '../services/engine/engine';
 import { sessionsRepo } from '../db/repositories/sessions.repo';
 import { generateReport } from '../services/session/report';
 import { getOrGenerateMeetingReport } from '../services/engine/meetingReport';
+import { archiveSession } from '../services/engine/sessionArchive';
+import { extractMemoryCandidates } from '../services/memory/extractor';
+import { memoriesRepo } from '../db/repositories/memories.repo';
 import { voiceService } from '../services/voice/voiceService';
 
 const interviewType = zInterviewType;
@@ -21,9 +24,11 @@ export function registerSessionIpc(): void {
       interviewType,
       jobId: z.string().nullable().default(null),
       answerFormat: answerFormat.default('key_points'),
-      // v2: which engine mode runs the session (default keeps v1 semantics)
-      // and, for ambient modes, how present the companion should be.
-      mode: zSessionMode.default('interview'),
+      // What the user said this call IS (shared/activities.ts). The engine mode
+      // is derived from it — the renderer no longer picks one, because that was
+      // the same question asked twice. Absent for rehearsals, which have no
+      // activity; the engine then falls back to the interview pipeline.
+      activity: zSpaceKind.optional(),
       presence: zPresence.optional(),
       // Companion cost governance: hard session budget in cents (null = none;
       // absent = the companion prefs default).
@@ -36,12 +41,17 @@ export function registerSessionIpc(): void {
       interviewType: t,
       jobId,
       answerFormat: f,
-      mode,
+      activity,
       presence,
       budgetCents,
       companionPresence,
     }) =>
-      sessionManager.start(profileId, t, jobId, f, { mode, presence, budgetCents, companionPresence }),
+      sessionManager.start(profileId, t, jobId, f, {
+        activity,
+        presence,
+        budgetCents,
+        companionPresence,
+      }),
   );
 
   // Live posture change for the active ambient session (companion presence
@@ -117,7 +127,10 @@ export function registerSessionIpc(): void {
     IPC.session.ask,
     z.object({ sessionId: z.string().min(1), questionText: z.string().min(1) }),
     ({ sessionId, questionText }) =>
-      // fire-and-forget; answer streams over events
+      // The answer streams over events as it is produced — but this promise is
+      // RETURNED, so the caller's `await` resolves only once the whole answer is
+      // done. Callers that want the streaming (the Cue Card, a capture) must not
+      // await it; the events are the live channel, this is the completion.
       sessionManager.answerQuestion(sessionId, questionText),
   );
 
@@ -159,7 +172,11 @@ export function registerSessionIpc(): void {
 
   handle(IPC.session.clearAnswer, z.void(), () => sessionManager.clearAnswerActive());
 
-  handle(IPC.session.list, z.void(), () => sessionsRepo.list());
+  // Scoped to a profile: Sessions and Insights are views of the ACTIVE profile
+  // (docs/19-ACTIVE-PROFILE.md), and used to list every session in the database.
+  handle(IPC.session.list, z.object({ profileId: z.string().min(1).optional() }).optional(), (a) =>
+    sessionsRepo.list(a?.profileId),
+  );
 
   handle(IPC.session.get, zId, ({ id }) => {
     const detail = sessionsRepo.detail(id);
@@ -167,7 +184,45 @@ export function registerSessionIpc(): void {
     return detail;
   });
 
+  /**
+   * Keep a finished conversation (docs/16-CONTINUITY.md §9).
+   *
+   * Both halves of "remembering" happen here, and only here: the retrievable
+   * archive, and the memory candidates the user will review. Each is gated
+   * again internally (global switch, per-Space opt-out, consent), so this is
+   * the user's intent, not an override of their settings.
+   *
+   * Neither failure is fatal. A session the user chose to keep must stay kept
+   * even if summarising or extraction fails, so the counts come back as they
+   * are and the UI can say what actually happened.
+   */
+  handle(
+    IPC.session.remember,
+    z.object({
+      id: z.string().min(1),
+      /** Where to remember it. A string files the session into that Space,
+       *  `null` files it out of every Space, absent leaves it where it ran. */
+      packId: z.string().min(1).nullable().optional(),
+    }),
+    async ({ id, packId }) => {
+      if (!sessionsRepo.detail(id)) throw new Error('Session not found');
+      // Filing FIRST is what makes the choice mean anything: both the archive
+      // and the memory candidates read their scope off this column, so moving
+      // the session afterwards would leave them attached to the old Space.
+      if (packId !== undefined) sessionsRepo.setPack(id, packId);
+      const [archived, memories] = await Promise.all([
+        archiveSession(id).catch(() => 0),
+        extractMemoryCandidates(id).catch(() => 0),
+      ]);
+      return { archived, memories };
+    },
+  );
+
   handle(IPC.session.delete, zId, ({ id }) => {
+    // Discard means discard: the session, its transcript, its archive, and any
+    // memory candidates it produced. A rejected conversation must not leave
+    // suggestions behind in the review queue with nothing to trace them to.
+    memoriesRepo.deleteBySession(id);
     sessionsRepo.delete(id);
     return { deleted: true as const };
   });
@@ -184,5 +239,9 @@ export function registerSessionIpc(): void {
     ({ sessionId }) => sessionsRepo.getReport(sessionId),
   );
 
-  handle(IPC.session.practiceStats, z.void(), () => sessionsRepo.practiceStats());
+  handle(
+    IPC.session.practiceStats,
+    z.object({ profileId: z.string().min(1).optional() }).optional(),
+    (a) => sessionsRepo.practiceStats(a?.profileId),
+  );
 }

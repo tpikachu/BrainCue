@@ -7,6 +7,7 @@ import { apiKeyStore } from '../services/security/apiKey';
 import { listModels, testApiKey } from '../services/openai/client';
 import { defaultEfforts, modelPreset, presetModels } from '../services/openai/models';
 import { SETTINGS_KEYS, settingsRepo } from '../db/repositories/settings.repo';
+import { profilesRepo } from '../db/repositories/profiles.repo';
 import { readCompanionPrefs } from '../services/engine/modes/companion.mode';
 import {
   getShortcuts,
@@ -16,6 +17,7 @@ import {
   unregisterGlobalShortcuts,
 } from '../shortcuts';
 import { SHORTCUT_DEFAULTS } from '@shared/shortcuts';
+import { resolveActiveProfile } from '@shared/activeProfile';
 import { broadcast } from './broadcast';
 import { EVENTS } from '@shared/ipc';
 import { confirmDestructive } from './data.ipc';
@@ -25,6 +27,14 @@ import { getMainWindow } from '../windows/mainWindow';
 
 const defaultOverlay: OverlayPrefs = { opacity: 0.95, fontSize: 14, mode: 'compact' };
 const defaultAudio: AudioPrefs = { source: 'system', micDeviceId: null };
+
+/** Resolved HERE rather than in the renderer so every window agrees on whose
+ *  dashboard this is — including the Cue Card, which has no picker at all. */
+const activeProfileId = (): string | null =>
+  resolveActiveProfile(
+    settingsRepo.get(SETTINGS_KEYS.activeProfileId),
+    profilesRepo.list().map((p) => p.id),
+  );
 
 function readSettings(): AppSettings {
   return {
@@ -41,6 +51,15 @@ function readSettings(): AppSettings {
     hideTaskbarIcon: settingsRepo.get(SETTINGS_KEYS.hideTaskbarIcon) === '1',
     dataConsentAck: settingsRepo.get(SETTINGS_KEYS.dataConsentAck) === '1',
     memoryEnabled: settingsRepo.get(SETTINGS_KEYS.memoryEnabled) === '1', // consent: OFF until enabled
+    // Continuity defaults ON (absent = on): it summarises sessions the user
+    // ran, from transcripts already stored locally — a much smaller step than
+    // memory, which extracts standing claims about the person.
+    sessionArchiveEnabled: settingsRepo.get(SETTINGS_KEYS.sessionArchiveEnabled) !== '0',
+    devDbExplorer: settingsRepo.get(SETTINGS_KEYS.devDbExplorer) === '1', // support tool: OFF unless asked for
+    // Whose dashboard this is. Validated against the real rows: a profile can
+    // be deleted from under the pointer, and a dangling id would leave every
+    // surface silently empty rather than falling back to a profile that exists.
+    activeProfileId: activeProfileId(),
     companionPrefs: readCompanionPrefs(),
     tourDone: settingsRepo.get(SETTINGS_KEYS.tourDone) === '1',
     shortcuts: getShortcuts(),
@@ -68,6 +87,9 @@ const settingsPatch = z.object({
   codingLanguage: z.string().min(1).max(40).optional(),
   dataConsentAck: z.boolean().optional(),
   memoryEnabled: z.boolean().optional(),
+  sessionArchiveEnabled: z.boolean().optional(),
+  devDbExplorer: z.boolean().optional(),
+  activeProfileId: z.string().min(1).nullable().optional(),
   companionPrefs: z
     .object({
       personality: z.object({
@@ -102,6 +124,8 @@ export function registerSettingsIpc(): void {
   handle(IPC.settings.get, NoInput, () => readSettings());
 
   handle(IPC.settings.set, settingsPatch, (patch) => {
+    if (patch.activeProfileId !== undefined)
+      settingsRepo.set(SETTINGS_KEYS.activeProfileId, patch.activeProfileId ?? '');
     if (patch.models) settingsRepo.setJson(SETTINGS_KEYS.models, patch.models);
     if (patch.modelPreset) settingsRepo.set(SETTINGS_KEYS.modelPreset, patch.modelPreset);
     if (patch.reasoningEfforts)
@@ -121,8 +145,15 @@ export function registerSettingsIpc(): void {
       settingsRepo.set(SETTINGS_KEYS.dataConsentAck, patch.dataConsentAck ? '1' : '0');
     if (patch.memoryEnabled !== undefined)
       settingsRepo.set(SETTINGS_KEYS.memoryEnabled, patch.memoryEnabled ? '1' : '0');
+    if (patch.sessionArchiveEnabled !== undefined)
+      settingsRepo.set(
+        SETTINGS_KEYS.sessionArchiveEnabled,
+        patch.sessionArchiveEnabled ? '1' : '0',
+      );
     if (patch.companionPrefs)
       settingsRepo.setJson(SETTINGS_KEYS.companionPrefs, patch.companionPrefs);
+    if (patch.devDbExplorer !== undefined)
+      settingsRepo.set(SETTINGS_KEYS.devDbExplorer, patch.devDbExplorer ? '1' : '0');
     if (patch.tourDone !== undefined)
       settingsRepo.set(SETTINGS_KEYS.tourDone, patch.tourDone ? '1' : '0');
     return readSettings();

@@ -1,90 +1,161 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui';
+
+/** How long to wait for a step's anchor to mount after its route is taken.
+ *  ~1.2s total: long enough for a page that fetches before it renders, short
+ *  enough that a genuinely missing anchor does not stall the tour. */
+const POLL_MS = 60;
+const POLL_TRIES = 20;
 
 export interface TourStep {
   /** value of a `data-tour="…"` attribute to spotlight; omit for a centered step */
   target?: string;
+  /**
+   * Route to open before spotlighting, so the step can point at the actual
+   * card rather than at the nav item that leads to it.
+   *
+   * Highlighting "Library" in the sidebar tells you where to click and nothing
+   * about what you would find — the tour is worth more when it takes you there
+   * and rings the Spaces list itself. Steps that describe the shell (the
+   * switcher, the title bar) leave this out and stay wherever you are.
+   */
+  route?: string;
+  /** The chapter this step belongs to, shown above the title so a fifteen-step
+   *  tour reads as four short chapters rather than as a countdown. */
+  chapter: string;
   title: string;
   body: string;
 }
 
-/** First-run walkthrough. Steps spotlight sidebar entries or Home's mode cards
- *  by `data-tour`; when a target isn't on-screen (e.g. replaying the tour from
- *  Settings), that step gracefully falls back to a centered card. */
+/**
+ * The first-run walkthrough.
+ *
+ * Steps spotlight a `data-tour` anchor; when the target is not on screen — the
+ * tour is replayable from Settings and from Help, where Home's cards are not
+ * mounted — that step falls back to a centered card rather than breaking.
+ *
+ * Written to be read once, by someone who has just installed this and does not
+ * yet know what it is. Two rules keep it honest:
+ *
+ *  - **Say what the thing IS before saying where it lives.** "Memory is under
+ *    this nav item" helps nobody who does not know why an app would remember
+ *    anything. Each step leads with the idea and lands on the surface.
+ *  - **Include the consequences, not only the capabilities.** A conversation
+ *    kept with no Space keeps nothing; memory is off until switched on; Privacy
+ *    Mode blanks your own screenshots too. Discovering those later feels like a
+ *    bug — hearing them here makes them a design.
+ */
 export const TOUR_STEPS: TourStep[] = [
   {
-    title: 'Welcome to BrainCue 👋',
-    body: 'BrainCue hears the conversation you’re actually in — an interview, a meeting, or just your working day — and contributes through a floating, screen-share-invisible Cue Card, or its own voice. It runs on your machine, on your own API key. Here’s the whole flow in about a minute.',
+    chapter: 'Welcome',
+    title: 'The AI that’s in the room with you',
+    body: 'BrainCue listens to the conversation you are actually in — a standup, a client call, an interview, or just your working day — and contributes through a floating Cue Card that is invisible to screen sharing, or through its own voice. Everything runs on this machine, on your own API key. This takes about ninety seconds and covers the whole loop.',
   },
   {
-    target: 'nav-settings',
-    title: '1 · Add your OpenAI key',
-    body: 'Everything runs on your own key. Paste it in Settings — it’s encrypted in your OS keychain and never leaves the main process except to call OpenAI. Defaults use cost-effective models; you can override any model per task here.',
+    chapter: 'Welcome',
+    target: 'titlebar-help',
+    title: 'You can always get back here',
+    body: 'The “?” in the title bar opens Help: a quick start, what every activity does, the keyboard shortcuts, and answers to the questions people actually arrive with — including why something was not remembered. You can replay this tour from there at any time, so nothing you skip now is lost.',
+  },
+
+  {
+    chapter: 'Setup',
+    route: '/settings',
+    target: 'settings-key',
+    title: '1 · Your key, your models',
+    body: 'BrainCue has no account and no server of its own. Paste an OpenAI key in Settings and every call is billed to you directly — which is also why it is careful about making them. The key is encrypted by your operating system’s keychain and stays in the background process; the part of the app you can see never receives it, only whether one is present.',
   },
   {
-    target: 'nav-library',
-    title: '2 · Build your Library',
-    body: 'The Library holds what BrainCue should know: your profile (name, role, résumé), your Spaces — one per context, like a job with its JD and company research — and Memory. Everything is parsed and indexed locally, so contributions are grounded in YOUR real world instead of invented.',
+    chapter: 'Setup',
+    target: 'profile-switcher',
+    title: '2 · Who this is for',
+    body: 'BrainCue works for one person at a time. This switcher scopes everything beneath it — Home, Library, Memory, Sessions, and Insights all show that person and nobody else. Profiles and Settings sit below the divider because they are not about any one person; the group above it is.',
   },
   {
-    target: 'nav-home',
-    title: '3 · Start from Home',
-    body: 'Home is the launcher. “Start listening” opens one shared start flow for every mode: pick the mode, the Space that grounds it, and what to listen to — then see exactly what gets captured and what leaves your machine, before anything starts.',
+    chapter: 'Setup',
+    route: '/library',
+    target: 'library-content',
+    title: '3 · What it should already know',
+    body: 'The Library holds the Spaces and documents that ground every answer. A Space is one recurring context — a standup with its agenda, a role with its job description, a house move with the dates — and setting one up takes a minute. Everything you add is parsed and indexed here on your disk, so contributions come from your real world instead of being invented.',
   },
+
   {
+    chapter: 'Using it',
+    route: '/home',
     target: 'primary-actions',
-    title: '4 · Four ways in',
-    body: 'Start listening for a live session · Talk to BrainCue to ask by voice · Share screen to capture a region and solve it · Add context to create a Space. Nothing captures anything until you explicitly start it.',
+    title: '4 · Starting a conversation',
+    body: 'Home is the launcher. “Start listening” opens one flow for every kind of conversation: say what the call IS — a meeting, an interview, a study session — and everything else follows from that answer. You never pick a mode. Before anything starts you are shown exactly what will be captured on this machine and what will leave it, for the session you are about to run.',
   },
   {
-    target: 'mode-interview',
-    title: 'Interview Copilot',
-    body: 'You’re the candidate. BrainCue hears the interviewer’s questions and streams grounded answer cues into the Cue Card — with the format (key points, explanation, STAR story) switchable live, mid-answer.',
+    chapter: 'Using it',
+    route: '/home',
+    target: 'activity-meeting',
+    title: '5 · It is built to stay quiet',
+    body: 'An assistant in a real conversation is judged by when it does NOT speak. Presence is an explicit threshold you set at the start — Summoned only, Quiet, Balanced, or Active — not a mood. On Quiet, the default, most turns never reach a model at all: silence, small talk, and anything below the confidence bar are filtered out before a call is made, which is why an hour of listening costs so little.',
   },
   {
-    target: 'mode-practice',
-    title: 'Practice',
-    body: 'Rehearse out loud before the real thing: a mock interviewer asks questions with a voice, or a sparring drill coaches every spoken answer. The safest way to see BrainCue work.',
+    chapter: 'Using it',
+    title: '6 · The Cue Card is the live surface',
+    body: 'Everything lands in the floating Cue Card: the running transcript, streamed cards and answers, and the controls to retune them mid-answer. It is always on top for you and excluded from screen sharing and recording for everyone else. One caveat worth knowing now — while that exclusion is on, your own screenshots of BrainCue come out blank too.',
   },
   {
-    target: 'mode-meeting',
-    title: 'Meeting Copilot · Labs',
-    body: 'Sits in quietly and surfaces context, open questions, action items, and decisions — only when it’s confident. A Presence dial (summoned → quiet → balanced → active) sets explicit thresholds, so “how much it talks” is a number you choose, not a vibe.',
+    chapter: 'Using it',
+    title: '7 · Ask it directly, any time',
+    body: 'You do not have to wait for it to volunteer. Press the summon shortcut anywhere — even with no session running — and talk; the answer comes back spoken and on screen, and it stops the moment you speak over it. You can also drag-select a region of your screen, or solve whatever you have just copied, straight into the Cue Card.',
+  },
+
+  {
+    chapter: 'What it keeps',
+    title: '8 · Nothing is kept until you say so',
+    body: 'When you stop a session, BrainCue asks one question: keep this conversation, and in which Space? Answering is what triggers everything downstream. Choose no Space and nothing is summarised and nothing is proposed — the session and its transcript are still saved, but it leaves no trace in what BrainCue knows. That is a legitimate choice, and it is offered before you start as well as after you finish.',
   },
   {
-    target: 'mode-companion',
-    title: 'Companion · Labs',
-    body: 'An ambient presence while you work: it remembers what you saved, flags tasks, and offers context — through deterministic gates you control. Set a posture (Off is a hard mute), quiet hours, and a hard per-session spend cap. Silence and small talk never cost a model call.',
+    chapter: 'What it keeps',
+    route: '/memory',
+    target: 'memory-switches',
+    title: '9 · Two different things, two different defaults',
+    body: 'A SUMMARY answers “what happened in that call?” — filed into the Space it happened in, so the tenth standup is grounded in the previous nine, and deleted along with its session. That is on by default. LONG-TERM MEMORY answers “what is true about me?” — a standing claim like “keeps updates under a minute”, which outlives every conversation. Because a wrong one would be repeated forever, it is off until you turn it on.',
   },
   {
-    title: 'Talk to BrainCue',
-    body: 'Press Ctrl+Shift+T anywhere to summon it: push-to-talk, and the answer comes back spoken and on-screen. Start talking over it and it stops to listen. Works with a session live — or on its own, when you just have a question.',
+    chapter: 'What it keeps',
+    route: '/memory',
+    target: 'memory-queue',
+    title: '10 · You approve every memory, one at a time',
+    body: 'Suggestions arrive here after a session and sit unused until you press Approve — nothing pending is ever recalled. Edit the wording first if it is nearly right; reject it and the same sentence is not raised again. When something you already saved has CHANGED — a date that moved, a person who switched roles — the card says “replaces a saved fact” and shows the old value struck through, and the button reads Replace. The old value is kept as history but stops being used, so an answer can never quote last month’s version back at you.',
   },
   {
-    title: 'The Cue Card is your live surface',
-    body: 'Everything lands here: the live transcript, streamed cards and answers, and the controls to retune them. It’s always-on-top and excluded from screen sharing and recording — there for you, invisible to everyone else. Toggle it from the tray or a hotkey.',
+    chapter: 'What it keeps',
+    route: '/memory',
+    target: 'memory-add',
+    title: '11 · Or just tell it directly',
+    body: 'Waiting for a conversation to mention something is the slow way to make this useful. Anything you already know it should know — who you report to, what you are building, how you like answers written — you can type here on day one, and it is searchable immediately. It goes through exactly the same gates as anything BrainCue proposed itself: the sensitive-content filter still applies, and you still choose whether it applies everywhere or only inside one Space.',
+  },
+
+  {
+    chapter: 'Afterwards',
+    route: '/sessions',
+    target: 'sessions-table',
+    title: '12 · Reviewing what happened',
+    body: 'Sessions keeps the full history for this profile, with transcripts and reports: interviews get a coaching report with strengths, improvements, and per-question notes; meetings get a structured report with decisions and action items. Insights aggregates the practice sessions over time, so you can see whether you are actually improving.',
   },
   {
-    title: 'Memory — off until you say so',
-    body: 'BrainCue can remember things across sessions, but nothing is remembered silently: memories are proposed, and only ones you approve in the Library are ever recalled. You can correct or forget any of them, right from the card that used it.',
+    chapter: 'Afterwards',
+    route: '/settings',
+    target: 'settings-privacy',
+    title: '13 · Staying invisible, and in control',
+    body: 'Privacy Mode hides every BrainCue window from screen capture and recording, and can be toggled with a shortcut mid-call. Every shortcut is rebindable. Your data — transcripts, documents, embeddings, summaries, memory — lives in a local database on this machine, which is why Settings → Danger zone can genuinely erase all of it, and why there is no backup but yours.',
   },
   {
-    target: 'nav-sessions',
-    title: 'Review afterwards',
-    body: 'Sessions is your history. Interviews get a coaching report — summary, strengths, improvements, per-question notes; meetings get their own structured report with decisions and action items. Insights aggregates your progress over time.',
-  },
-  {
-    target: 'nav-settings',
-    title: 'Stay invisible — and in control',
-    body: 'Privacy Mode (Ctrl+Shift+H) hides every window from screen capture; you can also hide the app from the taskbar. Settings → Danger zone resets settings or wipes all local data. More modes — Interviewer Assist and Tutor — are on the way; Home’s Labs strip shows what’s coming.',
-  },
-  {
-    title: 'You’re set 🚀',
-    body: 'That’s the flow: Library → Home → Start listening → the Cue Card → Sessions. Replay this tour anytime from Settings → Getting started.',
+    chapter: 'Afterwards',
+    title: 'That’s the loop',
+    body: 'Library → Home → Start listening → the Cue Card → keep it into a Space → review what it proposed. Everything else is detail, and the “?” in the title bar has it when you want it. Two things are still on the way: assisting you when YOU are the one interviewing, and guided tutoring.',
   },
 ];
 
 export function Tour({ steps, onClose }: { steps: TourStep[]; onClose: () => void }) {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [i, setI] = useState(0);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
@@ -92,13 +163,43 @@ export function Tour({ steps, onClose }: { steps: TourStep[]; onClose: () => voi
 
   const step = steps[i];
   const last = i === steps.length - 1;
+  // Where this step sits within its chapter, for the progress line. Cheap to
+  // recompute and it keeps the chapters defined in ONE place — the steps.
+  const chapters = steps.map((s) => s.chapter).filter((c, n, all) => all.indexOf(c) === n);
+
+  // Take the step's route before looking for its anchor. Navigating from inside
+  // the effect that measures would race the router; doing it first means the
+  // measure pass below simply polls until the new page has mounted.
+  useEffect(() => {
+    if (step.route && location.pathname !== step.route) navigate(step.route);
+  }, [step.route, location.pathname, navigate]);
 
   // Locate the target element and reposition the card; recompute on resize.
+  //
+  // The anchor may not exist yet (the route above is still mounting) or may be
+  // below the fold, so this polls briefly and scrolls the target into view
+  // before measuring. A target that never appears falls back to a centered
+  // card, which is also what a step with no target gets.
   useLayoutEffect(() => {
+    let timer = 0;
+    let tries = 0;
+    // Scroll the target into view ONCE per step. Doing it on every measure
+    // would loop forever: the scroll listener below re-measures, which would
+    // scroll again, which would re-measure.
+    let centered = false;
     const measure = () => {
       const el = step.target
         ? (document.querySelector(`[data-tour="${step.target}"]`) as HTMLElement | null)
         : null;
+      if (step.target && !el && tries < POLL_TRIES) {
+        tries += 1;
+        timer = window.setTimeout(measure, POLL_MS);
+        return;
+      }
+      if (el && !centered) {
+        centered = true;
+        el.scrollIntoView({ block: 'center', behavior: 'auto' });
+      }
       const r = el?.getBoundingClientRect() ?? null;
       setRect(r);
 
@@ -119,13 +220,21 @@ export function Tour({ steps, onClose }: { steps: TourStep[]; onClose: () => voi
       setPos({ top, left });
     };
     measure();
-    window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
-  }, [i, step.target]);
+    // A re-measure on scroll as well as resize: the target is scrolled into
+    // view above, and any later scroll would leave the ring behind.
+    const remeasure = () => measure();
+    window.addEventListener('resize', remeasure);
+    window.addEventListener('scroll', remeasure, true); // capture: inner scrollers too
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('resize', remeasure);
+      window.removeEventListener('scroll', remeasure, true);
+    };
+  }, [i, step.target, location.pathname]);
 
   const pad = 6;
   return (
-    <div className="fixed inset-0 z-[60]">
+    <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="Guided tour">
       {rect ? (
         <div
           className="pointer-events-none absolute rounded-xl ring-2 ring-indigo-400 transition-all duration-200"
@@ -143,11 +252,31 @@ export function Tour({ steps, onClose }: { steps: TourStep[]; onClose: () => voi
 
       <div
         ref={cardRef}
-        className="absolute w-80 rounded-xl border border-neutral-700 bg-neutral-900 p-4 shadow-2xl"
+        className="absolute w-[22rem] rounded-xl border border-neutral-700 bg-neutral-900 p-4 shadow-2xl"
         style={{ top: pos.top, left: pos.left }}
       >
-        <div className="mb-1 text-xs text-neutral-500">
-          Step {i + 1} of {steps.length}
+        {/* Chapter ticks rather than "step 7 of 14": a bare count out of fourteen
+            reads as a chore, while four named chapters read as a short story
+            with a visible end. */}
+        <div className="mb-2.5 flex items-center gap-2">
+          {chapters.map((c) => (
+            <span
+              key={c}
+              className={`h-1 flex-1 rounded-full transition-colors ${
+                c === step.chapter
+                  ? 'bg-indigo-400'
+                  : chapters.indexOf(c) < chapters.indexOf(step.chapter)
+                    ? 'bg-indigo-400/35'
+                    : 'bg-white/10'
+              }`}
+            />
+          ))}
+        </div>
+        <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+          {step.chapter}
+          <span className="ml-2 normal-case tracking-normal text-neutral-600">
+            {i + 1}/{steps.length}
+          </span>
         </div>
         <h3 className="mb-1.5 font-semibold text-neutral-100">{step.title}</h3>
         <p className="mb-4 text-sm leading-relaxed text-neutral-300">{step.body}</p>

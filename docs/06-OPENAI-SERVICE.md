@@ -116,7 +116,7 @@ so it grounds the answer, stays citable, and the Cue Card surfaces it as a promi
 no extra IPC event or embedding call).
 
 ### tailor.ts — `tailorApplication(input) => TailorResult`
-Powers **Tailor Resume** (v1.3). One call (new `tailor` model key — full `gpt-4.1` on
+Powers **Tailor Resume** (v1.3) — **switched off**, see [20](20-QUARANTINE.md). One call (new `tailor` model key — full `gpt-4.1` on
 balanced, `gpt-5` on best; latency-tolerant, quality-critical) takes the BASE resume ×
 JD × application questions and returns `{ candidateName, jobTitle, company,
 tailoredResume, answers[] }`. The prompt grounds EVERYTHING in the base resume (reword/

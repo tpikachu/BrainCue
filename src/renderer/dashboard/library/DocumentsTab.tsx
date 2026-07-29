@@ -1,26 +1,21 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { useProfileStore } from '../../store/useProfileStore';
+import { useActiveProfile } from '../../store/useProfileStore';
 import type { Job, Story } from '@shared/types';
-import { Badge, Card, Field, Select } from '../../components/ui';
+import { Badge, Card } from '../../components/ui';
+import { FLAGS } from '@shared/flags';
 
 /** Library › Documents: everything BrainCue has ingested for a profile —
  *  the résumé, STAR stories, and each Space's JD / company research. Read-only
  *  inventory with pointers to where each document is edited; the editing
  *  surfaces themselves stay where they are (Profile editor, Space detail). */
 export function DocumentsTab() {
-  const { profiles, load } = useProfileStore();
-  const [profileId, setProfileId] = useState('');
+  // Whose documents these are is decided once, in the sidebar switcher.
+  const profile = useActiveProfile();
+  const profileId = profile?.id ?? '';
   const [stories, setStories] = useState<Story[]>([]);
   const [spaces, setSpaces] = useState<Job[]>([]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-  useEffect(() => {
-    if (!profileId && profiles.length > 0) setProfileId(profiles[0].id);
-  }, [profiles, profileId]);
 
   useEffect(() => {
     if (!profileId) {
@@ -28,14 +23,14 @@ export function DocumentsTab() {
       setSpaces([]);
       return;
     }
-    void api.stories.list(profileId).then(setStories).catch(() => setStories([]));
+    if (FLAGS.storyBank) {
+      void api.stories.list(profileId).then(setStories).catch(() => setStories([]));
+    }
     void api.jobs
       .page(profileId, '', 100, 0)
       .then(({ items }) => setSpaces(items as Job[]))
       .catch(() => setSpaces([]));
   }, [profileId]);
-
-  const profile = profiles.find((p) => p.id === profileId);
 
   return (
     <div>
@@ -43,20 +38,6 @@ export function DocumentsTab() {
         Everything BrainCue has ingested for this profile. Documents are parsed and indexed locally;
         only retrieved snippets are ever sent per question.
       </p>
-
-      <Card className="mb-5">
-        <Field label="Profile">
-          <Select value={profileId} onChange={(e) => setProfileId(e.target.value)}>
-            <option value="">Select a profile…</option>
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-                {p.targetRole ? ` · ${p.targetRole}` : ''}
-              </option>
-            ))}
-          </Select>
-        </Field>
-      </Card>
 
       {profile && (
         <div className="space-y-3">
@@ -79,6 +60,10 @@ export function DocumentsTab() {
             </div>
           </Card>
 
+          {/* Inventory entry for the story bank. Conditional render, not a
+              `hidden` class — the hidden version still cost an IPC round-trip
+              to fill a badge nobody could see. */}
+          {FLAGS.storyBank && (
           <Card className="flex items-center justify-between !py-4">
             <div>
               <div className="font-medium text-neutral-100">STAR stories</div>
@@ -95,6 +80,7 @@ export function DocumentsTab() {
               </Link>
             </div>
           </Card>
+          )}
 
           <Card>
             <div className="mb-3 font-medium text-neutral-100">Per-Space documents</div>
@@ -116,6 +102,10 @@ export function DocumentsTab() {
                     <span className="flex shrink-0 gap-1.5">
                       {s.parsedJd ? <Badge tone="green">JD ✓</Badge> : <Badge tone="amber">no JD</Badge>}
                       {s.parsedCompany && <Badge tone="blue">company ✓</Badge>}
+                      {/* A tailored résumé is a document OF the Space, so it is
+                          listed with the Space's other documents rather than
+                          hidden inside the editor that produced it. */}
+                      {s.tailoredResume && <Badge tone="blue">tailored résumé ✓</Badge>}
                     </span>
                   </li>
                 ))}

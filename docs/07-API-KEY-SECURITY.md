@@ -70,7 +70,7 @@ key.
 - Disk theft is mitigated by OS-backed encryption; not a substitute for full-disk
   encryption, which we recommend in docs.
 
-## Memory privacy (v2 Prompt 8)
+## Memory privacy
 
 The local memory subsystem's standing guarantees:
 - **No capture before consent**: the global switch (`memory_enabled`) defaults
@@ -87,7 +87,7 @@ The local memory subsystem's standing guarantees:
 - **Provenance is visible**: every recalled memory appears in the Cue Card's
   "data sent" panel and in the contribution's sourceRefs.
 
-## Voice privacy (v2 Prompt 9)
+## Voice privacy
 
 The voice/summon layer's standing guarantees:
 - **Push-to-talk only**: the microphone opens exclusively for an explicit

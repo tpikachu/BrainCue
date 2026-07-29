@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { EVENTS } from '@shared/ipc';
 
 /**
- * Meeting Copilot ACCEPTANCE suite (Prompt 7) — a deterministic transcript
+ * Meeting Copilot ACCEPTANCE suite — a deterministic transcript
  * fixture through the REAL engine (sql.js db, real persistence, real trigger
  * policy), with the providers scripted. Pins the mode's contract:
  *  - greetings/small talk: silence, and the classifier is never even called
@@ -85,6 +85,17 @@ vi.mock('../../providers/registry', () => ({
     }
     if (cap === 'realtimeStt') {
       return { open: () => ({ appendAudio: vi.fn(), stop: vi.fn() }) };
+    }
+    // Scripted so the "stopping remembers nothing" test can actually observe an
+    // archive being written. Without it, archiveSession fails on the missing
+    // capability and returns 0 whether or not stop() calls it — which would
+    // make that test pass against broken code.
+    if (cap === 'embedding') {
+      return {
+        identity: () => ({ provider: 'fake', model: 'test-embed', dim: 3 }),
+        embed: async (texts: string[]) => texts.map(() => Float32Array.from([1, 0, 0.05])),
+        embedOne: async () => Float32Array.from([1, 0, 0.05]),
+      };
     }
     throw new Error(`unexpected capability: ${cap}`);
   },
@@ -259,6 +270,53 @@ describe('meeting acceptance — the deterministic fixture', () => {
     const summaries = contribs(sid).filter((c) => c.kind === 'summary');
     expect(summaries).toHaveLength(1);
     expect(JSON.parse(summaries[0].meta!)).toMatchObject({ reportType: 'meeting' });
+  });
+
+  it('stopping remembers NOTHING — the save prompt is the gate', async () => {
+    const profileId = `mp${++seq}`;
+    h.db
+      .insert(schema.profiles)
+      .values({ id: profileId, name: 'Deciding User', targetRole: 'PM', parsedResume: '{}' })
+      .run();
+    vi.setSystemTime(T0);
+    const s = engine.start(profileId, 'general', null, 'key_points', { mode: 'meeting' });
+    await engine.processFinalTranscript(s.id, 'We decided to move the launch to September.');
+    await engine.processFinalTranscript(s.id, 'Alice will send the revised plan by Friday.');
+    await engine.processFinalTranscript(s.id, 'Agreed, September it is.');
+    await engine.processFinalTranscript(s.id, 'I will update the roadmap.');
+
+    // A summariser that WOULD produce a valid archive, so the only reason none
+    // appears is that stop() declined to ask for one.
+    h.chatJson = async () => ({
+      topic: 'Launch timing',
+      summary: 'The launch moved to September and Alice is revising the plan.',
+      decisions: ['Move the launch to September'],
+      actionItems: ['Alice — send the revised plan by Friday'],
+      openQuestions: [],
+      participants: ['Alice'],
+    });
+
+    engine.stop(s.id);
+    // Archiving is fire-and-forget and awaits the model + the embedder, so a
+    // single tick would let it pass by simply not having finished yet. Flush
+    // enough microtasks that a real archive would have landed.
+    for (let i = 0; i < 50; i += 1) await Promise.resolve();
+
+    // No archive chunk, and no memory candidate, until the user says to keep it
+    // (docs/16-CONTINUITY.md §9). Doing either here would mean Discard has to
+    // undo work that should never have started.
+    const archives = h.db
+      .select()
+      .from(schema.chunks)
+      .all()
+      .filter((c) => c.sourceType === 'session' && c.sourceId === s.id);
+    expect(archives).toHaveLength(0);
+    const memories = h.db
+      .select()
+      .from(schema.memories)
+      .all()
+      .filter((m) => m.profileId === profileId);
+    expect(memories).toHaveLength(0);
   });
 
   it('summoned presence never contributes ambiently', async () => {

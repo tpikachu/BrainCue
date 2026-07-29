@@ -53,6 +53,7 @@ export function AnswerControls(props: {
               ['explanation', 'Explanation', 'A natural, spoken explanation'],
               ['detailed', 'Detailed', 'Thorough, with a concrete example'],
               ['story_teller', 'Story', 'A short, vivid first-person story'],
+              ['star', 'STAR', 'Situation · Task · Action · Result — for behavioural questions'],
             ] as const
           ).map(([value, label, title]) => (
             <button

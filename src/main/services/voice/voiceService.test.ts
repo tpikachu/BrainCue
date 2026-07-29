@@ -3,7 +3,7 @@ import { EVENTS } from '@shared/ipc';
 import type { VoiceAudioEvent, VoiceStateEvent } from '@shared/types';
 
 /**
- * Voice orchestrator acceptance (Prompt 9): the REAL VoiceService over the
+ * Voice orchestrator acceptance: the REAL VoiceService over the
  * sql.js db and real bridge/persistence, with the provider surface scripted.
  * Pins the contract:
  *  - no-session summon = quick ask over the default Space, GENERIC-only events

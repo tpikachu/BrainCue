@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useTourStore } from '../../store/useTourStore';
 import { api } from '../../lib/api';
@@ -168,7 +169,7 @@ export default function SettingsPage() {
 
   return (
     <Page title="Settings" width="max-w-2xl">
-      <Card className="mb-5">
+      <Card className="mb-5" data-tour="settings-key">
         <div className="mb-1 flex items-center gap-2">
           <h3 className="font-medium">OpenAI API Key</h3>
           {settings?.apiKeyPresent ? <Badge tone="green">configured</Badge> : <Badge tone="amber">not set</Badge>}
@@ -250,7 +251,7 @@ export default function SettingsPage() {
         </p>
       </Card>
 
-      <Card>
+      <Card data-tour="settings-privacy">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <span
@@ -298,6 +299,24 @@ export default function SettingsPage() {
           </div>
           <Switch checked={hideTaskbar} onChange={setHideTaskbarIcon} onLabel="Hidden" offLabel="Shown" />
         </div>
+
+        {/* What BrainCue remembers is TWO switches, and they used to live in
+            two places: this one for conversation summaries, another on the
+            Memory page for long-term memory. Both read as "remembering", so
+            having them apart made it impossible to tell which one you had just
+            turned off. They are together on Memory now; this points there. */}
+        <div className="mt-4 flex items-center justify-between gap-4 border-t border-white/5 pt-4">
+          <div>
+            <h3 className="font-medium">What BrainCue remembers</h3>
+            <p className="mt-0.5 max-w-2xl text-xs leading-relaxed text-neutral-500">
+              Conversation summaries and long-term memory are two separate switches, and both live
+              in Memory — along with everything currently remembered and the review queue.
+            </p>
+          </div>
+          <Link to="/memory">
+            <Button>Open Memory</Button>
+          </Link>
+        </div>
       </Card>
 
       {settings && <ShortcutsCard settings={settings} onSaved={load} />}
@@ -310,15 +329,25 @@ export default function SettingsPage() {
         <div className="flex items-center justify-between gap-4">
           <div>
             <h3 className="font-medium">Getting started</h3>
-            <p className="text-xs text-neutral-500">Replay the guided tour of the app.</p>
+            <p className="text-xs text-neutral-500">
+              Replay the guided tour, or open Help for the quick start, the shortcuts, and the
+              FAQ. Help is also the “?” in the title bar, from any page.
+            </p>
           </div>
-          <Button onClick={startTour}>
-            <PlayIcon /> Replay tour
-          </Button>
+          <div className="flex shrink-0 gap-2">
+            <Link to="/help">
+              <Button variant="ghost">Help &amp; FAQ</Button>
+            </Link>
+            <Button onClick={startTour}>
+              <PlayIcon /> Replay tour
+            </Button>
+          </div>
         </div>
       </Card>
 
       <UpdatesCard />
+
+      <AdvancedCard settings={settings} onSaved={load} />
 
       <DangerZoneCard onChanged={load} />
     </Page>
@@ -525,6 +554,58 @@ function UpdatesCard() {
 
 /** Destructive actions. Both are confirmed by a native dialog in the main process,
  *  so nothing is wiped without explicit consent. */
+/**
+ * Advanced — the DB Explorer switch.
+ *
+ * Separate from the Danger zone on purpose: nothing here destroys anything, so
+ * filing it under "irreversible" would either scare people off a legitimate
+ * support tool or teach them to ignore that heading. The warning is about what
+ * the tool SHOWS, not about damage it does — it reads every table raw,
+ * including transcripts and memory, with no redaction.
+ */
+function AdvancedCard({
+  settings,
+  onSaved,
+}: {
+  settings: AppSettings | null;
+  onSaved: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const on = !!settings?.devDbExplorer;
+
+  const toggle = async (next: boolean) => {
+    if (busy) return; // Switch has no disabled state — guard the handler instead
+    setBusy(true);
+    try {
+      await api.settings.set({ devDbExplorer: next });
+      await onSaved();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="mt-5">
+      <div className="mb-1 flex items-center justify-between">
+        <h3 className="font-medium">Advanced</h3>
+        <Badge tone="neutral">for troubleshooting</Badge>
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm text-neutral-200">Show the DB Explorer</p>
+          <p className="mt-0.5 text-xs text-neutral-500">
+            Adds a sidebar entry that browses this machine’s database directly — every table, raw
+            and unredacted, including full transcripts and everything in Memory. It is a support
+            tool for diagnosing a problem, not a feature: turn it on if you have been asked to, or
+            if you know what you are looking for. Nothing here is edited or deleted by viewing it.
+          </p>
+        </div>
+        <Switch checked={on} onChange={(v) => void toggle(v)} onLabel="Shown" offLabel="Hidden" />
+      </div>
+    </Card>
+  );
+}
+
 function DangerZoneCard({ onChanged }: { onChanged: () => Promise<void> }) {
   const [busy, setBusy] = useState<'reset' | 'wipe' | null>(null);
   const [status, setStatus] = useState<string | null>(null);

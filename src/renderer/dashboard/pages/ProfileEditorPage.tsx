@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
-import type { AppSettings, Profile } from '@shared/types';
+import type { AppSettings, Profile, ProfileAbout } from '@shared/types';
+import { EMPTY_PROFILE_ABOUT, PROFILE_ABOUT_FIELDS } from '@shared/types';
 import { Badge, BusyOverlay, Button, Card, Field, Page, TextArea, TextInput } from '../../components/ui';
 import { ChevronLeftIcon, UploadIcon } from '../../components/icons';
 import { StoryBankModal } from '../StoryBankModal';
+import { FLAGS } from '@shared/flags';
 
 export default function ProfileEditorPage() {
   const { id } = useParams<{ id: string }>();
@@ -13,13 +15,14 @@ export default function ProfileEditorPage() {
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
   const [resumeText, setResumeText] = useState('');
+  const [about, setAbout] = useState<ProfileAbout>(EMPTY_PROFILE_ABOUT);
   const [busyMsg, setBusyMsg] = useState<string | null>(null);
   const [status, setStatus] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
   const [storyOpen, setStoryOpen] = useState(false);
   const [storyCount, setStoryCount] = useState(0);
 
   const loadStoryCount = useCallback(async () => {
-    if (!id) return;
+    if (!id || !FLAGS.storyBank) return; // no round-trip for a card that isn't rendered
     setStoryCount((await api.stories.list(id)).length);
   }, [id]);
 
@@ -30,6 +33,7 @@ export default function ProfileEditorPage() {
     setName(p.name);
     setRole(p.targetRole);
     setResumeText(p.resumeText ?? '');
+    setAbout({ ...EMPTY_PROFILE_ABOUT, ...(p.about ?? {}) });
     setKeyPresent(((await api.settings.get()) as AppSettings).apiKeyPresent);
     await loadStoryCount();
   }, [id, loadStoryCount]);
@@ -62,7 +66,11 @@ export default function ProfileEditorPage() {
   const save = () =>
     withBusy(keyPresent ? 'Saving & parsing…' : 'Saving…', async () => {
       if (!id) return;
-      await api.profiles.update(id, { name: name.trim() || 'Untitled', targetRole: role });
+      await api.profiles.update(id, {
+        name: name.trim() || 'Untitled',
+        targetRole: role,
+        about,
+      });
       const res = await api.documents.saveResume(id, resumeText);
       await refresh();
       setStatus({
@@ -75,10 +83,12 @@ export default function ProfileEditorPage() {
 
   if (!profile) return <BusyOverlay message="Loading profile…" />;
 
+  const aboutFilled = PROFILE_ABOUT_FIELDS.filter((f) => about[f.key].trim()).length;
+
   return (
     <Page
       title="Edit profile"
-      subtitle="Your name, role, and resume. Jobs and interview settings live on the Interview page."
+      subtitle="Who you are, what you're working on, and any documents worth grounding in."
       width="max-w-2xl"
       actions={
         <Link to="/profiles">
@@ -111,6 +121,37 @@ export default function ProfileEditorPage() {
         </div>
       </Card>
 
+      {/* About you — the questions whose answers actually change how well
+          BrainCue can stand in for this person. A résumé says what they did for
+          employers; this says who they are now. Each answered section is
+          indexed as its own `profile` chunk, so it grounds answers in every
+          mode rather than sitting in the database unread. */}
+      <Card className="mb-5">
+        <div className="mb-1 flex items-center justify-between">
+          <h3 className="font-medium">About you</h3>
+          <Badge tone={aboutFilled > 0 ? 'green' : 'amber'}>
+            {aboutFilled} of {PROFILE_ABOUT_FIELDS.length} answered
+          </Badge>
+        </div>
+        <p className="mb-4 max-w-xl text-xs leading-relaxed text-neutral-500">
+          The more of this you fill in, the better BrainCue can help in a live conversation. Answer
+          what you can and skip the rest — nothing here is required, and you can come back to it.
+          It stays in the local database.
+        </p>
+        <div className="space-y-3">
+          {PROFILE_ABOUT_FIELDS.map((f) => (
+            <Field key={f.key} label={f.label}>
+              <TextArea
+                rows={f.rows}
+                value={about[f.key]}
+                placeholder={f.placeholder}
+                onChange={(e) => setAbout((a) => ({ ...a, [f.key]: e.target.value }))}
+              />
+            </Field>
+          ))}
+        </div>
+      </Card>
+
       <Card className="mb-5">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="font-medium">Resume</h3>
@@ -129,6 +170,11 @@ export default function ProfileEditorPage() {
         </Field>
       </Card>
 
+      {/* Stories ground live interview answers, so the bank that manages them
+          has to be reachable whenever that retrieval runs. Conditional render,
+          not a `hidden` class: display:none left StoryBankModal mounted with an
+          unreachable trigger and still fired an IPC round-trip for the count. */}
+      {FLAGS.storyBank && (
       <Card className="mb-5">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -156,6 +202,7 @@ export default function ProfileEditorPage() {
           </Button>
         </div>
       </Card>
+      )}
 
       <div className="sticky bottom-0 flex items-center justify-between gap-4 rounded-xl border border-neutral-800 bg-neutral-900/90 px-4 py-3 backdrop-blur">
         <span className="text-sm">

@@ -1,6 +1,12 @@
 import { and, desc, eq, inArray, isNull, like } from 'drizzle-orm';
 import { db, schema } from '../index';
-import type { MemoryCategory, MemoryItem, MemoryStatus } from '@shared/types';
+import type {
+  MemoryCategory,
+  MemoryConflict,
+  MemoryItem,
+  MemorySourceKind,
+  MemoryStatus,
+} from '@shared/types';
 
 type Row = typeof schema.memories.$inferSelect;
 
@@ -16,6 +22,12 @@ function toItem(r: Row): MemoryItem {
     importance: r.importance,
     sensitive: r.sensitive === 1,
     status: r.status as MemoryStatus,
+    factKey: r.factKey,
+    validFrom: r.validFrom,
+    validTo: r.validTo,
+    supersededBy: r.supersededBy,
+    sourceKind: r.sourceKind as MemorySourceKind,
+    revision: r.revision,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     lastUsedAt: r.lastUsedAt,
@@ -66,6 +78,8 @@ export const memoriesRepo = {
     confidence: number;
     importance: number;
     sourceRefs: { type: string; id: string }[];
+    factKey?: string | null;
+    sourceKind?: MemorySourceKind;
   }): string {
     const id = crypto.randomUUID();
     db()
@@ -80,9 +94,108 @@ export const memoriesRepo = {
         importance: opts.importance,
         status: 'pending',
         sourceRefs: JSON.stringify(opts.sourceRefs),
+        factKey: opts.factKey ?? null,
+        sourceKind: opts.sourceKind ?? 'extracted',
       })
       .run();
     return id;
+  },
+
+  /**
+   * The CURRENT approved row for a single-valued fact, or null.
+   *
+   * "Current" = approved, same scope, not superseded, still valid. This is the
+   * lookup the supersession invariant is built on: at most one such row may
+   * exist per (profileId, packId, factKey).
+   */
+  currentByFactKey(
+    profileId: string,
+    packId: string | null,
+    factKey: string,
+    now = Date.now(),
+  ): MemoryItem | null {
+    const rows = db()
+      .select()
+      .from(schema.memories)
+      .where(
+        and(
+          eq(schema.memories.profileId, profileId),
+          eq(schema.memories.factKey, factKey),
+          eq(schema.memories.status, 'approved'),
+          isNull(schema.memories.supersededBy),
+        ),
+      )
+      .all()
+      .filter(
+        (r) =>
+          (packId === null ? r.packId == null : r.packId === packId) &&
+          (r.validTo == null || r.validTo > now),
+      );
+    // Defensive: if a bug ever produced two current rows, the newest wins so
+    // recall still sees exactly one truth.
+    rows.sort((a, b) => b.validFrom - a.validFrom);
+    return rows[0] ? toItem(rows[0]) : null;
+  },
+
+  /**
+   * Retire `oldId` in favour of `newId`: stamps validTo + supersededBy and
+   * drops the embedding so the superseded row can never be recalled again,
+   * while the row itself (and its content) survives as history.
+   */
+  supersede(oldId: string, newId: string, at = Date.now()): void {
+    db()
+      .update(schema.memories)
+      .set({
+        supersededBy: newId,
+        validTo: at,
+        updatedAt: at,
+        // Recall filters on supersededBy already; clearing the vector is the
+        // belt-and-braces version — a superseded fact is unreachable even if a
+        // future retrieval path forgets the filter.
+        embedVector: null,
+        embedProvider: null,
+        embedModel: null,
+        embedDim: null,
+      })
+      .where(eq(schema.memories.id, oldId))
+      .run();
+  },
+
+  /** Set the revision on a row being promoted over a superseded predecessor. */
+  setRevision(id: string, revision: number): void {
+    db().update(schema.memories).set({ revision }).where(eq(schema.memories.id, id)).run();
+  },
+
+  /**
+   * Pending candidates that would REPLACE a current approved fact, paired with
+   * what they'd replace. The review UI shows both so the user decides; nothing
+   * is ever superseded automatically.
+   */
+  conflicts(profileId: string, now = Date.now()): MemoryConflict[] {
+    const pending = db()
+      .select()
+      .from(schema.memories)
+      .where(and(eq(schema.memories.profileId, profileId), eq(schema.memories.status, 'pending')))
+      .all()
+      .filter((r) => r.factKey);
+    const out: MemoryConflict[] = [];
+    for (const p of pending) {
+      const current = this.currentByFactKey(profileId, p.packId, p.factKey as string, now);
+      if (current && current.id !== p.id) out.push({ candidate: toItem(p), current });
+    }
+    return out;
+  },
+
+  /** A fact's revision chain, newest first — what the value is now and what it
+   *  used to be. Powers the history view; never feeds recall. */
+  history(profileId: string, factKey: string): MemoryItem[] {
+    return db()
+      .select()
+      .from(schema.memories)
+      .where(and(eq(schema.memories.profileId, profileId), eq(schema.memories.factKey, factKey)))
+      .all()
+      .map(toItem)
+      .sort((a, b) => b.validFrom - a.validFrom);
   },
 
   /** Approve (optionally with edits) + attach the embedding computed by the
@@ -163,20 +276,61 @@ export const memoriesRepo = {
     db().delete(schema.memories).where(eq(schema.memories.id, id)).run();
   },
 
+  /**
+   * Delete the PENDING candidates a session produced — what "discard this
+   * conversation" has to mean for memory.
+   *
+   * Only pending ones: an APPROVED memory is the user's, not the session's.
+   * They read it, said yes, and may have edited it; deleting it because its
+   * origin was later discarded would take back a decision they made
+   * deliberately. Provenance lives in `source_refs` JSON rather than a column,
+   * so this filters in JS — the candidate set is tiny.
+   */
+  deleteBySession(sessionId: string): number {
+    const doomed = db()
+      .select({ id: schema.memories.id, sourceRefs: schema.memories.sourceRefs })
+      .from(schema.memories)
+      .where(eq(schema.memories.status, 'pending'))
+      .all()
+      .filter((r) => {
+        if (!r.sourceRefs) return false;
+        try {
+          const refs = JSON.parse(r.sourceRefs) as { type: string; id: string }[];
+          return refs.some((ref) => ref.type === 'session' && ref.id === sessionId);
+        } catch {
+          return false; // unparseable provenance is not evidence of anything
+        }
+      })
+      .map((r) => r.id);
+    if (doomed.length === 0) return 0;
+    db().delete(schema.memories).where(inArray(schema.memories.id, doomed)).run();
+    return doomed.length;
+  },
+
   /** Recall inputs: approved, in-scope (global + this Space), unexpired,
-   *  embedded. Raw rows — the recall service scores them. */
+   *  CURRENT (not superseded, still valid), embedded. Raw rows — the recall
+   *  service scores them.
+   *
+   *  The supersession filter is enforced HERE, at the repository layer, so no
+   *  caller can accidentally ground an answer in a fact the user has replaced
+   *  (docs/14-MEMORY.md §4). */
   recallRows(profileId: string, packId: string | null, now: number): Row[] {
     return db()
       .select()
       .from(schema.memories)
       .where(
-        and(eq(schema.memories.profileId, profileId), eq(schema.memories.status, 'approved')),
+        and(
+          eq(schema.memories.profileId, profileId),
+          eq(schema.memories.status, 'approved'),
+          isNull(schema.memories.supersededBy),
+        ),
       )
       .all()
       .filter(
         (r) =>
           (r.packId == null || r.packId === packId) &&
           (r.expiresAt == null || r.expiresAt > now) &&
+          (r.validTo == null || r.validTo > now) &&
           r.embedVector != null,
       );
   },

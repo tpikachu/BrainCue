@@ -42,7 +42,7 @@ function buildMenu(): Menu {
     { label: 'Settings', click: () => navigateMainWindow('/settings') },
     { type: 'separator' },
     {
-      label: 'Exit BrainCue Copilot',
+      label: 'Exit BrainCue',
       accelerator: sc['app:quit'],
       registerAccelerator: false,
       click: () => void confirmQuit(),
@@ -59,7 +59,7 @@ export function updateTrayMenu(): void {
 export function createTray(): Tray {
   if (tray && !tray.isDestroyed()) return tray;
   tray = new Tray(iconImage());
-  tray.setToolTip('BrainCue Copilot');
+  tray.setToolTip('BrainCue');
   tray.setContextMenu(buildMenu());
   // Single-click (Windows) / click anywhere brings the dashboard forward.
   tray.on('click', () => showMainWindow());

@@ -340,7 +340,11 @@ export class VoiceService {
     emitGenericOpen({ contributionId, kind: 'answer', title: text });
     let body = '';
     try {
-      const chunks = await ground(profileId, text, packId);
+      // 'companion' — the mode a saved quick ask is filed under (quickAskSession
+      // below). Naming it matters: this call used to omit the mode and inherit
+      // a default of 'interview', which force-injected a STAR story into every
+      // generic voice answer.
+      const chunks = await ground(profileId, text, packId, 'companion');
       const memories = await recallMemories(profileId, text, packId);
       if (this.stale(gen)) {
         emitGenericDone(contributionId); // stop the card's streaming cursor

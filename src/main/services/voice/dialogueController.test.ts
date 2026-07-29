@@ -3,7 +3,7 @@ import { DialogueController, transition, type VoiceFsmEvent } from './dialogueCo
 import type { VoiceState } from '@shared/types';
 
 /**
- * The dialogue state machine (Prompt 9): every reachable state and the
+ * The dialogue state machine: every reachable state and the
  * cancel-at-every-stage guarantee are pinned here, table-first — the
  * orchestrator can only produce sequences this table allows.
  */

@@ -16,7 +16,13 @@ export const zInterviewType = z.enum([
   'general',
 ]);
 
-export const zAnswerFormat = z.enum(['key_points', 'explanation', 'detailed', 'story_teller']);
+export const zAnswerFormat = z.enum([
+  'key_points',
+  'explanation',
+  'detailed',
+  'story_teller',
+  'star',
+]);
 
 export const zTtsVoice = z.enum(['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']);
 

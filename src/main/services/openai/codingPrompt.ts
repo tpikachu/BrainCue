@@ -13,8 +13,11 @@ import type { AnswerFormat } from '@shared/types';
  * Deliberately résumé/JD-free — a coding problem is unrelated to the candidate's profile.
  */
 
-/** Per-format delivery instruction. `story_teller` narrates like `explanation` —
- *  coding answers are walkthroughs, not personal stories. */
+/** Per-format delivery instruction. `story_teller` and `star` both narrate like
+ *  `explanation` — a coding answer is a walkthrough, not a personal story, and
+ *  Situation/Task/Action/Result is the wrong shape for "reverse a linked list".
+ *  The format control is global, so a candidate who set STAR for the behavioural
+ *  round must not get a scaffolded non-answer when a coding question arrives. */
 const CODING_DELIVERY: Record<AnswerFormat, string> = {
   key_points:
     'DELIVERY = KEY POINTS. Terse and glanceable: each beat is 1-2 short bullets ' +
@@ -33,6 +36,10 @@ const CODING_DELIVERY: Record<AnswerFormat, string> = {
   story_teller:
     'DELIVERY = EXPLANATION (spoken walkthrough). Write beats 1, 2, and 4 as natural ' +
     'first-person speech — a coding answer is a walkthrough, not a personal story.',
+  star:
+    'DELIVERY = EXPLANATION (spoken walkthrough). Write beats 1, 2, and 4 as natural ' +
+    'first-person speech. Do NOT impose Situation/Task/Action/Result on a coding ' +
+    'problem — that scaffold is for behavioural answers about your own experience.',
 };
 
 export function codingRules(language: string, format: AnswerFormat = 'explanation'): string {

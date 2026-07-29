@@ -3,7 +3,13 @@ import { codingRules } from './codingPrompt';
 
 describe('codingRules', () => {
   it('always mandates the four beats in order: understanding → plan → solution → evaluation', () => {
-    for (const format of ['key_points', 'explanation', 'detailed', 'story_teller'] as const) {
+    for (const format of [
+      'key_points',
+      'explanation',
+      'detailed',
+      'story_teller',
+      'star',
+    ] as const) {
       const p = codingRules('python', format);
       const beats = ['**Understanding**', '**Plan**', '**Solution**', '**Evaluation**'];
       const positions = beats.map((b) => p.indexOf(b));
@@ -26,6 +32,11 @@ describe('codingRules', () => {
     expect(codingRules('js', 'detailed')).toContain('DELIVERY = DETAILED');
     // story_teller narrates like explanation — coding answers aren't personal stories.
     expect(codingRules('js', 'story_teller')).toContain('spoken walkthrough');
+    // …and neither is a coding answer a behavioural one. The format control is
+    // global, so a candidate who picked STAR for the behavioural round must not
+    // get Situation/Task/Action/Result imposed on "reverse a linked list".
+    expect(codingRules('js', 'star')).toContain('spoken walkthrough');
+    expect(codingRules('js', 'star')).toContain('Do NOT impose');
   });
 
   it('defaults to the explanation delivery and keeps the optimality mandate', () => {

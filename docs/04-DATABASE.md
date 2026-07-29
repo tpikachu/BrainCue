@@ -36,9 +36,10 @@ profiles 1───* documents 1───* chunks ──* embeddings
 settings (singleton-ish key/value, incl. encrypted API key)
 ```
 
-A **profile** is the user (name, role, resume). Each **context pack** bundles
-what a session is about — every v1 pack is `kind='job'` (its own JD + company
-research); other kinds (`subject`, `project`, …) arrive with their modes.
+A **profile** is the user — name, résumé, and `about`: who they are now. Each
+**context pack** bundles what a session is about; `kind` says which sort of thing
+it is (meeting, project, job, subject, …) and drives both the field labels and
+which interview-only steps run. v1 packs are all `kind='job'`.
 
 ## Tables
 
@@ -54,6 +55,7 @@ research); other kinds (`subject`, `project`, …) arrive with their modes.
 | resume_text | text | extracted raw text (nullable) |
 | jd_text / parsed_jd | text / text(json) | **legacy** — single-JD fields kept for back-compat; JDs live on packs |
 | parsed_resume | text(json) | structured candidate JSON |
+| about | text(json) | 0013 — `ProfileAbout`: who they are now (role, org, location, current projects, the people around them, how they work). Indexed as `profile` chunks; see [17 · Spaces and the person](./17-SPACES-AND-PROFILE.md) |
 | created_at / updated_at | int | |
 
 `answer_style` was dead (never read or written) and was dropped in 0008.
@@ -70,6 +72,7 @@ A Context Pack. One profile → many packs; each parsed/indexed independently.
 | jd_url | text | nullable — optional link to the original posting (reference only; not parsed) |
 | jd_text | text | nullable — JD text that is parsed + embedded |
 | parsed_jd | text(json) | structured JD JSON |
+| tailored_resume | text | nullable (0016) — the profile's résumé rewritten against THIS Space's JD. A document of the Space, like the JD beside it: indexed pack-scoped as `tailored` chunks, and it stands in for the base résumé only while grounding this Space's interviews. Replaces the old shape where a tailored résumé lived on an `application` that owned a hidden pack, so it could never attach to a Space the user had |
 | company_url | text | nullable — optional company website to research |
 | company_research | text | nullable — readable text scraped from the company site (parsed + embedded as `company` chunks) |
 | parsed_company | text(json) | nullable — structured interview-relevant research |
@@ -100,12 +103,25 @@ they can ground live answers.
 
 ### `chunks`
 Chunked text from documents/notes/profile fields/stories/tailored resumes for RAG.
-| id | profile_id FK | job_id FK (nullable) — TS: `packId` | source_type (resume/jd/note/company/story/tailored) | source_id | ord | content | token_count | created_at |
+| id | profile_id FK | job_id FK (nullable) — TS: `packId` | source_type (resume/jd/note/company/story/tailored/session/profile) | source_id | ord | content | token_count | created_at |
+
+`source_type='session'` is a finished conversation's archive
+([16 · Continuity](./16-CONTINUITY.md)); `source_id` is the session id and
+`job_id` scopes it to the Space the conversation happened in. It is **not** a
+foreign key, so deleting a session cannot cascade — `sessionsRepo.delete` /
+`deleteAll` remove archives explicitly, and embeddings then cascade from
+`chunks`.
 
 `job_id` is set on JD, company-research, **and** `tailored` chunks (all cascade on
 pack delete); resume/note/story chunks have `job_id` null. `story` chunks are managed
 by `indexStories` (one chunk per story) and are deliberately **excluded** from the
 résumé/notes re-index, so re-saving a résumé doesn't wipe the curated story bank.
+`session` chunks are excluded from it too. Archives written today are always
+scoped to a Space ([16 §15](./16-CONTINUITY.md)), but ones written before that
+rule have `job_id` null and are still in users' databases — so without the
+exclusion, editing a profile would erase every archive of every call they had
+before the upgrade. The exclusion is by `source_type`, not by scope, so it holds
+either way.
 `tailored` chunks (an application's tailored resume, indexed by `indexJob`) REPLACE the
 base `resume` chunks in retrieval whenever the selected pack has them — that's how
 "Start interview" on an application grounds in the tailored resume instead of the base.
@@ -123,7 +139,8 @@ re-index).
 | id | text PK | |
 | profile_id | text FK | cascade |
 | job_id | text FK | nullable, on delete set null — TS: `packId` |
-| mode | text | **SessionMode** (0008): interview/practice/interviewer_assist/meeting/tutor/companion. Backfilled live→interview, mock/sparring→practice |
+| activity | text | **ContextPackKind** (0014, nullable): what the user said this call WAS — meeting/project/job/subject/personal/game/solo/custom. The choice; `mode` below is only what we derived from it. Null on v1 rows and rehearsals. See [18-ACTIVITIES.md](./18-ACTIVITIES.md) |
+| mode | text | **SessionMode** (0008): interview/practice/interviewer_assist/meeting/tutor/companion. Derived from `activity` at start — never picked by the user. Backfilled live→interview, mock/sparring→practice |
 | kind | text | **deprecated** v1 discriminator: live/mock/sparring (kept for compatibility) |
 | interview_type | text | behavioral/technical/coding/system_design/general |
 | status | text | idle/live/stopped |
@@ -168,10 +185,20 @@ Local memory, ONE lifecycle table: a row is a MemoryCandidate while
 atomically and memory vectors can never leak into document retrieval. Scope:
 `pack_id` null = global to the profile, set = one Space. Sensitive content is
 rejected before insert (see 07). Never synced anywhere.
-| id | profile_id FK cascade | pack_id FK cascade (null=global) | category | content | source_refs (json) | confidence | importance | sensitive | status | embed_provider | embed_model | embed_dim | embed_vector (blob) | created_at | updated_at | last_used_at | expires_at |
+| id | profile_id FK cascade | pack_id FK cascade (null=global) | category | content | source_refs (json) | confidence | importance | sensitive | status | fact_key | valid_from | valid_to | superseded_by | source_kind | revision | embed_provider | embed_model | embed_dim | embed_vector (blob) | created_at | updated_at | last_used_at | expires_at |
 
 `jobs.memory_enabled` (0011) is the per-Space opt-out; the global consent
 switch is the `memory_enabled` settings key (default off).
+
+**Truthfulness columns (0015, purely additive).** A single-valued fact carries
+a `fact_key`; at most ONE row per `(profile_id, pack_id, fact_key)` may have
+`superseded_by IS NULL`, and that row is the current answer. Approving a new
+value stamps `valid_to` + `superseded_by` on the old one and clears its vector
+— the row survives as history but can never be recalled again. `recallRows`
+enforces this at the repository layer. Index `memories_fact_key_idx` on
+`(profile_id, fact_key, superseded_by)` keeps the "is there a current row for
+this fact?" lookup off a profile scan. Existing rows default to current /
+`extracted` / revision 1. See [14 · Memory](14-MEMORY.md) §4.
 
 ### `settings`
 Key/value singleton store.
@@ -192,7 +219,7 @@ Known keys (see `SETTINGS_KEYS` in `settings.repo.ts`):
 - `hide_taskbar_icon` — `'1'`/`'0'` (tray-only mode).
 - `data_consent_ack` — `'1'` once user acknowledges the compliance reminder.
 - `memory_enabled` — `'1'`/`'0'` global memory consent (absent = off; no
-  extraction or recall until the user enables it in Library › Memory).
+  extraction or recall until the user enables it in the Memory section).
 - `voice_prefs` — json VoicePrefs (TTS voice, hard mute, output device,
   quick-ask persistence + default Space). Quick asks (summons with no session
   live) are EPHEMERAL unless `saveQuickAsks` is on — then they persist as
@@ -201,6 +228,11 @@ Known keys (see `SETTINGS_KEYS` in `settings.repo.ts`):
 - `companion_prefs` — json CompanionPrefs (personality name/tone/brevity/humor,
   default presence, DND windows, default session budget). Per-Space overrides
   live on `jobs.companion_prefs` (0012).
+- `active_profile_id` — which profile the dashboard is scoped to
+  ([19-ACTIVE-PROFILE.md](./19-ACTIVE-PROFILE.md)). Validated against the real
+  rows on every read, so a deleted profile falls back to one that exists rather
+  than blanking every list; absent/dangling with no profiles at all is the
+  signal the first-run gate keys off.
 - `tour_done` — `'1'` once the first-run guided tour is completed/skipped.
 
 ## Deletion semantics

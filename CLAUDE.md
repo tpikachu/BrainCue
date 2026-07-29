@@ -4,7 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**BrainCue Copilot** — a local-first desktop AI interview copilot (Electron + React + TypeScript). It transcribes interview audio in real time, detects questions, and streams grounded answer cues into a floating, screen-share-invisible overlay ("Cue Card"). Data stays on the user's machine; only retrieved context + the current question go to OpenAI (BYO key).
+**BrainCue** — a local-first desktop AI companion for live conversations (Electron + React + TypeScript). It transcribes what it hears in real time (with consent), decides when it can help, and streams grounded cues into a floating, screen-share-invisible overlay ("Cue Card"). It archives each conversation so the next one starts where the last ended, and holds reviewed long-term memory per profile. Data stays on the user's machine; only retrieved context + the current question go to OpenAI (BYO key).
+
+**Interviews are one activity, not the product.** Interview Copilot and Practice are still fully shipped, but meetings and solo sessions are the daily cases — when you touch a shared path (prompts, retrieval, session defaults), check that it doesn't assume an interview. See [docs/00-VISION.md](docs/00-VISION.md) and [docs/16-CONTINUITY.md](docs/16-CONTINUITY.md).
+
+**One profile at a time.** The dashboard is scoped by `AppSettings.activeProfileId`, chosen in the sidebar switcher and resolved in main (`shared/activeProfile.ts`) so every window agrees. Profile-scoped surfaces read it — never add another profile `<Select>` to a page. See [docs/19-ACTIVE-PROFILE.md](docs/19-ACTIVE-PROFILE.md).
+
+**The user picks an activity, never a mode.** `shared/activities.ts` is the one catalog: what a call IS (meeting/project/job/subject/personal/game/solo/custom), what a Space is a saved instance of, and which `SessionMode` the engine derives from it. There used to be two lists answering the same question and they could disagree. Never add a mode picker back to a start surface; add an activity. See [docs/18-ACTIVITIES.md](docs/18-ACTIVITIES.md).
+
+**A Space is where a conversation is kept.** `archiveSession` and `extractMemoryCandidates` both return 0 when `sessions.packId` is null — no Space, no summary, no memory. The start modal offers only the Spaces of the chosen activity (`spacesFor`) and says what will survive the session before it starts; the save prompt offers the choice once more and files the session before either half runs. Exactly one activity refuses to start without one (`ActivityConfig.needsSpace`, `job`). See [docs/16-CONTINUITY.md](docs/16-CONTINUITY.md) §15.
 
 ## Commands
 

@@ -1,82 +1,87 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { useProfileStore } from '../store/useProfileStore';
+import { useActiveProfile } from '../store/useProfileStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useLiveSession } from '../store/useLiveSession';
-import type { CompanionPresence, Job, Presence } from '@shared/types';
+import { ACTIVITIES, DEFAULT_ACTIVITY, activityOf } from '@shared/activities';
+import type { CompanionPresence, ContextPackKind, Job, Presence } from '@shared/types';
 import { COMPANION_TO_ENGINE_PRESENCE } from '@shared/types';
-import { Badge, Button, Field, Modal, Select } from '../components/ui';
+import { Button, Dropdown, Field, Modal, Select } from '../components/ui';
+import { JobFormModal } from './JobFormModal';
 import {
   BUDGET_OPTIONS,
   COMPANION_PRESENCE_OPTIONS,
+  PRACTICE_LINKS,
   PRESENCE_OPTIONS,
-  START_MODES,
+  START_ACTIVITIES,
   captureSummary,
+  spacesFor,
   startBlocker,
-  type StartMode,
 } from './startFlow';
 
 /**
- * The universal start flow (docs/11-UX-NAVIGATION.md): one shared surface for
- * every mode — choose mode → Space → input source, see exactly what will be
- * captured and sent, and start only on the explicit button. Flag-gated modes
- * never appear. Practice routes to its drill pages (they own their own setup);
- * Interview starts the live session right here.
+ * The universal start flow (docs/18-ACTIVITIES.md): one shared surface for
+ * every conversation — say what the call is → who you are and what grounds it →
+ * what it listens to, see exactly what will be captured and sent, and start
+ * only on the explicit button.
+ *
+ * There is no mode picker. Choosing a mode AND a Space kind was the same
+ * question asked twice, and answering it twice let the two disagree. The
+ * activity resolves the mode; what that means for behaviour is printed on the
+ * choice rather than hidden behind a second one.
  */
 export function StartSessionModal(props: {
   open: boolean;
   onClose: () => void;
-  initialProfileId?: string;
   initialSpaceId?: string;
-  initialMode?: StartMode['id'];
+  initialActivity?: ContextPackKind;
 }) {
   const navigate = useNavigate();
-  const { profiles, load: loadProfiles } = useProfileStore();
+  // Whose session this is was decided in the sidebar — the modal no longer asks.
+  const profile = useActiveProfile();
+  const profileId = profile?.id ?? '';
   const { settings, load: loadSettings } = useSettingsStore();
   const live = useLiveSession();
 
-  // Every mode is listed; the ones still in build are shown disabled with a
-  // "Coming soon" mark rather than hidden, so the catalog reads honestly.
-  const modes = START_MODES;
-  const [mode, setMode] = useState<StartMode['id']>('interview');
-  const [profileId, setProfileId] = useState(props.initialProfileId ?? '');
+  const [activity, setActivity] = useState<ContextPackKind>(DEFAULT_ACTIVITY);
   const [spaceId, setSpaceId] = useState(props.initialSpaceId ?? '');
   const [spaces, setSpaces] = useState<Job[]>([]);
   const [source, setSource] = useState<'system' | 'mic'>('system');
   const [presence, setPresence] = useState<Presence>('quiet'); // meetings: quiet by default
   const [companionPresence, setCompanionPresence] = useState<CompanionPresence>('assistive');
   const [budgetCents, setBudgetCents] = useState<number | null>(null);
+  const [creatingSpace, setCreatingSpace] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const config = ACTIVITIES[activity] ?? ACTIVITIES[DEFAULT_ACTIVITY];
+  const mode = config.mode;
+
   useEffect(() => {
     if (!props.open) return;
-    void loadProfiles();
     void loadSettings();
-    setMode(props.initialMode ?? 'interview');
-    setProfileId(props.initialProfileId ?? '');
+    setActivity(props.initialActivity ?? DEFAULT_ACTIVITY);
     setSpaceId(props.initialSpaceId ?? '');
     setPresence('quiet');
+    setCreatingSpace(false);
     setError(null);
-  }, [
-    props.open,
-    props.initialProfileId,
-    props.initialSpaceId,
-    props.initialMode,
-    loadProfiles,
-    loadSettings,
-  ]);
+  }, [props.open, props.initialSpaceId, props.initialActivity, loadSettings]);
 
-  // Default the source to the persisted audio preference; companion defaults
-  // (posture + budget) come from the global companion config.
+  // Companion defaults (posture + budget) come from the global companion config.
   useEffect(() => {
-    if (settings?.audio) setSource(settings.audio.source);
     if (settings?.companionPrefs) {
       setCompanionPresence(settings.companionPrefs.presence);
       setBudgetCents(settings.companionPrefs.budgetCents);
     }
   }, [settings]);
+
+  // The activity sets what it listens to. A meeting is the other side of a call;
+  // a solo session is you. Still a default, not a lock — an in-person meeting is
+  // a microphone, and the control below stays live.
+  useEffect(() => {
+    setSource(config.listensTo);
+  }, [config.listensTo]);
 
   // Spaces are per-profile (they ground the answers in that profile's world).
   useEffect(() => {
@@ -90,17 +95,29 @@ export function StartSessionModal(props: {
       .catch(() => setSpaces([]));
   }, [props.open, profileId]);
 
-  const profile = profiles.find((p) => p.id === profileId);
+  // A Space IS a saved activity, so picking one answers the question. This now
+  // only ever fires for a Space that arrived as `initialSpaceId` from the
+  // Library — one picked in the list below already matches, because the list
+  // below only offers Spaces of the chosen activity.
+  useEffect(() => {
+    const picked = spaces.find((s) => s.id === spaceId);
+    if (picked) setActivity(activityOf(picked.kind));
+  }, [spaces, spaceId]);
+
+  const options = useMemo(() => spacesFor(spaces, activity), [spaces, activity]);
+
   const space = spaces.find((s) => s.id === spaceId);
   const spaceTitle = space ? space.company || space.title : null;
   const blocker = startBlocker({
     profile,
     apiKeyPresent: !!settings?.apiKeyPresent,
     sessionLive: !!live.session,
+    activity,
+    spaceId,
   });
   const summary = useMemo(
-    () => captureSummary({ source, spaceTitle, mode }),
-    [source, spaceTitle, mode],
+    () => captureSummary({ source, spaceTitle, activity }),
+    [source, spaceTitle, activity],
   );
 
   const start = async () => {
@@ -113,13 +130,13 @@ export function StartSessionModal(props: {
       await live.startNew({
         profileId,
         jobId: spaceId || null,
-        interviewType: 'general',
+        // No interviewType: it is chosen live in the Cue Card for interviews and
+        // means nothing anywhere else. The session row keeps its 'general' default.
         // Companion replies are spoken persona prose, not glanceable cues.
         answerFormat: mode === 'companion' ? 'explanation' : 'key_points',
-        // Companion listens to YOU — always the microphone.
-        source: mode === 'companion' ? 'mic' : source,
+        source,
         micDeviceId: settings?.audio?.micDeviceId ?? null,
-        mode,
+        activity,
         presence:
           mode === 'meeting'
             ? presence
@@ -130,8 +147,8 @@ export function StartSessionModal(props: {
         budgetCents: mode === 'companion' ? budgetCents : undefined,
       });
       props.onClose();
-      // Interviews continue in their workspace; ambient modes live in the Cue Card.
-      navigate(mode === 'meeting' || mode === 'companion' ? '/home' : '/interview');
+      // Interviews continue in their workspace; ambient sessions live in the Cue Card.
+      navigate(mode === 'interview' ? '/interview' : '/home');
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -144,217 +161,243 @@ export function StartSessionModal(props: {
     navigate(path);
   };
 
+  /** A Space created here is the one about to be used, so it is selected
+   *  immediately — and the activity follows it, in case the sub-form's own
+   *  picker was changed while it was open. */
+  const spaceCreated = (saved: Job) => {
+    setSpaces((prev) => [saved, ...prev.filter((s) => s.id !== saved.id)]);
+    setActivity(activityOf(saved.kind));
+    setSpaceId(saved.id);
+    // Closing is the sub-form's own call: it stays open to report a link it
+    // could not read, and that notice must not be taken off the screen here.
+  };
+
   return (
-    <Modal open={props.open} onClose={props.onClose} title="Start a session" width="max-w-lg">
+    <>
+      {/* Creating a Space REPLACES this modal rather than stacking on it: the
+          start form's state lives in this component, so it survives untouched
+          and comes back with the new Space already chosen. */}
+      <JobFormModal
+        open={props.open && creatingSpace}
+        profileId={profileId}
+        initialKind={activity}
+        onClose={() => setCreatingSpace(false)}
+        onSaved={spaceCreated}
+      />
+    <Modal
+      open={props.open && !creatingSpace}
+      onClose={props.onClose}
+      title="Start a session"
+      width="max-w-lg"
+    >
       <div className="space-y-5 text-sm">
-        {/* 1 · Mode */}
+        {/* 1 · What is this? The only question about what BrainCue will be.
+            A dropdown, not a card grid: eight tiles pushed the Space, the audio
+            source, and the privacy summary below the fold, and the choice is
+            one word — it does not need a card each. What the choice MEANS is
+            printed underneath, so nothing the cards said is lost. */}
+        <Field label="What’s this call?">
+          <Dropdown
+            value={activity}
+            options={START_ACTIVITIES.map((a) => ({ value: a.id, label: a.label }))}
+            onChange={(v) => {
+              const next = v as ContextPackKind;
+              setActivity(next);
+              // Drop a Space that no longer belongs to the chosen activity —
+              // it is about to disappear from the list, and a selection you
+              // cannot see is the one that surprises you afterwards.
+              setSpaceId((id) => (spacesFor(spaces, next).some((s) => s.id === id) ? id : ''));
+            }}
+          />
+          <p className="mt-1.5 text-xs leading-snug text-neutral-400">
+            {config.hint} <span className="text-neutral-500">{config.does}</span>
+          </p>
+        </Field>
+
+        {/* 1b · Practice is preparation FOR an interview, not a kind of call. */}
+        {activity === 'job' && (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-white/5 bg-neutral-900/60 p-3">
+            <span className="text-xs text-neutral-400">Not the real thing yet?</span>
+            {PRACTICE_LINKS.map((p) => (
+              <Button key={p.to} variant="ghost" onClick={() => goPractice(p.to)}>
+                {p.label}
+              </Button>
+            ))}
+          </div>
+        )}
+
+        {/* 2 · Which Space this belongs to — what grounds the answers now AND
+            what keeps them afterwards. Only Spaces of the chosen activity are
+            offered, because a Space is a saved activity. */}
+        <Field
+          label={`${config.label} Space${config.needsSpace ? '' : ' (optional)'} · ${profile?.name ?? 'no profile'}`}
+        >
+          <div className="flex gap-2">
+            <Select
+              value={spaceId}
+              onChange={(e) => setSpaceId(e.target.value)}
+              disabled={!profileId}
+              className="flex-1"
+            >
+              <option value="">
+                {config.needsSpace ? 'Choose a Space…' : 'No Space — keep nothing afterwards'}
+              </option>
+              {options.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.title || 'Untitled'}
+                  {s.company ? ` · ${s.company}` : ''}
+                </option>
+              ))}
+            </Select>
+            <Button variant="default" disabled={!profileId} onClick={() => setCreatingSpace(true)}>
+              New Space
+            </Button>
+          </div>
+          <p className="mt-1.5 text-xs leading-snug text-neutral-400">
+            {spaceId ? (
+              <>
+                Grounded in what this Space knows, and everything you keep is filed back into it —
+                so the next one here starts where this one ends.
+              </>
+            ) : config.needsSpace ? (
+              <>
+                An interview is one round of several. Give it a Space — the role and who it is with,
+                like “Senior engineer · Acme” — so what they asked, what you claimed, and what they
+                pushed on is there for the next round.
+              </>
+            ) : options.length === 0 ? (
+              <>
+                No {config.label.toLowerCase()} Spaces yet. Starting without one is fine — it just
+                will not be summarised or remembered afterwards.
+              </>
+            ) : (
+              <>Without one, nothing is summarised or remembered when this ends.</>
+            )}
+          </p>
+        </Field>
+
+        {/* 3 · Input source. Defaulted by the activity, still yours to change. */}
         <fieldset>
           <legend className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
-            Mode
+            Listen to
           </legend>
-          <div className="grid grid-cols-2 gap-2">
-            {modes.map((m) => (
+          <div className="flex gap-2" role="radiogroup" aria-label="Audio source">
+            {(
+              [
+                ['system', 'System audio', 'the other side of your call'],
+                ['mic', 'Microphone', 'in-person / your own voice'],
+              ] as const
+            ).map(([value, label, hint]) => (
               <button
-                key={m.id}
+                key={value}
                 type="button"
-                disabled={!m.enabled}
-                aria-pressed={mode === m.id}
-                aria-disabled={!m.enabled}
-                title={m.enabled ? undefined : `${m.label} isn’t built yet — it’s on the way.`}
-                onClick={() => m.enabled && setMode(m.id)}
-                className={`rounded-xl border p-3 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400 ${
-                  !m.enabled
-                    ? 'cursor-not-allowed border-white/5 bg-neutral-900/30 opacity-55'
-                    : mode === m.id
-                      ? 'border-indigo-400/50 bg-indigo-500/10'
-                      : 'border-white/5 bg-neutral-900/60 hover:bg-neutral-900'
+                role="radio"
+                aria-checked={source === value}
+                onClick={() => setSource(value)}
+                className={`flex-1 rounded-xl border p-3 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400 ${
+                  source === value
+                    ? 'border-indigo-400/50 bg-indigo-500/10'
+                    : 'border-white/5 bg-neutral-900/60 hover:bg-neutral-900'
                 }`}
               >
-                <span className="flex flex-wrap items-center gap-1.5 font-medium text-neutral-100">
-                  {m.label}
-                  {!m.enabled ? (
-                    <Badge tone="neutral">Coming soon</Badge>
-                  ) : (
-                    (m.id === 'meeting' || m.id === 'companion') && <Badge tone="amber">Labs</Badge>
-                  )}
-                </span>
-                <span className="mt-0.5 block text-xs leading-snug text-neutral-400">{m.desc}</span>
+                <span className="block font-medium text-neutral-100">{label}</span>
+                <span className="mt-0.5 block text-xs text-neutral-400">{hint}</span>
               </button>
             ))}
           </div>
         </fieldset>
 
-        {mode === 'practice' ? (
-          <div className="rounded-xl border border-white/5 bg-neutral-900/60 p-4">
-            <p className="mb-3 text-neutral-300">
-              Practice drills have their own setup — pick one:
-            </p>
-            <div className="flex gap-2">
-              <Button variant="primary" onClick={() => goPractice('/mock')}>
-                Mock interview
-              </Button>
-              <Button variant="primary" onClick={() => goPractice('/sparring')}>
-                Sparring drill
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <>
-            {/* 2 · Who + which Space grounds the answers */}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Profile">
-                <Select value={profileId} onChange={(e) => setProfileId(e.target.value)}>
-                  <option value="">Select a profile…</option>
-                  {profiles.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                      {p.targetRole ? ` · ${p.targetRole}` : ''}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Space (optional)">
-                <Select
-                  value={spaceId}
-                  onChange={(e) => setSpaceId(e.target.value)}
-                  disabled={!profileId}
-                >
-                  <option value="">No Space — profile only</option>
-                  {spaces.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.title || 'Untitled'}
-                      {s.company ? ` · ${s.company}` : ''}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
-
-            {/* 3 · Input sources. Companion always listens to YOUR mic — the
-                whole point is an ambient presence while you work. */}
-            {mode !== 'companion' && (
-            <fieldset>
-              <legend className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
-                Listen to
-              </legend>
-              <div className="flex gap-2" role="radiogroup" aria-label="Audio source">
-                {(
-                  [
-                    ['system', 'System audio', 'the other side of your call'],
-                    ['mic', 'Microphone', 'in-person / your own voice'],
-                  ] as const
-                ).map(([value, label, hint]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    role="radio"
-                    aria-checked={source === value}
-                    onClick={() => setSource(value)}
-                    className={`flex-1 rounded-xl border p-3 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400 ${
-                      source === value
-                        ? 'border-indigo-400/50 bg-indigo-500/10'
-                        : 'border-white/5 bg-neutral-900/60 hover:bg-neutral-900'
-                    }`}
-                  >
-                    <span className="block font-medium text-neutral-100">{label}</span>
-                    <span className="mt-0.5 block text-xs text-neutral-400">{hint}</span>
-                  </button>
-                ))}
-              </div>
-            </fieldset>
-            )}
-
-            {/* 3b · Presence — meetings only: explicit thresholds, not a vibe. */}
-            {mode === 'meeting' && (
-              <Field label="Presence">
-                <Select value={presence} onChange={(e) => setPresence(e.target.value as Presence)}>
-                  {PRESENCE_OPTIONS.map((p) => (
-                    <option key={p.value} value={p.value}>
-                      {p.label} — {p.desc}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            )}
-
-            {/* 3c · Companion posture + hard budget — the InterjectionPolicy's
-                explicit dials, chosen before anything starts. */}
-            {mode === 'companion' && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Presence">
-                  <Select
-                    value={companionPresence}
-                    onChange={(e) => setCompanionPresence(e.target.value as CompanionPresence)}
-                  >
-                    {COMPANION_PRESENCE_OPTIONS.map((p) => (
-                      <option key={p.value} value={p.value}>
-                        {p.label} — {p.desc}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Session budget">
-                  <Select
-                    value={budgetCents === null ? '' : String(budgetCents)}
-                    onChange={(e) =>
-                      setBudgetCents(e.target.value === '' ? null : Number(e.target.value))
-                    }
-                  >
-                    {BUDGET_OPTIONS.map((b) => (
-                      <option key={b.label} value={b.value === null ? '' : String(b.value)}>
-                        {b.label}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-              </div>
-            )}
-
-            {/* 4 · Exactly what is captured and sent — before anything starts. */}
-            <div className="rounded-xl border border-white/5 bg-neutral-950/60 p-3.5 text-xs leading-relaxed">
-              <p className="mb-1 font-medium text-neutral-300">Captured on this machine</p>
-              <ul className="mb-2 list-disc space-y-0.5 pl-4 text-neutral-400">
-                {summary.captured.map((l) => (
-                  <li key={l}>{l}</li>
-                ))}
-              </ul>
-              <p className="mb-1 font-medium text-neutral-300">Sent to OpenAI (your key)</p>
-              <ul className="mb-2 list-disc space-y-0.5 pl-4 text-neutral-400">
-                {summary.sent.map((l) => (
-                  <li key={l}>{l}</li>
-                ))}
-              </ul>
-              <p className="mb-1 font-medium text-neutral-300">Never sent</p>
-              <ul className="list-disc space-y-0.5 pl-4 text-neutral-400">
-                {summary.neverSent.map((l) => (
-                  <li key={l}>{l}</li>
-                ))}
-              </ul>
-            </div>
-
-            {(blocker || error) && (
-              <p className="text-xs text-amber-400" role="alert">
-                ⚠ {error ?? blocker}
-              </p>
-            )}
-
-            {/* 5 · Explicit start — nothing is captured until this click. */}
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={props.onClose}>
-                Cancel
-              </Button>
-              <Button
-                variant="success"
-                disabled={!!blocker}
-                loading={starting}
-                onClick={() => void start()}
-              >
-                Start listening
-              </Button>
-            </div>
-          </>
+        {/* 3b · Presence — how present it should be. The one dial that genuinely
+            varies WITHIN an activity, so it stays a question. */}
+        {mode === 'meeting' && (
+          <Field label="Presence">
+            <Select value={presence} onChange={(e) => setPresence(e.target.value as Presence)}>
+              {PRESENCE_OPTIONS.map((p) => (
+                <option key={p.value} value={p.value}>
+                  {p.label} — {p.desc}
+                </option>
+              ))}
+            </Select>
+          </Field>
         )}
+
+        {/* 3c · Companion posture + hard budget — the InterjectionPolicy's
+            explicit dials, chosen before anything starts. */}
+        {mode === 'companion' && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Presence">
+              <Select
+                value={companionPresence}
+                onChange={(e) => setCompanionPresence(e.target.value as CompanionPresence)}
+              >
+                {COMPANION_PRESENCE_OPTIONS.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label} — {p.desc}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Session budget">
+              <Select
+                value={budgetCents === null ? '' : String(budgetCents)}
+                onChange={(e) =>
+                  setBudgetCents(e.target.value === '' ? null : Number(e.target.value))
+                }
+              >
+                {BUDGET_OPTIONS.map((b) => (
+                  <option key={b.label} value={b.value === null ? '' : String(b.value)}>
+                    {b.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+        )}
+
+        {/* 4 · Exactly what is captured and sent — before anything starts. */}
+        <div className="rounded-xl border border-white/5 bg-neutral-950/60 p-3.5 text-xs leading-relaxed">
+          <p className="mb-1 font-medium text-neutral-300">Captured on this machine</p>
+          <ul className="mb-2 list-disc space-y-0.5 pl-4 text-neutral-400">
+            {summary.captured.map((l) => (
+              <li key={l}>{l}</li>
+            ))}
+          </ul>
+          <p className="mb-1 font-medium text-neutral-300">Sent to OpenAI (your key)</p>
+          <ul className="mb-2 list-disc space-y-0.5 pl-4 text-neutral-400">
+            {summary.sent.map((l) => (
+              <li key={l}>{l}</li>
+            ))}
+          </ul>
+          <p className="mb-1 font-medium text-neutral-300">Never sent</p>
+          <ul className="list-disc space-y-0.5 pl-4 text-neutral-400">
+            {summary.neverSent.map((l) => (
+              <li key={l}>{l}</li>
+            ))}
+          </ul>
+        </div>
+
+        {(blocker || error) && (
+          <p className="text-xs text-amber-400" role="alert">
+            ⚠ {error ?? blocker}
+          </p>
+        )}
+
+        {/* 5 · Explicit start — nothing is captured until this click. */}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={props.onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="success"
+            disabled={!!blocker}
+            loading={starting}
+            onClick={() => void start()}
+          >
+            Start listening
+          </Button>
+        </div>
       </div>
     </Modal>
+    </>
   );
 }

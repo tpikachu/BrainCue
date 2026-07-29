@@ -26,6 +26,7 @@ function toPack(r: Row): ContextPack {
     companyUrl: r.companyUrl,
     companyResearch: r.companyResearch,
     parsedCompany: r.parsedCompany ? JSON.parse(r.parsedCompany) : null,
+    tailoredResume: r.tailoredResume,
     notes: r.notes,
     memoryEnabled: r.memoryEnabled === 1,
     companionPrefs: r.companionPrefs ? JSON.parse(r.companionPrefs) : null,
@@ -53,7 +54,7 @@ export const contextPacksRepo = {
     return r ? toPack(r) : null;
   },
 
-  /** Per-Space memory opt-out (Library › Memory). */
+  /** Per-Space memory opt-out (the Memory section). */
   setMemoryEnabled(id: string, enabled: boolean): void {
     db()
       .update(schema.contextPacks)
@@ -143,6 +144,7 @@ export const contextPacksRepo = {
 
   update(id: string, patch: Partial<ContextPack>): ContextPack {
     const set: Record<string, unknown> = { updatedAt: Date.now() };
+    if (patch.kind !== undefined) set.kind = patch.kind;
     if (patch.title !== undefined) set.title = patch.title;
     if (patch.company !== undefined) set.company = patch.company;
     if (patch.jdUrl !== undefined) set.jdUrl = patch.jdUrl;
@@ -154,6 +156,7 @@ export const contextPacksRepo = {
     if (patch.companyResearch !== undefined) set.companyResearch = patch.companyResearch;
     if (patch.parsedCompany !== undefined)
       set.parsedCompany = patch.parsedCompany ? JSON.stringify(patch.parsedCompany) : null;
+    if (patch.tailoredResume !== undefined) set.tailoredResume = patch.tailoredResume;
     db().update(schema.contextPacks).set(set).where(eq(schema.contextPacks.id, id)).run();
     return this.get(id)!;
   },

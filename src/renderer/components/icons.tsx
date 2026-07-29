@@ -349,3 +349,13 @@ export function DatabaseIcon(p: IconProps) {
     </Svg>
   );
 }
+
+export function HelpIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9.6 9.2a2.5 2.5 0 1 1 3.3 2.4c-.6.2-.9.8-.9 1.4v.5" />
+      <path d="M12 17h.01" />
+    </Svg>
+  );
+}

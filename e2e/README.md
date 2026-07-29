@@ -45,90 +45,57 @@ Two tiers:
 
 ## Capturing marketing media
 
-The root README and the landing page (`docs/index.html`) share one set of
-assets: animated clips in `docs/media/`, stills in `docs/images/`. Both are
-regenerated **from the real app** — nothing is mocked up in a design tool.
-
-Capture is opt-in: `playwright.config.ts` ignores `*.capture.spec.ts` unless
-`E2E_CAPTURE` is set, because these specs need a real key and write into the
-repo. They also need a **display** (the app is driven visibly) — they will not
-run on a headless CI box.
-
-### Stills
+The two `*.capture.spec.ts` files are not tests — they are the recording rig for
+the demo film, the GIFs and the screenshots, all captured **from the real app**.
 
 ```bash
-E2E_CAPTURE=1 npx playwright test e2e/screenshots.capture.spec.ts   # bash / Git Bash
-```
-```powershell
-$env:E2E_CAPTURE=1; npx playwright test e2e/screenshots.capture.spec.ts
+npm run media -- check     # is ffmpeg able to do this at all?
+npm run media              # capture everything, then build everything
 ```
 
-Writes `docs/images/`: `home.png`, `library.png`, `sessions.png`,
-`insights.png`, `settings.png`, `start-flow.png`, `cue-card.png`.
+**[docs/21-MEDIA.md](../docs/21-MEDIA.md) is the guide**: the storyboard, the
+style rules, what each asset is for, and the checklist before any of it ships.
+What belongs here instead are the two harness facts that shape how those specs
+are written:
 
-### Animated clips (GIF + MP4)
+- Capture is **opt-in** — `playwright.config.ts` ignores `*.capture.spec.ts`
+  unless `E2E_CAPTURE` is set, because they need a real key and write into the
+  repo. They also need a **display**; they will not run on a headless CI box.
+  `npm run media` sets the variable for you, which matters because
+  `E2E_CAPTURE=1 npx …` is a bash-ism that silently does nothing in `cmd.exe`.
 
-Two steps — burst frames from the running app, then assemble them:
+- **Frames, not Playwright video.** The harness attaches to an already-running
+  Electron over CDP (see below), and `recordVideo` is a **context-creation**
+  option — it cannot be enabled on a context we merely connected to. Bursting
+  screenshots works over CDP, is deterministic, and lets ffmpeg choose the frame
+  rate after the fact.
 
-```bash
-E2E_CAPTURE=1 npx playwright test e2e/media.capture.spec.ts   # both capture tests
-node scripts/build-media.mjs cuecard-stream --fps 8 --width 760 --hold 4
-node scripts/build-media.mjs interview-grounded --fps 1.2 --hold 2 --width 640 --gif-only
-node scripts/build-media.mjs --manifest docs/media/frames/demo/manifest.json --out braincue-demo
-```
+### Driving the UI from a spec
 
-Clip names match the committed assets, so a re-capture refreshes
-`docs/media/cuecard-stream.gif`, `interview-grounded.gif`, and
-`braincue-demo.mp4` in place — the README and landing page pick them up with
-no reference changes.
+Two traps, both of which have cost a whole capture run:
 
-The demo is assembled from the walkthrough's per-scene frame dirs via the
-manifest the spec writes (`frames/demo/manifest.json`): each scene is scaled
-and padded onto one canvas with its caption burned in (drawtext), then the
-segments are concatenated. Still scenes hold a single frame for `holdSec`;
-the streaming scene plays at `fps` and freezes its last frame for
-`tailHoldSec` so the payoff stays readable.
+- **There is no `<select>` in this app.** `Select` in `components/ui.tsx` takes
+  `<option>` children and has the type signature of a native select, then
+  renders a `Dropdown` — `button[aria-haspopup="listbox"]` over
+  `li[role="option"]`. So `selectOption()` waits out its timeout on a control
+  that is plainly on screen. Use the exported `choose(scope, label, nth)` helper
+  in `fixtures.ts`.
 
-The spec writes numbered PNGs to `docs/media/frames/<clip>/` (scratch —
-gitignored); the script turns them into `docs/media/<clip>.gif` and
-`<clip>.mp4`. Only the built `.gif`/`.mp4` are committed.
-
-`build-media.mjs` needs **ffmpeg** on PATH (`winget install Gyan.FFmpeg` ·
-`brew install ffmpeg` · `apt install ffmpeg`). It builds the GIF with a two-pass
-global palette, which keeps flat UI colour and thin text sharp where ffmpeg's
-default quantisation smears them.
-
-`--hold N` collapses any run of byte-identical frames to at most N. The app
-idles before the answer arrives and holds still after it finishes, so a raw
-capture is bookended by long stretches of the same image — leave those in and
-the clip reads as a static screenshot rather than a demo.
-
-### Getting a clip that shows the streaming
-
-Two things decide whether the clip has any motion in it, and both have bitten:
-
-- **Don't `await api.mock.start()` before capturing.** It only resolves once the
-  question has been asked *and* answered, so awaiting it means you start filming
-  after the interesting part is over. Kick it off and sample concurrently.
-- **Don't stop on "text stopped changing" alone.** There's a quiet gap between
-  the question landing and the first answer token; treat that as the end and you
-  get a couple of seconds of nothing. `captureStream` requires `minGrowth`
-  characters to have arrived before a settle counts as finished.
-
-### Why frames, not Playwright video
-
-The harness attaches to an already-running Electron over CDP (see below), and
-`recordVideo` is a **context-creation** option — it can't be enabled on a
-context we merely connected to. Bursting screenshots works over CDP, is
-deterministic, and lets ffmpeg choose the frame rate after the fact.
-
-### Keeping captures from rotting
+- **Bound your action timeout.** Playwright's default is *unbounded*, capped
+  only by the test timeout — which a capture run sets to tens of minutes. One
+  un-clickable element then eats the entire run rather than failing its own
+  scene. Both capture specs call `page.setDefaultTimeout(...)` and close any
+  modal a failed scene left open, because a modal swallows every click behind
+  it.
 
 Navigation uses the sidebar's `data-tour="nav-*"` anchors rather than visible
 link text. Those anchors are load-bearing for the onboarding tour, so they
 don't drift silently — whereas the previous version of the screenshot spec
 still clicked "Interview" / "Mock" / "Reports" nav items that the mode-first
 redesign had already removed, which is how the assets went stale.
+
+Frames land in `docs/media/frames/` (gitignored scratch); only the built
+`.gif`/`.mp4` and the stills in `docs/images/` are committed.
 
 ## How the harness works (and why)
 

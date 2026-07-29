@@ -3,13 +3,25 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useProfileStore } from '../../store/useProfileStore';
 import { usePagedSearch } from '../../lib/usePagedSearch';
-import { Badge, Button, Card, Field, Pager, SearchInput, TextInput } from '../../components/ui';
+import { Badge, Button, Card, Field, Page, Pager, SearchInput, TextInput } from '../../components/ui';
 import { PlusIcon } from '../../components/icons';
 
-/** Library › Profile: who you are — name, role, résumé. Create once, reuse in
- *  every Space and session. (Formerly the standalone Profiles page.) */
-export function ProfilesTab() {
-  const { profiles, load, create, remove } = useProfileStore();
+/**
+ * Profiles — the people BrainCue works for.
+ *
+ * GLOBAL, not scoped: this is the one page that is about the set of profiles
+ * rather than about one of them. It lived as a tab inside the Library, next to
+ * three tabs that each showed exactly one profile's things, so the Library was
+ * simultaneously "what BrainCue knows about you" and "which you". Those are
+ * different questions and they now have different homes — the sidebar switcher
+ * picks who, this page manages the set, the Library shows the chosen one's
+ * things (docs/19-ACTIVE-PROFILE.md).
+ *
+ * Creating from here activates the new profile, same as the switcher's "New
+ * profile…", because a profile you just made is the one you meant to use.
+ */
+export default function ProfilesPage() {
+  const { profiles, activeId, load, create, remove } = useProfileStore();
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [targetRole, setTargetRole] = useState('');
@@ -20,7 +32,8 @@ export function ProfilesTab() {
     void load();
   }, [load]);
 
-  // Seed a sample profile + Google/Amazon/Stripe Spaces to try the flow.
+  // Seed the demo world — a profile, Spaces across several activities, and
+  // finished conversations to try the keep/summarise/remember loop on.
   const loadSamples = async () => {
     setLoadingSamples(true);
     try {
@@ -54,7 +67,11 @@ export function ProfilesTab() {
   };
 
   return (
-    <div>
+    <Page
+      title="Profiles"
+      subtitle="The people BrainCue works for. Pick which one is active in the sidebar."
+      width="max-w-3xl"
+    >
       <div className="mb-4 flex items-start justify-between gap-3">
         <p className="text-sm text-neutral-400">
           A profile is just you: your name, role, and résumé. Reuse it for every Space.
@@ -114,7 +131,10 @@ export function ProfilesTab() {
         {paged.pageItems.map((p) => (
           <Card key={p.id} className="flex items-center justify-between !py-4">
             <Link to={`/profiles/${p.id}`} className="group flex-1">
-              <div className="font-medium group-hover:text-indigo-300">{p.name}</div>
+              <div className="flex items-center gap-2 font-medium group-hover:text-indigo-300">
+                {p.name}
+                {p.id === activeId && <Badge tone="green">active</Badge>}
+              </div>
               <div className="mt-1 flex items-center gap-2 text-xs text-neutral-400">
                 <span>{p.targetRole || '—'}</span>
                 {p.parsedResume ? (
@@ -136,6 +156,6 @@ export function ProfilesTab() {
         ))}
         <Pager page={paged.page} totalPages={paged.totalPages} onPage={paged.setPage} />
       </div>
-    </div>
+    </Page>
   );
 }

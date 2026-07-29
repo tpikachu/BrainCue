@@ -1,10 +1,12 @@
 import { z } from 'zod';
 import { IPC } from '@shared/ipc';
-import { handle, zId } from './helpers';
+import { isInterviewSpace } from '@shared/activities';
+import { handle, zId, zSpaceKind } from './helpers';
 import { jobsRepo } from '../db/repositories/jobs.repo';
 import { profilesRepo } from '../db/repositories/profiles.repo';
 import { parseCompany, parseJobDescription } from '../services/openai/parsing';
 import { generateBrief } from '../services/openai/brief';
+import { tailorApplication } from '../services/openai/tailor';
 import { fetchCompanySite } from '../services/documents/companyResearch';
 import { indexJob } from '../services/rag/indexProfile';
 import { apiKeyStore } from '../services/security/apiKey';
@@ -39,6 +41,7 @@ export function registerJobsIpc(): void {
     z.object({
       id: z.string().optional(),
       profileId: z.string().min(1),
+      kind: zSpaceKind.optional(),
       title: z.string().default(''),
       company: z.string().nullable().default(null),
       jdUrl: z.string().nullable().default(null),
@@ -46,21 +49,26 @@ export function registerJobsIpc(): void {
       companyUrl: z.string().nullable().default(null),
       notes: z.string().nullable().default(null),
     }),
-    async ({ id, profileId, title, company, jdUrl, jdText, companyUrl, notes }) => {
+    async ({ id, profileId, kind, title, company, jdUrl, jdText, companyUrl, notes }) => {
       const job = id
-        ? jobsRepo.update(id, { title, company, jdUrl, jdText, companyUrl, notes })
-        : jobsRepo.create({ profileId, title, company, jdUrl, jdText, companyUrl, notes });
+        ? jobsRepo.update(id, { kind, title, company, jdUrl, jdText, companyUrl, notes })
+        : jobsRepo.create({ profileId, kind, title, company, jdUrl, jdText, companyUrl, notes });
 
       const hasKey = apiKeyStore.isPresent();
-      if (jdText?.trim()) {
+      // Structured JD parsing extracts requirements, responsibilities, and
+      // seniority — an interview artifact. Run over a standup agenda it invents
+      // all three, so non-job Spaces index their document as plain text.
+      const interviewSpace = isInterviewSpace(jobsRepo.get(job.id)?.kind);
+      if (jdText?.trim() && interviewSpace) {
         if (hasKey) jobsRepo.update(job.id, { parsedJd: await parseJobDescription(jdText) });
       } else {
-        // JD cleared → drop its parsed structure (chunks are cleared by indexJob).
+        // JD cleared, or not an interview → drop any parsed structure (chunks
+        // are cleared by indexJob either way).
         jobsRepo.update(job.id, { parsedJd: null });
       }
 
-      // Company research: scrape the website + parse it into interview-relevant
-      // notes. Best-effort — failures (bot-blocking, no key) don't fail the save.
+      // Site research: scrape the linked page + parse it into background notes.
+      // Best-effort — failures (bot-blocking, no key) don't fail the save.
       let companyResearched = false;
       let companyError: string | null = null;
       const trimmedCompanyUrl = companyUrl?.trim();
@@ -123,7 +131,11 @@ export function registerJobsIpc(): void {
   // the brief to the renderer (not persisted — it's regenerated on demand).
   handle(IPC.jobs.brief, zId, async ({ id }) => {
     const job = jobsRepo.get(id);
-    if (!job) throw new Error('Interview not found.');
+    if (!job) throw new Error('Space not found.');
+    // The brief predicts interview questions and coverage gaps against a JD.
+    // It has no meaning for a standup or a project.
+    if (!isInterviewSpace(job.kind))
+      throw new Error('Prep briefs are for interview Spaces.');
     if (!apiKeyStore.isPresent())
       throw new Error('Add your OpenAI API key in Settings to generate a brief.');
     if (!job.parsedJd)
@@ -139,6 +151,64 @@ export function registerJobsIpc(): void {
       jd: job.parsedJd,
       companyResearch: job.parsedCompany,
     });
+  });
+
+  /**
+   * Tailor the profile's résumé to THIS Space's job description, and keep the
+   * result on the Space.
+   *
+   * A tailored résumé is a document about one role at one company, so it
+   * belongs to the Space that already holds that role's JD — not to a separate
+   * hidden pack the user never sees, which was the old shape and the reason
+   * "tailor for this Space" could not be expressed at all.
+   *
+   * The model call runs BEFORE any write, so a failure leaves the Space exactly
+   * as it was. Indexing is best-effort afterwards: the text is the paid result
+   * and must survive an embedding hiccup, and re-saving the Space re-indexes.
+   */
+  handle(IPC.jobs.tailorResume, zId, async ({ id }) => {
+    const job = jobsRepo.get(id);
+    if (!job) throw new Error('Space not found.');
+    if (!isInterviewSpace(job.kind))
+      throw new Error('Tailoring a résumé only applies to interview Spaces.');
+    if (!apiKeyStore.isPresent())
+      throw new Error('Add your OpenAI API key in Settings to tailor a résumé.');
+    if (!job.jdText?.trim())
+      throw new Error('Add this Space’s job description first — there is nothing to tailor to.');
+    const profile = profilesRepo.get(job.profileId);
+    if (!profile?.resumeText?.trim())
+      throw new Error('This profile has no résumé yet — add one on the profile first.');
+
+    const result = await tailorApplication({
+      baseResume: profile.resumeText,
+      jdText: job.jdText,
+      questions: [],
+    });
+    const saved = jobsRepo.update(id, { tailoredResume: result.tailoredResume });
+
+    let embedded = 0;
+    let indexError: string | null = null;
+    try {
+      ({ embedded } = await indexJob(id));
+    } catch (e) {
+      indexError = (e as Error).message;
+      log.warn('tailor: indexing failed, text kept', { jobId: id });
+    }
+    return { job: saved, embedded, indexError };
+  });
+
+  /** Drop it. The Space keeps its JD; sessions fall back to the base résumé on
+   *  the next re-index, which this triggers. */
+  handle(IPC.jobs.clearTailoredResume, zId, async ({ id }) => {
+    const job = jobsRepo.get(id);
+    if (!job) throw new Error('Space not found.');
+    const saved = jobsRepo.update(id, { tailoredResume: null });
+    try {
+      await indexJob(id);
+    } catch {
+      /* the column is already cleared; stale chunks go on the next re-index */
+    }
+    return { job: saved };
   });
 
   handle(IPC.jobs.delete, zId, ({ id }) => {

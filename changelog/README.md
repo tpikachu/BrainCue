@@ -1,6 +1,6 @@
 # Changelog
 
-Release notes for **BrainCue Copilot**, one file per version, newest first.
+Release notes for **BrainCue**, one file per version, newest first.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project uses [Semantic Versioning](https://semver.org/).
 

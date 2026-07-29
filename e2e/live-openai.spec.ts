@@ -26,7 +26,7 @@ test.describe('live OpenAI (real key)', () => {
       };
     });
 
-    expect(result.jobs).toBeGreaterThan(0); // sample interviews created
+    expect(result.jobs).toBeGreaterThan(0); // sample Spaces created (a meeting + interviews)
     expect(result.hasParsedResume).toBe(true); // real OpenAI parse happened
     expect(result.skills).toBeGreaterThan(0);
     expect(result.embedded).toBeGreaterThan(0); // real OpenAI embeddings produced

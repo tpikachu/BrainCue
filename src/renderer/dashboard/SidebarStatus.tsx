@@ -66,10 +66,27 @@ export function SidebarStatus() {
           </span>
         </div>
 
+        {/* Each count goes to the thing it counts. A number with no way to
+            reach what it describes makes you hunt for the page that has it. */}
         <div className="space-y-1">
-          <Stat icon={<UserIcon className="h-3.5 w-3.5" />} label="Profiles" value={stats?.profiles} />
-          <Stat icon={<LibraryIcon className="h-3.5 w-3.5" />} label="Spaces" value={stats?.interviews} />
-          <Stat icon={<ReportIcon className="h-3.5 w-3.5" />} label="Sessions" value={stats?.sessions} />
+          <Stat
+            icon={<UserIcon className="h-3.5 w-3.5" />}
+            label="Profiles"
+            value={stats?.profiles}
+            to="/profiles"
+          />
+          <Stat
+            icon={<LibraryIcon className="h-3.5 w-3.5" />}
+            label="Spaces"
+            value={stats?.interviews}
+            to="/library?tab=spaces"
+          />
+          <Stat
+            icon={<ReportIcon className="h-3.5 w-3.5" />}
+            label="Sessions"
+            value={stats?.sessions}
+            to="/sessions"
+          />
         </div>
       </div>
 
@@ -87,14 +104,28 @@ export function SidebarStatus() {
   );
 }
 
-function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value?: number }) {
+function Stat({
+  icon,
+  label,
+  value,
+  to,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value?: number;
+  to: string;
+}) {
   return (
-    <div className="flex items-center justify-between rounded-lg bg-white/5 px-2.5 py-1.5">
+    <NavLink
+      to={to}
+      title={`Go to ${label}`}
+      className="flex items-center justify-between rounded-lg bg-white/5 px-2.5 py-1.5 transition-colors hover:bg-white/10"
+    >
       <span className="flex items-center gap-1.5 text-xs text-neutral-400">
         {icon}
         {label}
       </span>
       <span className="text-sm font-semibold tabular-nums text-neutral-100">{value ?? '—'}</span>
-    </div>
+    </NavLink>
   );
 }

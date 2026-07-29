@@ -3,12 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useProfileStore } from '../../store/useProfileStore';
 import type { Job } from '@shared/types';
-import { Badge, Button, Card, Field, Select } from '../../components/ui';
+import { Badge, Button, Card } from '../../components/ui';
 import { DataTable, type Column } from '../../components/DataTable';
 import { JobFormModal } from '../JobFormModal';
 import { BriefModal } from '../BriefModal';
 import { StartSessionModal } from '../StartSessionModal';
 import { PlayIcon, PlusIcon } from '../../components/icons';
+import { FLAGS } from '@shared/flags';
+import { activity, isInterviewSpace } from '@shared/activities';
 
 const PER_PAGE = 8;
 
@@ -19,8 +21,8 @@ const PER_PAGE = 8;
  *  job-Space action (not a universal top-level concept). */
 export function SpacesTab() {
   const navigate = useNavigate();
-  const { profiles, load } = useProfileStore();
-  const [profileId, setProfileId] = useState('');
+  // Whose Spaces these are is decided once, in the sidebar switcher.
+  const profileId = useProfileStore((s) => s.activeId) ?? '';
 
   const [rows, setRows] = useState<Job[]>([]);
   const [total, setTotal] = useState(0);
@@ -31,15 +33,6 @@ export function SpacesTab() {
   const [editJob, setEditJob] = useState<Job | null>(null); // null => create
   const [briefJob, setBriefJob] = useState<Job | null>(null);
   const [startSpaceId, setStartSpaceId] = useState<string | null>(null); // open => start flow
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  // Default to the first profile so the list isn't empty behind a hidden picker.
-  useEffect(() => {
-    if (!profileId && profiles.length > 0) setProfileId(profiles[0].id);
-  }, [profiles, profileId]);
 
   useEffect(() => {
     setPage(0);
@@ -74,25 +67,34 @@ export function SpacesTab() {
       header: 'Space',
       render: (j) => (
         <div>
-          <div className="font-medium text-neutral-100">{j.title || 'Untitled role'}</div>
+          <div className="font-medium text-neutral-100">{j.title || 'Untitled'}</div>
           {j.company && <div className="text-xs text-neutral-500">{j.company}</div>}
         </div>
       ),
     },
     {
-      key: 'kind',
-      header: 'Kind',
-      className: 'w-28',
-      render: () => <Badge>Interview</Badge>,
-    },
-    {
-      key: 'docs',
-      header: 'Context',
-      className: 'w-36',
+      // There used to be a "Kind" column here that rendered the literal string
+      // "Interview" for every row — v1 residue from when a Space could only be
+      // a job. It sat next to the column that shows the REAL activity, so a
+      // standup read as "Kind: Interview · Meeting or call".
+      key: 'activity',
+      header: 'Activity',
+      className: 'w-44',
       render: (j) => (
         <div className="flex flex-wrap gap-1.5">
-          {j.parsedJd ? <Badge tone="green">JD ✓</Badge> : <Badge tone="amber">no JD</Badge>}
-          {j.parsedCompany && <Badge tone="blue">company ✓</Badge>}
+          <Badge>{activity(j.kind).label}</Badge>
+          {/* "Parsed" is only meaningful for an interview; other kinds index
+              their document as plain text, so show whether there IS one. */}
+          {isInterviewSpace(j.kind) ? (
+            j.parsedJd ? (
+              <Badge tone="green">JD ✓</Badge>
+            ) : (
+              <Badge tone="amber">no JD</Badge>
+            )
+          ) : (
+            j.jdText && <Badge tone="green">context ✓</Badge>
+          )}
+          {j.parsedCompany && <Badge tone="blue">link read ✓</Badge>}
         </div>
       ),
     },
@@ -105,21 +107,32 @@ export function SpacesTab() {
           <Button variant="success" onClick={() => setStartSpaceId(j.id)} title="Start a session in this Space">
             <PlayIcon /> Start
           </Button>
-          <Button
-            variant="ghost"
-            disabled={!j.parsedJd}
-            title={j.parsedJd ? 'Pre-interview prep brief' : 'Add a job description first'}
-            onClick={() => setBriefJob(j)}
-          >
-            Brief
-          </Button>
-          <Button
-            variant="ghost"
-            title="Tailor your résumé to this Space's job description"
-            onClick={() => navigate('/tailor')}
-          >
-            Tailor
-          </Button>
+          {/* A prep brief predicts interview questions against a JD — it has no
+              meaning for a standup or a project. */}
+          {isInterviewSpace(j.kind) && (
+            <Button
+              variant="ghost"
+              disabled={!j.parsedJd}
+              title={j.parsedJd ? 'Pre-interview prep brief' : 'Add a job description first'}
+              onClick={() => setBriefJob(j)}
+            >
+              Brief
+            </Button>
+          )}
+          {/* Same kind gate as Brief above: only a job Space HAS a job
+              description to tailor against. The title no longer claims this
+              Space's JD is carried over — `navigate('/tailor')` passes no id,
+              and Tailor cannot attach an application to an existing Space at
+              all (docs/20-QUARANTINE.md). Promising it was the bug. */}
+          {FLAGS.jobSearch && isInterviewSpace(j.kind) && (
+            <Button
+              variant="ghost"
+              title="Open Tailor Resume (you'll paste the job description there)"
+              onClick={() => navigate('/tailor')}
+            >
+              Tailor
+            </Button>
+          )}
           <Button
             variant="ghost"
             onClick={() => {
@@ -137,24 +150,10 @@ export function SpacesTab() {
   return (
     <div>
       <p className="mb-4 text-sm text-neutral-400">
-        A Space is everything BrainCue should know for one context — for interviews: the job
-        description, company research, and your notes. Answers ground themselves in the active
-        Space.
+        A Space is everything BrainCue should know for one recurring context — a meeting, a
+        project, a subject, an interview. Its activity decides what it asks you for; answers,
+        archives, and memory from a session all attach to the Space it ran in.
       </p>
-
-      <Card className="mb-5">
-        <Field label="Profile">
-          <Select value={profileId} onChange={(e) => setProfileId(e.target.value)}>
-            <option value="">Select a profile…</option>
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-                {p.targetRole ? ` · ${p.targetRole}` : ''}
-              </option>
-            ))}
-          </Select>
-        </Field>
-      </Card>
 
       {profileId && (
         <Card>
@@ -171,7 +170,7 @@ export function SpacesTab() {
               setQuery(q);
               setPage(0);
             }}
-            searchPlaceholder="Search Spaces by role or company…"
+            searchPlaceholder="Search Spaces by name or who they involve…"
             onRowClick={(j) => {
               setEditJob(j);
               setFormOpen(true);
@@ -208,7 +207,6 @@ export function SpacesTab() {
       <StartSessionModal
         open={!!startSpaceId}
         onClose={() => setStartSpaceId(null)}
-        initialProfileId={profileId}
         initialSpaceId={startSpaceId ?? undefined}
       />
     </div>

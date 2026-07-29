@@ -99,6 +99,19 @@ describe('streamAnswer — request body', () => {
     expect(userPrompt()).toContain('STORY TELLER');
   });
 
+  it('caps star at 520 output tokens and demands the four beats', async () => {
+    await collect(streamAnswer(baseInput({ format: 'star' })));
+    // Four labelled beats cost more than one flowing story, and Result — the
+    // point of the answer — is the beat a low ceiling would truncate.
+    expect(h.lastBody!.max_output_tokens).toBe(520);
+    const p = userPrompt();
+    expect(p).toContain('FORMAT = STAR');
+    for (const beat of ['SITUATION', 'TASK', 'ACTION', 'RESULT']) expect(p).toContain(beat);
+    // The two beats candidates actually drop, called out by name in the prompt.
+    expect(p).toMatch(/what \*I\* specifically was responsible for/);
+    expect(p).toMatch(/never invent one/); // a fabricated metric is worse than none
+  });
+
   it('includes the structured pronunciation-guide instruction only when enabled', async () => {
     await collect(streamAnswer(baseInput({ pronunciation: true })));
     expect(userPrompt()).toMatch(/phonetic respelling/i);
@@ -197,5 +210,47 @@ describe('streamAnswer — streamed events', () => {
       (e) => e.type === 'meta',
     );
     expect((noCtx as { riskWarning: string | null }).riskWarning).toBeTruthy();
+  });
+});
+
+/** The framing split (docs/00-VISION.md): interviews are one mode, so the
+ *  candidate persona must not follow the user into every other conversation. */
+describe('answer framing', () => {
+  const system = () => String((h.lastBody!.input as { role: string; content: string }[])[0].content);
+
+  it('defaults to the interview framing, unchanged', async () => {
+    await collect(streamAnswer(baseInput()));
+    expect(system()).toContain('You ARE the candidate');
+    expect(system()).toContain('while the interviewer watches');
+    expect(userPrompt()).toContain('Interview type: behavioral');
+    expect(userPrompt()).toContain('Candidate role target: SWE @ Acme');
+  });
+
+  it('conversation framing never casts the user as a candidate being assessed', async () => {
+    await collect(streamAnswer(baseInput({ framing: 'conversation' })));
+    const sys = system();
+    expect(sys).not.toContain('candidate');
+    expect(sys).not.toContain('interviewer');
+    expect(sys).toContain('live conversation');
+    // and it says so positively, not just by omission
+    expect(sys).toMatch(/Nobody is assessing them/i);
+  });
+
+  it('conversation framing drops interview-only user-prompt lines', async () => {
+    await collect(streamAnswer({ ...baseInput(), framing: 'conversation' }));
+    const p = userPrompt();
+    expect(p).not.toContain('Interview type:');
+    expect(p).not.toContain('Candidate role target:');
+  });
+
+  it('keeps the shared rules under BOTH framings — speakable, human, cited, grounded', async () => {
+    for (const framing of ['interview', 'conversation'] as const) {
+      await collect(streamAnswer(baseInput({ framing })));
+      const sys = system();
+      expect(sys, framing).toMatch(/WRITE FOR THE EAR/i);
+      expect(sys, framing).toMatch(/SOUND 100% HUMAN/i);
+      expect(sys, framing).toMatch(/CITE YOUR SOURCES/i);
+      expect(sys, framing).toMatch(/FABRICATION GUARD/i);
+    }
   });
 });

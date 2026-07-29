@@ -109,15 +109,19 @@ export function Button({
   );
 }
 
+/** `data-tour` passes through so the guided tour can spotlight a specific card
+ *  rather than the nav item that leads to its page (see dashboard/Tour.tsx). */
 export function Card({
   className = '',
   children,
+  ...rest
 }: {
   className?: string;
   children: React.ReactNode;
-}) {
+} & React.HTMLAttributes<HTMLElement>) {
   return (
     <section
+      {...rest}
       className={`rounded-2xl border border-white/5 bg-neutral-900/70 p-5 shadow-lg shadow-black/20 ${className}`}
     >
       {children}

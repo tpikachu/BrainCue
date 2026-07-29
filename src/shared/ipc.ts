@@ -1,6 +1,6 @@
 // Single source of truth for IPC channel names. See docs/05-IPC-MAP.md.
 
-import type { AnswerFormat, InterviewType } from './types';
+import type { AnswerFormat, ContextPackKind, InterviewType, SessionMode } from './types';
 
 /** Request/response channels (ipcRenderer.invoke <-> ipcMain.handle). */
 export const IPC = {
@@ -53,7 +53,11 @@ export const IPC = {
     page: 'jobs:page',
     get: 'jobs:get',
     save: 'jobs:save', // create or update + parse + index
-    setNotes: 'jobs:set-notes', // update just the client notes (no re-parse)
+    setNotes: 'jobs:set-notes',
+    // Rewrite the profile's résumé against THIS Space's JD and keep it here,
+    // as one of the Space's documents. Interview Spaces only.
+    tailorResume: 'jobs:tailor-resume',
+    clearTailoredResume: 'jobs:clear-tailored-resume', // update just the client notes (no re-parse)
     setCompanionPrefs: 'jobs:set-companion-prefs', // per-Space companion overrides (no re-parse)
     brief: 'jobs:brief', // generate a grounded pre-interview prep brief
     delete: 'jobs:delete',
@@ -95,6 +99,9 @@ export const IPC = {
     practiceStats: 'session:practice-stats', // Practice Loop aggregates (Reports)
     ask: 'session:ask',
     askActive: 'session:ask-active',
+    // Keep a finished conversation: archive it for retrieval + extract memory
+    // candidates. The user's answer to the save prompt, not an automatic step.
+    remember: 'session:remember',
     setInterviewType: 'session:set-interview-type',
     setAnswerPrefs: 'session:set-answer-prefs',
     setAnswering: 'session:set-answering', // coding: toggle auto-answering the interviewer
@@ -110,6 +117,9 @@ export const IPC = {
   // memory is ever recalled. All review actions are explicit user actions.
   memory: {
     list: 'memory:list',
+    create: 'memory:create', // author a memory by hand (same gates, same lifecycle)
+    conflicts: 'memory:conflicts', // pending candidates that would replace a current fact
+    history: 'memory:history', // a fact's revision chain, newest first
     review: 'memory:review', // approve (optionally with edits) or reject a candidate
     update: 'memory:update', // edit an item (content/category/importance/scope/expiry)
     archive: 'memory:archive',
@@ -228,12 +238,31 @@ export const EVENTS = {
   companionStatus: 'companion:status', // live companion posture + cost snapshot (CompanionStatusEvent)
 } as const;
 
-/** Pushed to the dashboard when a session stops, to prompt save-or-discard. */
+/**
+ * Pushed to the dashboard when a session stops, to prompt save-or-discard.
+ *
+ * This is the gate on remembering (docs/16-CONTINUITY.md §9): a conversation is
+ * archived, and its memory candidates extracted, only after the user says to
+ * keep it. Nothing about the session leaves the transcript until then.
+ */
 export interface SavePrompt {
   sessionId: string;
+  /** Which mode ran, so the prompt asks the right question. */
+  mode: SessionMode;
+  /** What the user said this call was — the prompt names the thing that ended
+   *  rather than the pipeline it ran through. Null on rehearsals and v1 rows. */
+  activity: ContextPackKind | null;
   interviewType: InterviewType;
+  /** Whose it is, so the prompt can offer that profile's Spaces to file it in. */
+  profileId: string;
+  /** The Space it ran in, if any — the default answer to "remember it where?". */
+  packId: string | null;
+  /** That Space's display title. */
   jobTitle: string | null;
   questionCount: number;
+  /** Transcript turns captured — "nothing was said" is worth telling the user
+   *  before they decide. */
+  turnCount: number;
 }
 
 /** A main-initiated confirm, shown INSIDE a protected window (not a native OS

@@ -57,7 +57,7 @@ export function quitApp(): void {
 /** Tray "Exit": ask for confirmation (in-window, not a native dialog), then quit. */
 export async function confirmQuit(): Promise<void> {
   const ok = await confirmInWindow({
-    title: 'Exit BrainCue Copilot?',
+    title: 'Exit BrainCue?',
     detail: 'The app will fully close and stop running in the background tray.',
     confirmLabel: 'Exit',
     cancelLabel: 'Cancel',

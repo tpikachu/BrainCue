@@ -17,13 +17,130 @@ export type InterviewType =
  *    through with someone.
  *  - `detailed`: thorough, with one concrete example.
  *  - `story_teller`: a short, vivid first-person story (hook → challenge → what I
- *    did → outcome) — memorable, great for behavioral answers. */
-export type AnswerFormat = 'key_points' | 'explanation' | 'detailed' | 'story_teller';
+ *    did → outcome) — memorable, great for behavioral answers.
+ *  - `star`: the same material under the named interview scaffold — Situation,
+ *    Task, Action, Result. Distinct from `story_teller` on purpose: that one
+ *    optimizes for how a story LANDS, this one for what a behavioural
+ *    interviewer is scoring against. Panels listen for the four beats, and
+ *    "what was YOUR task" and "what was the RESULT" are the two people
+ *    reliably skip. */
+export type AnswerFormat = 'key_points' | 'explanation' | 'detailed' | 'story_teller' | 'star';
 
 export type DocumentKind = 'resume' | 'jd' | 'note' | 'other';
 /** `tailored` = an application's tailored resume, indexed pack-scoped; when a pack
  *  has tailored chunks, retrieval drops the base `resume` chunks for its sessions. */
-export type ChunkSource = 'resume' | 'jd' | 'note' | 'company' | 'story' | 'tailored';
+/** `session` = the archive of a FINISHED conversation (docs/16-CONTINUITY.md).
+ *  It is what makes BrainCue continuous rather than a very good single-meeting
+ *  tool: without it every call starts from zero and "what did we agree three
+ *  calls ago" is unanswerable. */
+export type ChunkSource =
+  | 'resume'
+  | 'jd'
+  | 'note'
+  | 'company'
+  | 'story'
+  | 'tailored'
+  | 'session'
+  /** What the user told us about themselves (ProfileAbout). A résumé says what
+   *  someone did for employers; this says who they are now. */
+  | 'profile';
+
+/**
+ * The person, as they describe themselves.
+ *
+ * Onboarding used to ask for a target role, a target company, and a résumé —
+ * everything a job applicant needs and almost nothing a companion in someone's
+ * daily calls does. These are the questions whose answers actually change how
+ * well it can stand in for them. Every field is optional: a half-filled profile
+ * is far better than a blank one, and the UI asks rather than demands.
+ */
+export interface ProfileAbout {
+  /** What you do. */
+  role: string;
+  /** Where you do it. */
+  org: string;
+  /** City / timezone — so "tomorrow morning" and "end of day" mean something. */
+  location: string;
+  /** How you work and how you like to be communicated with. */
+  workingStyle: string;
+  /** The people you deal with regularly, and who they are to you. */
+  people: string;
+  /** What you are working on right now. */
+  projects: string;
+  /** Anything else someone standing in for you would need. */
+  other: string;
+}
+
+export const EMPTY_PROFILE_ABOUT: ProfileAbout = {
+  role: '',
+  org: '',
+  location: '',
+  workingStyle: '',
+  people: '',
+  projects: '',
+  other: '',
+};
+
+/** Label + prompt per section — one source of truth for the intake UI and for
+ *  the sentence each section is indexed as. */
+export const PROFILE_ABOUT_FIELDS: {
+  key: keyof ProfileAbout;
+  label: string;
+  placeholder: string;
+  /** How the section reads once indexed, so a retrieved chunk is self-contained. */
+  lead: string;
+  rows: number;
+}[] = [
+  {
+    key: 'role',
+    label: 'What do you do?',
+    placeholder: 'e.g. Product manager for the payments platform',
+    lead: 'What they do:',
+    rows: 2,
+  },
+  {
+    key: 'org',
+    label: 'Where?',
+    placeholder: 'e.g. Acme, on the platform team',
+    lead: 'Where they work:',
+    rows: 2,
+  },
+  {
+    key: 'location',
+    label: 'Where are you based?',
+    placeholder: 'e.g. Lisbon (WET). Team is mostly US Eastern.',
+    lead: 'Based in:',
+    rows: 2,
+  },
+  {
+    key: 'projects',
+    label: 'What are you working on right now?',
+    placeholder: 'e.g. Atlas migration — phase 2 starts in September. Renewal season for the top 20 accounts.',
+    lead: 'Currently working on:',
+    rows: 3,
+  },
+  {
+    key: 'people',
+    label: 'Who do you work with?',
+    placeholder: 'e.g. Sarah Chen — my manager. Priya runs the standup. Marco is my counterpart at Acme.',
+    lead: 'People they work with:',
+    rows: 3,
+  },
+  {
+    key: 'workingStyle',
+    label: 'How do you work, and how should it help you?',
+    placeholder: 'e.g. I keep updates short. Never commit to dates in a call. Prefer bullet points over prose.',
+    lead: 'How they work:',
+    rows: 3,
+  },
+  {
+    key: 'other',
+    label: 'Anything else it should know about you?',
+    placeholder: 'Anything someone standing in for you would need and would not guess.',
+    lead: 'Also worth knowing:',
+    rows: 3,
+  },
+];
 export type SessionStatus = 'idle' | 'live' | 'stopped';
 
 // ---- v2 domain vocabulary (see docs/12-ENGINE-PLAN.md) ----
@@ -39,8 +156,13 @@ export type SessionMode =
   | 'tutor'
   | 'companion';
 
-/** What a Context Pack ("Space" in the UI) is about. v1 jobs are packs of
- *  kind 'job'; other kinds arrive with their modes. */
+/**
+ * An **activity** — what a conversation IS. The one thing the user picks when
+ * starting a session, and what a Space is a saved instance of (hence the
+ * Context Pack name: v1 jobs are packs of kind 'job'). The engine `SessionMode`
+ * is derived from it, never chosen separately — see shared/activities.ts for
+ * why there used to be two lists and now there is one.
+ */
 export type ContextPackKind =
   | 'job'
   | 'subject'
@@ -48,6 +170,8 @@ export type ContextPackKind =
   | 'meeting'
   | 'personal'
   | 'game'
+  /** No call at all — thinking out loud while you work. */
+  | 'solo'
   | 'custom';
 
 /** Every engine output is a Contribution of one of these kinds (the overlay
@@ -71,7 +195,7 @@ export type ContributionKind =
  *  (trigger/presence.ts) — never a vague slider feeding a prompt. */
 export type Presence = 'summoned' | 'quiet' | 'balanced' | 'active';
 
-// --- Local memory (v2 Prompt 8) ---------------------------------------------
+// --- Local memory ------------------------------------------------------------
 // Memory belongs to the user: candidates are extracted conservatively AFTER
 // consent, reviewed explicitly, and only approved items ever ground answers.
 
@@ -89,6 +213,9 @@ export type MemoryCategory =
  *  durable MemoryItem, rejected/archived = out of retrieval. */
 export type MemoryStatus = 'pending' | 'approved' | 'rejected' | 'archived';
 
+/** How a memory got here — shown in review so the user can weigh it. */
+export type MemorySourceKind = 'extracted' | 'authored' | 'imported' | 'derived';
+
 export interface MemoryItem {
   id: string;
   profileId: string;
@@ -102,10 +229,28 @@ export interface MemoryItem {
   importance: number;
   sensitive: boolean;
   status: MemoryStatus;
+  /** Single-valued facts carry a key ("project:atlas/launch-date"); approving a
+   *  new value for the same key supersedes the old one instead of coexisting
+   *  with it. null = free-text memory, many may coexist. */
+  factKey: string | null;
+  validFrom: number;
+  /** null = still true; set when superseded. */
+  validTo: number | null;
+  /** The memory that replaced this one; null = current. */
+  supersededBy: string | null;
+  sourceKind: MemorySourceKind;
+  revision: number;
   createdAt: number;
   updatedAt: number;
   lastUsedAt: number | null;
   expiresAt: number | null;
+}
+
+/** A pending candidate whose factKey already has a current approved value —
+ *  surfaced in review as "this replaces that", never auto-applied. */
+export interface MemoryConflict {
+  candidate: MemoryItem;
+  current: MemoryItem;
 }
 
 /** A memory recalled for grounding — cited separately from documents ([M1]…). */
@@ -178,14 +323,16 @@ export interface Profile {
   jdText: string | null;
   parsedResume: ParsedResume | null;
   parsedJd: ParsedJd | null;
+  /** Who they are now (§ ProfileAbout). null on profiles created before it existed. */
+  about: ProfileAbout | null;
   createdAt: number;
   updatedAt: number;
 }
 
 export type ProfileInput = Omit<
   Profile,
-  'id' | 'createdAt' | 'updatedAt' | 'parsedResume' | 'parsedJd'
->;
+  'id' | 'createdAt' | 'updatedAt' | 'parsedResume' | 'parsedJd' | 'about'
+> & { about?: ProfileAbout | null };
 
 export interface ParsedResume {
   skills: string[];
@@ -315,6 +462,10 @@ export interface ContextPack {
   companyUrl: string | null;
   companyResearch: string | null;
   parsedCompany: ParsedCompany | null;
+  /** This profile's résumé rewritten against THIS Space's JD — a document of
+   *  the Space, like the JD beside it. Indexed pack-scoped, and it stands in
+   *  for the base résumé only while grounding this Space's interviews. */
+  tailoredResume: string | null;
   notes: string | null; // free-form client notes (user-facing, shown in setup + Cue Card)
   /** Per-Space memory opt-out (matters only while global memory consent is on). */
   memoryEnabled: boolean;
@@ -376,6 +527,13 @@ export interface Session {
   id: string;
   profileId: string;
   jobId: string | null; // context-pack id (field name kept for IPC compatibility)
+  /**
+   * What the user said this conversation was. Recorded because it is the
+   * CHOICE, while `mode` is only what we derived from it — and because a
+   * session started without a Space has no kind stored anywhere else. Null on
+   * v1 rows and on rehearsals.
+   */
+  activity: ContextPackKind | null;
   mode: SessionMode;
   /** @deprecated superseded by `mode`; kept for v1 compatibility. */
   kind: SessionKind;
@@ -500,12 +658,26 @@ export interface AppSettings {
   hideTaskbarIcon: boolean; // keep the app off the taskbar (stealth)
   dataConsentAck: boolean;
   /** Global memory consent — OFF by default: no extraction, no recall until
-   *  the user explicitly enables it (Library › Memory). */
+   *  the user explicitly enables it (the Memory section). */
   memoryEnabled: boolean;
+  /** Write a short archive of each finished conversation and let later ones
+   *  retrieve it (docs/16-CONTINUITY.md). ON by default, unlike memory: this
+   *  summarises sessions the user deliberately ran and whose transcripts are
+   *  already stored locally, rather than extracting standing claims about
+   *  them. Respects the same per-Space opt-out. */
+  sessionArchiveEnabled: boolean;
+  /** Whose dashboard this is — every profile-scoped surface reads it instead of
+   *  asking again. Resolved in main against the real rows, so a deleted profile
+   *  falls back to one that exists; null only when there are no profiles. */
+  activeProfileId: string | null;
   /** Global companion configuration (personality, default presence, DND,
    *  default budget). */
   companionPrefs: CompanionPrefs;
   tourDone: boolean; // first-run guided tour completed/skipped
+  /** Show the raw DB Explorer in the sidebar. OFF by default and off in
+   *  packaged builds unless asked for: it reads every table directly, so it is
+   *  a support/debugging tool, not a feature. Always on in a dev build. */
+  devDbExplorer: boolean;
   shortcuts: Record<string, string>; // effective global-shortcut accelerators per action
   shortcutDefaults: Record<string, string>; // built-in default accelerator per action
 }
@@ -578,7 +750,7 @@ export interface ContributionResetEvent {
   contributionId: string;
 }
 
-// --- Voice / summon layer (v2, Prompt 9) ------------------------------------
+// --- Voice / summon layer ---------------------------------------------------
 // Voice is an OUTPUT SURFACE over the generic contribution pipeline, not a
 // mode: a summon transcribes the user's speech, routes it as a direct ask
 // (live session) or a quick ask (default Space), and the reply streams to the
@@ -621,7 +793,7 @@ export interface VoiceAudioEvent {
   last: boolean;
 }
 
-// --- Companion (v2, Prompt 10) ----------------------------------------------
+// --- Companion ---------------------------------------------------------------
 // Companion is an EXPLICITLY started session (no background listening before
 // consent). Its posture is a CompanionPresence — richer than the engine's
 // Presence dial because "off" (hard mute) and "on demand" (summon-only) are

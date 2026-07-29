@@ -13,7 +13,9 @@ import type {
   ContributionPatchEvent,
   ContributionResetEvent,
   InterviewBrief,
+  Job,
   MeetingReport,
+  MemoryConflict,
   MemoryItem,
   Presence,
   SparringFeedback,
@@ -68,7 +70,8 @@ const api = {
         IPC.data.stats,
       ),
     wipeAll: () => invoke<{ wiped: boolean }>(IPC.data.wipeAll),
-    loadSamples: () => invoke<{ profileId: string; jobs: number }>(IPC.data.loadSamples),
+    loadSamples: () =>
+      invoke<{ profileId: string; jobs: number; conversations: number }>(IPC.data.loadSamples),
   },
   window: {
     minimize: () => invoke<{ ok: true }>(IPC.window.minimize),
@@ -111,6 +114,9 @@ const api = {
     save: (input: {
       id?: string;
       profileId: string;
+      /** What this Space is about (see shared/activities.ts). Absent on an edit
+       *  leaves the stored kind alone; absent on create defaults to 'job'. */
+      kind?: string;
       title: string;
       company: string | null;
       jdUrl: string | null;
@@ -129,6 +135,14 @@ const api = {
     setCompanionPrefs: (id: string, prefs: CompanionSpaceOverrides | null) =>
       invoke(IPC.jobs.setCompanionPrefs, { id, prefs }),
     brief: (id: string) => invoke<InterviewBrief>(IPC.jobs.brief, { id }),
+    /** Rewrite this profile's résumé against this Space's JD and keep it here.
+     *  `indexError` set = the text is saved but not searchable yet. */
+    tailorResume: (id: string) =>
+      invoke<{ job: Job; embedded: number; indexError: string | null }>(IPC.jobs.tailorResume, {
+        id,
+      }),
+    clearTailoredResume: (id: string) =>
+      invoke<{ job: Job }>(IPC.jobs.clearTailoredResume, { id }),
     delete: (id: string) => invoke(IPC.jobs.delete, { id }),
   },
   applications: {
@@ -180,20 +194,25 @@ const api = {
   session: {
     start: (
       profileId: string,
-      interviewType: string,
+      /** Interview/practice only. Ambient modes omit it; the row keeps the
+       *  column's 'general' default, and the answer prompt ignores it (see
+       *  services/openai/answer.ts — framing). */
+      interviewType: string | undefined,
       jobId: string | null = null,
       answerFormat = 'key_points',
-      mode = 'interview',
+      /** What this call IS (shared/activities.ts). The engine derives the mode
+       *  from it — the renderer never picks one. */
+      activity?: string,
       presence?: Presence,
       budgetCents?: number | null,
       companionPresence?: string,
     ) =>
       invoke(IPC.session.start, {
         profileId,
-        interviewType,
+        interviewType: interviewType ?? 'general',
         jobId,
         answerFormat,
-        mode,
+        activity,
         presence,
         budgetCents,
         companionPresence,
@@ -209,6 +228,14 @@ const api = {
       ),
     askActive: (questionText: string) =>
       invoke<{ ok: boolean }>(IPC.session.askActive, { questionText }),
+    /** Keep this conversation: archive it for retrieval and extract memory
+     *  candidates. Both stay gated by the user's own settings, so the counts
+     *  can legitimately come back as zero. */
+    /** Keep a finished conversation. `packId` files it into a Space first (null
+     *  = no Space, undefined = leave it where it ran) — the archive and the
+     *  memory candidates are both scoped from there. */
+    remember: (id: string, packId?: string | null) =>
+      invoke<{ archived: number; memories: number }>(IPC.session.remember, { id, packId }),
     setInterviewType: (sessionId: string, interviewType: string) =>
       invoke<{ ok: true }>(IPC.session.setInterviewType, { sessionId, interviewType }),
     setAnswering: (enabled: boolean) =>
@@ -228,12 +255,14 @@ const api = {
       ipcRenderer.send(IPC.session.realtimeAudio, { sessionId, pcm }),
     ask: (sessionId: string, questionText: string) =>
       invoke(IPC.session.ask, { sessionId, questionText }),
-    list: () => invoke(IPC.session.list),
+    /** Sessions for ONE profile — Sessions and Insights are views of the
+     *  active profile. Omitting it means every profile (data stats only). */
+    list: (profileId?: string) => invoke(IPC.session.list, { profileId }),
     get: (id: string) => invoke(IPC.session.get, { id }),
     delete: (id: string) => invoke(IPC.session.delete, { id }),
     generateReport: (sessionId: string) => invoke(IPC.session.generateReport, { sessionId }),
     getReport: (sessionId: string) => invoke(IPC.session.getReport, { sessionId }),
-    practiceStats: () => invoke(IPC.session.practiceStats),
+    practiceStats: (profileId?: string) => invoke(IPC.session.practiceStats, { profileId }),
     meetingReport: (sessionId: string) =>
       invoke<{ contributionId: string; report: MeetingReport }>(IPC.session.meetingReport, {
         sessionId,
@@ -251,8 +280,26 @@ const api = {
     ) => invoke<Contribution>(IPC.contributions.update, { id, ...patch }),
   },
   memory: {
-    list: (profileId: string, opts: { status?: string; query?: string } = {}) =>
-      invoke<MemoryItem[]>(IPC.memory.list, { profileId, ...opts }),
+    /** `packId`: a string filters to that Space, null to what is remembered
+     *  everywhere, absent to every scope. */
+    list: (
+      profileId: string,
+      opts: { status?: string; query?: string; packId?: string | null } = {},
+    ) => invoke<MemoryItem[]>(IPC.memory.list, { profileId, ...opts }),
+    /** Author a memory by hand. Same sensitive gate, same lifecycle — it is
+     *  approved immediately, so a failure here means it is waiting in review. */
+    create: (
+      profileId: string,
+      content: string,
+      opts: { category?: string; packId?: string | null; importance?: number } = {},
+    ) => invoke<MemoryItem>(IPC.memory.create, { profileId, content, ...opts }),
+    /** Pending candidates that would replace a fact the profile already holds,
+     *  each paired with the value it would retire. */
+    conflicts: (profileId: string) =>
+      invoke<MemoryConflict[]>(IPC.memory.conflicts, { profileId }),
+    /** A fact's revision chain, newest first. */
+    history: (profileId: string, factKey: string) =>
+      invoke<MemoryItem[]>(IPC.memory.history, { profileId, factKey }),
     review: (
       id: string,
       action: 'approve' | 'reject',

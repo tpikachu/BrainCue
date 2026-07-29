@@ -58,8 +58,11 @@ export const SETTINGS_KEYS = {
   hideTaskbarIcon: 'hide_taskbar_icon',
   codingLanguage: 'coding_language',
   memoryEnabled: 'memory_enabled', // global memory consent ('1'/'0'; absent = off)
+  sessionArchiveEnabled: 'session_archive_enabled', // conversation continuity ('1'/'0'; absent = ON)
   voicePrefs: 'voice_prefs', // json VoicePrefs (TTS voice, mute, output device, quick-ask opts)
   companionPrefs: 'companion_prefs', // json CompanionPrefs (personality, presence, DND, budget)
+  activeProfileId: 'active_profile_id', // whose dashboard this is (see docs/19-ACTIVE-PROFILE.md)
+  devDbExplorer: 'dev_db_explorer', // raw table browser in the sidebar ('1'/'0'; absent = off)
 } as const;
 
 /** Non-secret settings cleared by a factory reset (everything except the API key). */
@@ -77,6 +80,8 @@ const APP_SETTING_KEYS: string[] = [
   SETTINGS_KEYS.hideTaskbarIcon,
   SETTINGS_KEYS.codingLanguage,
   SETTINGS_KEYS.memoryEnabled,
+  SETTINGS_KEYS.sessionArchiveEnabled,
   SETTINGS_KEYS.voicePrefs,
   SETTINGS_KEYS.companionPrefs,
+  SETTINGS_KEYS.devDbExplorer,
 ];

@@ -14,6 +14,12 @@ export const profiles = sqliteTable('profiles', {
   jdText: text('jd_text'),
   parsedResume: text('parsed_resume'), // json
   parsedJd: text('parsed_jd'), // json
+  // Who this person actually is (json ProfileAbout) — role, org, where they
+  // are, how they work, who they work with, what they're working on. A résumé
+  // says what someone did for employers; a companion in their daily calls needs
+  // what they're doing now and how they like to be helped. Indexed as `profile`
+  // chunks so it grounds answers in every mode.
+  about: text('about'),
   createdAt: integer('created_at').notNull().default(now),
   updatedAt: integer('updated_at').notNull().default(now),
 });
@@ -70,6 +76,12 @@ export const contextPacks = sqliteTable(
     companyUrl: text('company_url'), // optional company website to research
     companyResearch: text('company_research'), // raw text scraped from the site
     parsedCompany: text('parsed_company'), // json — structured interview-relevant research
+    // The profile's résumé rewritten against THIS Space's job description.
+    // A Space-level document like the JD beside it: it belongs to the role you
+    // are interviewing for, is indexed pack-scoped, and substitutes for the
+    // base résumé only while grounding this Space's interviews
+    // (docs/20-QUARANTINE.md §4). Null = never tailored.
+    tailoredResume: text('tailored_resume'),
     notes: text('notes'), // free-form client notes (shown when selecting + in the Cue Card)
     // Per-Space memory opt-out (only meaningful while the GLOBAL memory
     // consent is on): sessions in a disabled Space neither extract nor
@@ -186,8 +198,15 @@ export const sessions = sqliteTable(
       .notNull()
       .references(() => profiles.id, { onDelete: 'cascade' }),
     packId: text('job_id').references(() => contextPacks.id, { onDelete: 'set null' }),
+    // The ACTIVITY the user chose: meeting | project | job | … (ContextPackKind).
+    // This is the choice; `mode` below is only what we derived from it. Stored
+    // separately because several activities share one mode (a project call and
+    // a standup both run 'meeting'), and because a session started WITHOUT a
+    // Space has no kind anywhere else. Null on v1 rows and on rehearsals.
+    activity: text('activity'),
     // The MODE this session ran in (v2): interview | practice | … (SessionMode).
-    // Migration 0008 backfills live→interview, mock/sparring→practice.
+    // Derived from `activity` at start — never picked by the user. Migration
+    // 0008 backfills live→interview, mock/sparring→practice.
     mode: text('mode').notNull().default('interview'),
     // What produced this session: a real interview ('live'), a mock rehearsal
     // ('mock' — deleted at stop, only ever transient), or a Sparring practice
@@ -302,7 +321,7 @@ export const sessionReports = sqliteTable('session_reports', {
 // with a stable lifecycle. Interview answers DUAL-WRITE here alongside
 // ai_answers (which stays the parity source of truth) until the overlay and
 // reports consume contributions directly.
-// Local memory (v2 Prompt 8): ONE lifecycle table — a row is a
+// Local memory: ONE lifecycle table — a row is a
 // MemoryCandidate while status='pending' and a MemoryItem once 'approved'.
 // The embedding lives ON the row (with its identity), so deleting a memory
 // deletes its vector in the same statement — nothing orphaned, and memory
@@ -326,6 +345,22 @@ export const memories = sqliteTable(
     importance: real('importance').notNull().default(0.5),
     sensitive: integer('sensitive').notNull().default(0),
     status: text('status').notNull().default('pending'), // MemoryStatus
+    // ── Truthfulness over time (docs/14-MEMORY.md §4) ──────────────────────
+    // A single-valued fact ("project:atlas/launch-date") carries a factKey.
+    // INVARIANT: at most ONE row per (profile_id, pack_id, fact_key) may have
+    // superseded_by IS NULL — that row is the current answer. Approving a new
+    // value stamps valid_to + superseded_by on the old one instead of deleting
+    // it, so history survives and recall still sees exactly one truth.
+    // Free-text memories (a preference in prose, a story) leave factKey null
+    // and keep the pre-existing many-rows behavior.
+    factKey: text('fact_key'),
+    validFrom: integer('valid_from').notNull().default(now),
+    validTo: integer('valid_to'), // null = still true
+    supersededBy: text('superseded_by'), // → memories.id; null = current
+    // How the row got here: extracted from a session, authored by the user,
+    // imported from a document, or derived by consolidation.
+    sourceKind: text('source_kind').notNull().default('extracted'), // MemorySourceKind
+    revision: integer('revision').notNull().default(1),
     // Embedding (populated on approval) + its identity — vectors from a
     // different provider/model are ignored at recall until re-embedded.
     embedProvider: text('embed_provider'),
@@ -340,6 +375,9 @@ export const memories = sqliteTable(
   (t) => ({
     byProfile: index('memories_profile_idx').on(t.profileId),
     byStatus: index('memories_status_idx').on(t.status),
+    // The supersession lookup: "is there a current row for this fact?" runs on
+    // every keyed candidate, so it must not scan the profile.
+    byFactKey: index('memories_fact_key_idx').on(t.profileId, t.factKey, t.supersededBy),
   }),
 );
 

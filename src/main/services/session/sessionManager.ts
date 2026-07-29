@@ -1,5 +1,12 @@
 import { engine } from '../engine/engine';
-import type { AnswerFormat, InterviewType, Presence, Session, SessionMode } from '@shared/types';
+import type {
+  AnswerFormat,
+  ContextPackKind,
+  InterviewType,
+  Presence,
+  Session,
+  SessionMode,
+} from '@shared/types';
 
 /**
  * Backward-compatible FACADE over the conversation engine.
@@ -42,6 +49,7 @@ export const sessionManager = {
     jobId: string | null = null,
     answerFormat: AnswerFormat = 'key_points',
     opts: {
+      activity?: ContextPackKind | null;
       mode?: SessionMode;
       presence?: Presence;
       budgetCents?: number | null;

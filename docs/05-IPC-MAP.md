@@ -36,7 +36,7 @@ validates input with zod via the `handle()` helper. Errors are returned as
 ### settings
 | Channel | Request | Response |
 |---|---|---|
-| `settings:get` | — | `AppSettings` (no raw key — only `apiKeyPresent`; incl. `tourDone`) |
+| `settings:get` | — | `AppSettings` (no raw key — only `apiKeyPresent`; incl. `tourDone`, `sessionArchiveEnabled`) |
 | `settings:set` | `Partial<AppSettings>` (`models`, `overlay`, `dataConsentAck`, `tourDone`) | `AppSettings` |
 | `settings:set-api-key` | `{ key }` | `{ apiKeyPresent: true }` |
 | `settings:clear-api-key` | — | `{ apiKeyPresent: false }` |
@@ -79,17 +79,22 @@ validates input with zod via the `handle()` helper. Errors are returned as
 | `documents:save-resume` | `{ profileId, resumeText }` | `{ keyMissing, parsed, embedded }` (saves resume, parses + reindexes profile base when a key exists) |
 | `documents:reindex-profile` | `{ profileId }` | `{ chunks, embedded }` |
 
-### jobs
-A profile can target multiple jobs; each holds its own JD and is parsed/indexed
-independently.
+### jobs (Spaces)
+A profile can hold many Spaces; each carries its own defining document and is
+parsed/indexed independently. `kind` says what the Space is about — see
+[17 · Spaces and the person](17-SPACES-AND-PROFILE.md) — and drives the field
+labels plus which interview-only steps run (structured JD parsing, the prep
+brief). Physical table/column names stay `jobs`/`job_id`; the rename is logical.
 | Channel | Request | Response |
 |---|---|---|
 | `jobs:list` | `{ profileId }` | `Job[]` |
 | `jobs:page` | `{ profileId, query?, limit=5, offset=0 }` | `{ items: Job[], total }` (server-side pagination + search — `LIKE` on title/company, sorted by `updatedAt` desc. Backs the searchable jobs table) |
 | `jobs:get` | `{ id }` | `Job` |
-| `jobs:save` | `{ id?, profileId, title, company, jdUrl, jdText, companyUrl, notes }` | `{ job, keyMissing, embedded, companyResearched, companyError }` (create or update; parses JD + indexes when a key exists. `jdUrl` is reference-only. If `companyUrl` is set, best-effort scrapes + parses the company site into `parsed_company` and indexes it as `company` chunks; failures surface in `companyError`, not as an error) |
+| `jobs:save` | `{ id?, profileId, kind?, title, company, jdUrl, jdText, companyUrl, notes }` | `{ job, keyMissing, embedded, companyResearched, companyError }` (create or update; parses JD + indexes when a key exists. `jdUrl` is reference-only. If `companyUrl` is set, best-effort scrapes + parses the company site into `parsed_company` and indexes it as `company` chunks; failures surface in `companyError`, not as an error) |
 | `jobs:set-notes` | `{ id, notes }` | `{ job }` (updates the free-form client notes) |
-| `jobs:brief` | `{ id }` | `InterviewBrief` (grounded pre-interview prep brief from the profile's parsed résumé × the job's parsed JD × parsed company research — likely questions, coverage gaps, strengths, company angles. Not persisted; regenerated on demand. Throws a guidance error if the key, parsed résumé, or parsed JD is missing) |
+| `jobs:tailor-resume` | `{ id }` | `{ job, embedded, indexError }` (interview Spaces only. Rewrites the profile's résumé against THIS Space's `jd_text` and stores it on the Space as `tailored_resume`. The model call runs BEFORE any write, so a failure leaves the Space untouched; indexing is best-effort after, so an embedding hiccup never loses the paid text — `indexError` set means saved-but-not-searchable, and re-saving the Space retries) |
+| `jobs:clear-tailored-resume` | `{ id }` | `{ job }` (drops it and re-indexes; this Space's interviews fall back to the base résumé) |
+| `jobs:brief` | `{ id }` (refuses for non-`job` Spaces — a prep brief predicts interview questions) | `InterviewBrief` (grounded pre-interview prep brief from the profile's parsed résumé × the job's parsed JD × parsed company research — likely questions, coverage gaps, strengths, company angles. Not persisted; regenerated on demand. Throws a guidance error if the key, parsed résumé, or parsed JD is missing) |
 | `jobs:delete` | `{ id }` | `{ deleted: true }` |
 
 ### notes
@@ -99,7 +104,7 @@ independently.
 | `notes:create` | `{ profileId, content }` | `Note` |
 | `notes:delete` | `{ id }` | `{ deleted: true }` |
 
-### applications (Tailor Resume)
+### applications (Tailor Resume) — **switched off**, see [20](20-QUARANTINE.md)
 A job application produced by the Tailor Resume flow: an ATS-friendly resume tailored
 from a base resume × JD (grounded — never invented), plus answers to the application
 questions. Each application owns a dedicated (hidden) job row; its tailored resume is
@@ -127,7 +132,7 @@ résumé, persisted, and indexed as `story` chunks so they ground live answers.
 ### session
 | Channel | Request | Response |
 |---|---|---|
-| `session:start` | `{ profileId, interviewType, jobId, answerFormat }` | `Session` (`answerFormat` = key_points\|explanation\|detailed — the single answer control) |
+| `session:start` | `{ profileId, interviewType, jobId, answerFormat, activity? }` | `Session` (`answerFormat` = key_points\|explanation\|detailed — the single answer control; `activity` is the ContextPackKind the user picked and the engine derives the mode from it) |
 | `session:resume` | `{ sessionId, answerFormat? }` | `Session` (re-activate an existing session row and continue it; interview type is restored from the row — one session per interview, type is dynamic) |
 | `session:stop` | `{ sessionId }` | `Session` |
 | `session:toggle-pause` | `{ sessionId }` | `{ paused }` |
@@ -142,6 +147,7 @@ résumé, persisted, and indexed as `story` chunks so they ground live answers.
 | `session:get-report` | `{ sessionId }` | `SessionReport` |
 | `session:ask` | `{ sessionId, questionText }` | `{ questionId }` (manual ask; answer streams) |
 | `session:ask-active` | `{ questionText }` | `{ ok }` (Cue Card "Ask" box — manual ask for the active session, no id) |
+| `session:remember` | `{ id }` | `{ archived, memories }` (KEEP this conversation: writes its retrievable archive and extracts memory candidates. Called by the save prompt, never automatically — stopping a session remembers nothing. Both halves stay gated by the user's settings, so zeros are legitimate; failures come back as counts, not errors) |
 | `session:set-interview-type` | `{ sessionId, interviewType }` | `{ ok }` (set the session-level type — chosen by the user in the save prompt at stop) |
 | `session:set-answer-prefs` | `{ interviewType?, format?, pronunciation? }` | `{ interviewType, format, pronunciation }` (live Cue Card controls; acts on the active session. Switching `interviewType` is dynamic — it persists onto the session row + reframes later answers) |
 | `session:set-answering` | `{ enabled }` | `{ enabled, answered }` (coding "listen-only" toggle: when disabled, the interviewer is still transcribed but not auto-answered; enabling it also answers the question they just asked) |
@@ -230,16 +236,21 @@ Channel constants live in `EVENTS` (`src/shared/ipc.ts`); payload types are in
 | `contribution:done` | `{ contributionId }` | overlay (stream finished — completed or aborted) |
 | `contribution:reset` | `{ contributionId }` | overlay (regenerate: clear that card's body, keep the card) |
 
-Memory additions (Prompt 8): `memory:list` / `memory:review` (approve with
+Memory additions: `memory:list` / `memory:review` (approve with
 optional edits, or reject) / `memory:update` / `memory:archive` /
 `memory:delete` (removes the row AND its embedding) /
-`memory:set-pack-enabled` (per-Space opt-out); `settings:set` accepts
+`memory:set-pack-enabled` (per-Space opt-out) /
+`memory:create` (author one by hand — creates pending then approves in the same
+call, so a failure leaves it in review rather than losing it) /
+`memory:conflicts` (pending candidates that would replace a fact the profile
+already holds, each paired with the value it would retire — see
+[14 · Memory](14-MEMORY.md) §4) / `memory:history` (a fact's revision chain,
+newest first; never feeds recall); `settings:set` accepts
 `memoryEnabled` (the global consent switch, default off). Recalled memories
 ride the `session:context` / `contribution:patch` payloads as a separate
 `memories` array so "data sent" always shows every memory used.
 
-Meeting Copilot additions (Prompt 7): `session:start` now accepts `mode`
-(SessionMode, default `interview`) and `presence`
+Meeting Copilot additions: `session:start` accepts `presence`
 (summoned|quiet|balanced|active) for ambient modes; `session:meeting-report`
 returns `{ contributionId, report: MeetingReport }` (get-or-generate);
 `contributions:update` edits a persisted contribution's
@@ -247,7 +258,7 @@ title/body/meta/status (the meeting report's action items / open questions
 stay editable). Ambient meeting cards broadcast ONLY the generic
 `contribution:*` events — no legacy `answer-*` twins.
 
-Voice/summon additions (Prompt 9): request channels `voice:summon` (the
+Voice/summon additions: request channels `voice:summon` (the
 push-to-talk press — state-dependent: idle→listen, listening→send,
 speaking→interrupt), `voice:commit`, `voice:cancel`, `voice:interrupt`,
 `voice:playback-done` (`{ generation }`), `voice:get-prefs` /
@@ -262,7 +273,15 @@ in-session summon is a normal engine direct ask (dual-emitted events, v1
 persistence); a no-session quick ask streams GENERIC-only `contribution:*`
 events like ambient cards.
 
-Companion additions (Prompt 10): `session:start` gains `companionPresence`
+**Activities superseded the `mode` argument** ([18-ACTIVITIES.md](./18-ACTIVITIES.md)).
+`session:start` takes `activity` (ContextPackKind) instead of `mode`
+(SessionMode): the renderer says what the call IS and the engine derives which
+mode runs it, so the two lists that used to answer the same question cannot
+disagree. Sessions started without an activity (mock and sparring rehearsals)
+fall back to the interview pipeline. The `session:save-prompt` broadcast carries
+`activity` alongside `mode` so the prompt names the thing that ended.
+
+Companion additions: `session:start` gains `companionPresence`
 (off|on_demand|assistive|proactive — the InterjectionPolicy posture; the
 engine-level `presence` is its coarse projection) and `budgetCents`
 (hard session budget, null = no cap; absent = the companion-prefs default).
@@ -301,3 +320,12 @@ type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 ```
 The preload wrapper unwraps `Result` and throws on `ok:false` so renderer code
 can use normal try/catch / async-await.
+
+**Profile scoping (2026-07-28).** `session:list` and `session:practice-stats`
+take an optional `profileId` and are called WITH one from Sessions, Insights,
+and the interview workspace — they used to return every session in the database
+([19-ACTIVE-PROFILE.md](./19-ACTIVE-PROFILE.md)). `session:remember` takes an
+optional `packId`: a string files the session into that Space before archiving
+and extraction, `null` files it out of every Space, absent leaves it where it
+ran ([16 §11](./16-CONTINUITY.md)). `session:save-prompt` carries `profileId`
+and `packId` so the prompt can offer that profile's Spaces.

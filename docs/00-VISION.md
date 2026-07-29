@@ -30,24 +30,43 @@ are things a cloud chat app cannot do:
 The unifying frame: **BrainCue is in the room with you.** Voice chat is one of
 its surfaces, not the product.
 
-## 3. Mode catalog
+## 3. What the user picks: an activity
 
-A **mode** is a preset over one shared engine (§4) — never a forked pipeline.
+> Revised 2026-07-28. This section used to be a **mode catalog**, and the modes
+> were shown to the user in a picker. They no longer are — see
+> [18-ACTIVITIES.md](./18-ACTIVITIES.md) for why that picker was deleted.
 
-| Mode | You are… | BrainCue… | Status |
-| --- | --- | --- | --- |
-| **Interview Copilot** | the candidate | detects questions, streams grounded answer cues | ✅ shipped (v1) |
-| **Practice** (mock + sparring) | rehearsing | plays interviewer with a TTS voice, coaches each answer | ✅ shipped (v1) |
-| **Interviewer Assist** | the one asking | suggests questions and follow-ups, tracks coverage, drafts the evaluation | 🔜 planned |
-| **Meeting Copilot** | a participant | quietly surfaces context, unanswered questions, action items | 🧪 shipped (Labs) |
-| **Tutor** | learning something | voice dialogue + drills grounded in any material you give it | 🔜 planned |
-| **Companion** | working / gaming / thinking | ambient presence with long-term memory; speaks when it should, stays silent when it shouldn't | 🧪 shipped (Labs) |
+A **mode** is a preset over one shared engine (§4) — never a forked pipeline —
+and it is now an *internal* concept. The user says what the call **is**; the
+mode follows from it. That collapse happened because choosing a mode and
+choosing a Space kind were the same question asked twice, and they could
+disagree.
 
-The voice/summon layer (push-to-talk, spoken replies with barge-in) and the
-review-first memory substrate shipped alongside — they are output/grounding
-surfaces over the one engine, not modes. Unbuilt modes stay visible as
-"Coming soon" in the pickers rather than hidden — the catalog itself markets
-the widening.
+| Activity | You are… | BrainCue… | Runs | Status |
+| --- | --- | --- | --- | --- |
+| **Meeting or call** | a participant | quietly surfaces context, unanswered questions, action items, decisions | `meeting` | 🧪 shipped (Labs) |
+| **Project discussion** | talking about ongoing work | recalls prior decisions and open threads | `meeting` | 🧪 shipped (Labs) |
+| **Interview** | the candidate | detects questions, streams grounded answer cues framed as you | `interview` | ✅ shipped (v1) |
+| **Study or tutoring** | learning something | surfaces the part of your material that bears on what was said | `meeting` → `tutor` | 🧪 partial |
+| **Personal** | dealing with your own life | keeps the background straight, catches what you agreed to | `meeting` | 🧪 shipped (Labs) |
+| **Game** · **Just me** | playing / working / thinking | ambient presence; speaks when it should, stays silent when it shouldn't | `companion` | 🧪 shipped (Labs) |
+| **Something else** | anything else | contributes only when confident | `meeting` | 🧪 shipped (Labs) |
+
+**Practice** (mock + sparring) is not an activity: it is preparation *for* an
+interview, in its own drill pages. It used to sit in the mode list, where
+picking it started nothing — it navigated away.
+
+Two modes are still unbuilt: **Interviewer Assist** (you are the one asking —
+question suggestions, coverage tracking, a drafted evaluation) and **Tutor**
+(voice dialogue and drills; `subject` runs `meeting` until it lands). An
+activity whose mode is off is **not offered** rather than silently downgraded —
+starting a standup as an interview is worse than not starting it — so the
+roadmap lives on Home's Labs strip instead of inside the picker you must answer
+to start.
+
+The voice/summon layer (push-to-talk, spoken replies with barge-in), session
+summaries, and the review-first memory substrate are output/grounding surfaces
+over the one engine, not modes.
 
 ## 4. One engine, many modes (the core bet)
 
@@ -80,10 +99,15 @@ the rule that keeps six modes maintainable instead of six forked products.
    always see what was heard and exactly what left the machine.
 4. **Silence is a feature** — an ambient agent is judged by when it *doesn't*
    speak; sensitivity is user-tunable and quiet is the default posture.
-5. **One engine, many modes** — modes are presets, not forks.
-6. **Memory belongs to the user** — visible, editable, deletable. Shipped
-   review-first: nothing is remembered silently; only memories the user
-   APPROVES in the Library are ever recalled.
+5. **One engine, many activities** — modes are presets, not forks, and the user
+   never picks one. They say what the call is; the mode is derived.
+6. **Continuity is scoped, and memory belongs to the user** — a conversation is
+   kept in the **Space** it happened in, or not at all, so the tenth standup is
+   grounded in the previous nine and one client's history can never ground
+   another's call. Long-term memory about the *person* is a separate promise:
+   off until consented, proposed rather than taken, and only ever recalled after
+   the user approves it in the Memory section — visible, editable, deletable.
+   See [16-CONTINUITY.md](./16-CONTINUITY.md).
 7. **Assist where allowed** — unchanged v1 ethics posture: no anti-proctoring,
    no evasion, persistent "use only where AI assistance is permitted" reminder.
 

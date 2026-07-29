@@ -68,8 +68,9 @@ import { createTestDb } from '../../test/dbHarness';
 import { memoriesRepo } from '../../db/repositories/memories.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
 import { extractMemoryCandidates, extractionSchema } from './extractor';
-import { approveMemory, updateMemory } from './memoryService';
-import { recallMemories } from './recall';
+import { approveMemory, createMemory, updateMemory } from './memoryService';
+import { buildIndex, hasExactAnchor, lexicalScore, tokenize } from './lexical';
+import { MEMORY_MIN_SCORE, recallMemories } from './recall';
 
 let seq = 0;
 const T0 = 1_700_000_000_000;
@@ -157,6 +158,16 @@ describe('extraction gates', () => {
     expect(h.chatCalls).toBe(0);
   });
 
+  it('a conversation with no Space extracts nothing — and is never sent to the model', async () => {
+    // A Space is where a conversation is kept; with none there is nowhere to
+    // put what it taught, so the transcript never leaves the machine either.
+    const pid = seedProfile();
+    const sid = seedSession(pid, null, ['We should meet weekly.', 'Agreed, Mondays work.']);
+    h.chatJson = candidates();
+    expect(await extractMemoryCandidates(sid)).toBe(0);
+    expect(h.chatCalls).toBe(0);
+  });
+
   it('a Space that opted out extracts nothing', async () => {
     const pid = seedProfile();
     const packId = seedPack(pid, 0);
@@ -168,7 +179,7 @@ describe('extraction gates', () => {
 
   it('saves only benign, confident candidates — as PENDING, with provenance', async () => {
     const pid = seedProfile();
-    const sid = seedSession(pid, null, ['I prefer bullet points.', 'Noted, concise it is.']);
+    const sid = seedSession(pid, seedPack(pid), ['I prefer bullet points.', 'Noted, concise it is.']);
     h.chatJson = candidates();
     expect(await extractMemoryCandidates(sid)).toBe(1); // floor-drop + sensitive-drop
     const rows = memoriesRepo.list({ profileId: pid });
@@ -177,6 +188,49 @@ describe('extraction gates', () => {
     expect(rows[0].sourceRefs).toEqual([{ type: 'session', id: sid }]);
     // The secret NEVER touched the database in any status.
     expect(rows.some((r) => r.content.includes('hunter2'))).toBe(false);
+  });
+
+  /**
+   * The prompt has to carry the keys, or supersede is unreachable in practice.
+   *
+   * `factKey` only supersedes when two extractions choose the SAME slug. Sent
+   * nothing but a transcript, the model picks a plausible one each time —
+   * `project:atlas/phase-two-start` on Tuesday and
+   * `project:atlas/phase-2-start-date` next Tuesday — and a near-miss key reads
+   * as a brand-new fact, so both values are remembered at once. Every test
+   * around supersede seeds the matching key by hand, so all of them pass while
+   * the real path never fires. This is the one that would notice.
+   */
+  it('tells the model which fact keys it already holds, so a changed value can replace one', async () => {
+    const pid = seedProfile();
+    const packId = seedPack(pid);
+    seedApproved(pid, 'Phase two of Atlas starts in September.', {
+      factKey: 'project:atlas/phase-two-start',
+    });
+    // A retired value must NOT be offered — naming it invites a revival.
+    const retired = seedApproved(pid, 'Phase two of Atlas starts in August.', {
+      factKey: 'project:atlas/phase-two-start-old',
+    });
+    memoriesRepo.supersede(retired, 'someone-else', T0);
+    // Free-text memories have no key and nothing to reuse.
+    seedApproved(pid, 'Prefers concise updates in standup.');
+
+    const sid = seedSession(pid, packId, [
+      'Legal need two more weeks.',
+      'So phase two moves to October.',
+    ]);
+    let prompt = '';
+    h.chatJson = async (req: { system: string; user: string }) => {
+      prompt = `${req.system}\n${req.user}`;
+      return { candidates: [] };
+    };
+    await extractMemoryCandidates(sid);
+
+    expect(prompt).toContain('project:atlas/phase-two-start = Phase two of Atlas starts in September.');
+    expect(prompt).not.toContain('project:atlas/phase-two-start-old');
+    expect(prompt).not.toContain('Prefers concise updates in standup.');
+    // And the instruction that makes the list mean something.
+    expect(prompt).toMatch(/reuse its factKey EXACTLY/i);
   });
 
   it('an invalid extraction shape stores nothing', async () => {
@@ -318,5 +372,391 @@ describe('scoped hybrid recall', () => {
     settingsRepo.set(SETTINGS_KEYS.memoryEnabled, '1');
     const off = seedPack(pid, 0);
     expect(await recallMemories(pid, 'concise bullets', off, T0)).toEqual([]);
+  });
+});
+
+/**
+ * Lexical scoring — the half of retrieval embeddings are bad at.
+ *
+ * fakeVec only encodes three topics, so a memory about a ticket id embeds to
+ * near-nothing — which is exactly the real-world case: identifiers, versions,
+ * and figures blur under embedding. These tests pin the behaviour that lets
+ * such a memory come back when the query names it.
+ */
+describe('lexical scoring', () => {
+  it('keeps identifiers whole AND splits them, and drops stopwords', () => {
+    const t = tokenize('What about ticket ATL-4471 for the v2.0.1 release?');
+    expect(t).toContain('atl-4471'); // whole identifier
+    expect(t).toContain('4471'); // …and its parts, for partial recall
+    expect(t).toContain('v2.0.1');
+    expect(t).not.toContain('the');
+    expect(t).not.toContain('what');
+  });
+
+  it('weights a rare token far above a common one', () => {
+    const corpus = [
+      'The team discussed the roadmap in the meeting.',
+      'The team discussed the roadmap again today.',
+      'The team discussed the roadmap at length.',
+      'Ticket ATL-4471 tracks the checkout regression.',
+    ];
+    const index = buildIndex(corpus);
+    const q = tokenize('ATL-4471');
+    expect(lexicalScore(q, corpus[3], index)).toBeGreaterThan(0.9);
+    expect(lexicalScore(q, corpus[0], index)).toBe(0);
+    // "roadmap" appears in three of four documents, so it discriminates little.
+    expect(index.idf.get('roadmap')!).toBeLessThan(index.idf.get('atl-4471')!);
+  });
+
+  it('anchors on rarity by document frequency, not corpus-size-dependent idf', () => {
+    // The same token must anchor in a 2-memory store and a 40-memory one; an
+    // absolute idf threshold silently stops working in small corpora.
+    const small = buildIndex([
+      'Ticket ATL-4471 tracks the checkout regression.',
+      'A note about teams.',
+    ]);
+    const large = buildIndex([
+      'Ticket ATL-4471 tracks the checkout regression.',
+      ...Array.from({ length: 39 }, (_, i) => `Routine note number ${i} about the weekly sync.`),
+    ]);
+    for (const index of [small, large]) {
+      expect(hasExactAnchor(tokenize('ATL-4471'), 'Ticket ATL-4471 tracks it', index)).toBe(true);
+    }
+    // A word the corpus repeats is not an anchor, however long: "note" appears
+    // in 39 of the 40 memories, so sharing it says nothing.
+    expect(
+      hasExactAnchor(tokenize('note'), 'Routine note number 5 about the weekly sync.', large),
+    ).toBe(false);
+    // Short words never anchor even when rare — "api" appears once here and
+    // still cannot pull a memory in on its own.
+    expect(hasExactAnchor(tokenize('api'), 'A note about the api.', small)).toBe(false);
+  });
+});
+
+describe('hybrid recall', () => {
+  // fakeVec maps text to a topic vector; anything with NO topic word lands on
+  // the same near-zero point, so two topicless strings score cosine 1.0 against
+  // each other. Every fixture below therefore carries a topic word, which is
+  // what makes "the semantic score is genuinely low" a real condition rather
+  // than an artifact.
+  it('recalls a memory the semantic floor alone would discard', async () => {
+    const pid = seedProfile();
+    // Topic 'stripe/api' — the query has no topic word, so their cosine is far
+    // below the floor. Exactly the real case: an identifier the embedding blurs.
+    seedApproved(pid, 'Ticket ATL-4471 tracks the stripe api checkout regression.');
+    seedApproved(pid, 'Prefers concise bullet answers in meetings.');
+    seedApproved(pid, 'The deadline for the quarterly report is Friday.');
+
+    const out = await recallMemories(pid, 'status of ATL-4471', null, T0);
+    expect(out).toHaveLength(1);
+    expect(out[0].content).toContain('ATL-4471');
+    expect(out[0].score).toBeLessThan(MEMORY_MIN_SCORE); // semantic alone would have dropped it
+  });
+
+  it('still ranks a strong semantic match first', async () => {
+    const pid = seedProfile();
+    seedApproved(pid, 'Prefers concise bullet answers in meetings.');
+    seedApproved(pid, 'Ticket ATL-4471 tracks the stripe api checkout regression.');
+
+    const out = await recallMemories(pid, 'concise bullet preference', null, T0);
+    expect(out[0].content).toContain('concise bullet');
+  });
+
+  it('does not surface a memory sharing only common words', async () => {
+    const pid = seedProfile();
+    seedApproved(pid, 'The team met about the stripe api plan.');
+    seedApproved(pid, 'The team met again about the stripe api plan.');
+
+    // No rare shared token, and the topic words differ → neither path fires.
+    const out = await recallMemories(pid, 'quarterly budget spreadsheet', null, T0);
+    expect(out).toEqual([]);
+  });
+
+  it('a lexically perfect match still needs the query to name something specific', async () => {
+    const pid = seedProfile();
+    // Every memory mentions the team and the plan, so those tokens are common
+    // in THIS corpus and single out nothing.
+    seedApproved(pid, 'The team agreed the plan for the stripe api rollout.');
+    seedApproved(pid, 'The team revisited the plan for the stripe api rollout.');
+    seedApproved(pid, 'The team signed off the plan for the stripe api work.');
+
+    // Lexically this is a *perfect* match — every query token is present — and
+    // semantically it is nowhere near. It must still return nothing: the
+    // lexical path exists to surface exact anchors (an id, a figure, a name),
+    // not to let a vague query drag in every memory that shares its filler.
+    expect(await recallMemories(pid, 'team plan', null, T0)).toEqual([]);
+  });
+});
+
+/**
+ * Supersession — the truthfulness guarantee (docs/14-MEMORY.md §4).
+ *
+ * The failure this prevents: a fact changes, both values sit in the store,
+ * both match the query, and the answer confidently states the old one. After
+ * this there is exactly ONE current row per fact key, and the previous value
+ * survives as history rather than as a competing truth.
+ */
+describe('supersession', () => {
+  const KEY = 'project:atlas/launch-date';
+
+  const pendingFact = (profileId: string, content: string, factKey: string | null = KEY) =>
+    memoriesRepo.insertCandidate({
+      profileId,
+      packId: null,
+      category: 'fact',
+      content,
+      confidence: 0.9,
+      importance: 0.7,
+      sourceRefs: [],
+      factKey,
+      sourceKind: 'extracted',
+    });
+
+  it('approving a new value retires the old one and promotes the revision', async () => {
+    const pid = seedProfile();
+    const oldId = seedApproved(pid, 'The launch deadline is March 3.', { factKey: KEY });
+    const newId = pendingFact(pid, 'The launch deadline moved to May 9.');
+
+    await approveMemory(newId);
+
+    const before = memoriesRepo.get(oldId)!;
+    const after = memoriesRepo.get(newId)!;
+    expect(before.supersededBy).toBe(newId);
+    expect(before.validTo).not.toBeNull();
+    expect(after.supersededBy).toBeNull();
+    expect(after.validTo).toBeNull();
+    expect(after.revision).toBe(before.revision + 1);
+    expect(memoriesRepo.currentByFactKey(pid, null, KEY)!.id).toBe(newId);
+  });
+
+  it('recall returns ONLY the current value — the stale fact is unreachable', async () => {
+    const pid = seedProfile();
+    seedApproved(pid, 'The launch deadline is March 3.', { factKey: KEY });
+    const newId = pendingFact(pid, 'The launch deadline moved to May 9.');
+    await approveMemory(newId);
+
+    const out = await recallMemories(pid, 'launch deadline', null, T0);
+    expect(out).toHaveLength(1);
+    expect(out[0].content).toContain('May 9');
+    expect(out.some((m) => m.content.includes('March 3'))).toBe(false);
+  });
+
+  it('keeps the superseded row as history, newest first, with its vector cleared', async () => {
+    const pid = seedProfile();
+    const oldId = seedApproved(pid, 'The launch deadline is March 3.', { factKey: KEY });
+    const newId = pendingFact(pid, 'The launch deadline moved to May 9.');
+    await approveMemory(newId);
+
+    const chain = memoriesRepo.history(pid, KEY);
+    expect(chain.map((m) => m.id)).toEqual([newId, oldId]);
+    const raw = memoriesRepo.recallRows(pid, null, T0);
+    expect(raw.some((r) => r.id === oldId)).toBe(false);
+  });
+
+  it('excludes a superseded row on the FILTER alone, vector intact', () => {
+    // The previous test passes for two independent reasons (the supersededBy
+    // filter AND the cleared vector), so it cannot prove the filter works.
+    // Here the row keeps a valid embedding and a null validTo, so supersededBy
+    // is the ONLY thing that can exclude it — drop that filter and this fails.
+    const pid = seedProfile();
+    const live = seedApproved(pid, 'The launch deadline is March 3.', { factKey: KEY });
+    const retired = seedApproved(pid, 'The launch deadline was January 8.', {
+      factKey: KEY,
+      supersededBy: live,
+    });
+
+    const rows = memoriesRepo.recallRows(pid, null, T0);
+    expect(rows.map((r) => r.id)).toEqual([live]);
+    expect(memoriesRepo.get(retired)!.supersededBy).toBe(live);
+  });
+
+  it('leaves free-text memories (no factKey) coexisting', async () => {
+    const pid = seedProfile();
+    seedApproved(pid, 'Prefers concise bullet answers.');
+    const second = pendingFact(pid, 'Prefers concise bullet summaries up front.', null);
+    await approveMemory(second);
+
+    const rows = memoriesRepo.recallRows(pid, null, T0);
+    expect(rows).toHaveLength(2); // nothing was retired
+    expect(rows.every((r) => r.supersededBy == null)).toBe(true);
+  });
+
+  it('surfaces a conflict for review instead of applying it', () => {
+    const pid = seedProfile();
+    const oldId = seedApproved(pid, 'The launch deadline is March 3.', { factKey: KEY });
+    const newId = pendingFact(pid, 'The launch deadline moved to May 9.');
+
+    const conflicts = memoriesRepo.conflicts(pid);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].candidate.id).toBe(newId);
+    expect(conflicts[0].current.id).toBe(oldId);
+    expect(memoriesRepo.get(oldId)!.supersededBy).toBeNull(); // nothing applied yet
+  });
+
+  it('scopes supersession per Space — a Space value never retires the global one', async () => {
+    const pid = seedProfile();
+    const pack = seedPack(pid);
+    const globalId = seedApproved(pid, 'The launch deadline is March 3.', { factKey: KEY });
+    const scoped = memoriesRepo.insertCandidate({
+      profileId: pid,
+      packId: pack,
+      category: 'fact',
+      content: 'For this Space the launch deadline is June 1.',
+      confidence: 0.9,
+      importance: 0.7,
+      sourceRefs: [],
+      factKey: KEY,
+    });
+    await approveMemory(scoped);
+
+    expect(memoriesRepo.get(globalId)!.supersededBy).toBeNull();
+    expect(memoriesRepo.currentByFactKey(pid, pack, KEY)!.id).toBe(scoped);
+    expect(memoriesRepo.currentByFactKey(pid, null, KEY)!.id).toBe(globalId);
+  });
+});
+
+describe('consolidation', () => {
+  const KEY = 'project:atlas/launch-date';
+
+  it('drops a re-stated identical fact and re-confirms the existing one', async () => {
+    const pid = seedProfile();
+    const existing = seedApproved(pid, 'The launch deadline is March 3.', {
+      factKey: KEY,
+      lastUsedAt: null,
+    });
+    const sid = seedSession(pid, seedPack(pid), ['We are still on for March 3.', 'Right, noted.']);
+    h.chatJson = async () => ({
+      candidates: [
+        {
+          category: 'fact',
+          // Same claim, different case/punctuation — normalization catches it.
+          content: 'the launch deadline is march 3',
+          scope: 'profile',
+          confidence: 0.9,
+          importance: 0.7,
+          factKey: KEY,
+        },
+      ],
+    });
+
+    expect(await extractMemoryCandidates(sid)).toBe(0); // nothing new stored
+    expect(memoriesRepo.list({ profileId: pid, status: 'pending' })).toHaveLength(0);
+    expect(memoriesRepo.get(existing)!.lastUsedAt).not.toBeNull(); // re-confirmed
+  });
+
+  it('stores a contradicting fact as pending — never auto-supersedes', async () => {
+    const pid = seedProfile();
+    const existing = seedApproved(pid, 'The launch deadline is March 3.', { factKey: KEY });
+    const sid = seedSession(pid, seedPack(pid), ['Deadline slipped.', 'It is May 9 now.']);
+    h.chatJson = async () => ({
+      candidates: [
+        {
+          category: 'fact',
+          content: 'The launch deadline moved to May 9.',
+          scope: 'profile',
+          confidence: 0.9,
+          importance: 0.8,
+          factKey: KEY,
+        },
+      ],
+    });
+
+    expect(await extractMemoryCandidates(sid)).toBe(1);
+    expect(memoriesRepo.get(existing)!.supersededBy).toBeNull(); // untouched
+    const pending = memoriesRepo.list({ profileId: pid, status: 'pending' });
+    expect(pending).toHaveLength(1);
+    expect(pending[0].factKey).toBe(KEY);
+  });
+
+  it('rejects a malformed factKey rather than storing a bad one', () => {
+    const parsed = extractionSchema.safeParse({
+      candidates: [
+        {
+          category: 'fact',
+          content: 'The launch deadline moved to May 9.',
+          scope: 'profile',
+          confidence: 0.9,
+          importance: 0.8,
+          factKey: 'Not A Valid Key',
+        },
+      ],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('still refuses to re-raise an exact restatement the user already answered', async () => {
+    // The keyed path handles a fact that CHANGED; this is the older guard for
+    // a fact that did not. A recurring meeting states the same things weekly,
+    // and re-proposing what was already rejected is what makes a review queue
+    // stop being read. Both must keep working — the keyed check runs first and
+    // must not shadow this one.
+    const pid = seedProfile();
+    seedApproved(pid, 'Prefers concise bullet answers.', { status: 'rejected' });
+    const sid = seedSession(pid, seedPack(pid), ['Bullets again please.', 'Sure.']);
+    h.chatJson = async () => ({
+      candidates: [
+        {
+          category: 'preference',
+          content: 'Prefers concise bullet answers.',
+          scope: 'profile',
+          confidence: 0.9,
+          importance: 0.5,
+        },
+      ],
+    });
+
+    expect(await extractMemoryCandidates(sid)).toBe(0);
+  });
+});
+
+describe('authoring', () => {
+  it('lands pending, marked authored, and is fully trusted', () => {
+    const pid = seedProfile();
+    const m = createMemory({
+      profileId: pid,
+      packId: null,
+      category: 'fact',
+      content: 'I report to Sarah Chen.',
+    });
+    // Pending, not approved: embedding happens at approval, and that is the
+    // step that needs a key and a network. Creating must work without either.
+    expect(m.status).toBe('pending');
+    expect(m.sourceKind).toBe('authored');
+    expect(m.confidence).toBe(1); // the user asserting it directly is the strongest signal
+  });
+
+  it('applies the same sensitive gate as anything the model proposed', () => {
+    const pid = seedProfile();
+    expect(() =>
+      createMemory({
+        profileId: pid,
+        packId: null,
+        category: 'fact',
+        content: 'My password is hunter2 for the staging box.',
+      }),
+    ).toThrow();
+    // Refused outright — not stored in any status for later review.
+    expect(memoriesRepo.list({ profileId: pid })).toHaveLength(0);
+  });
+
+  it('becomes recallable once approved, like any other memory', async () => {
+    const pid = seedProfile();
+    const m = createMemory({
+      profileId: pid,
+      packId: null,
+      category: 'preference',
+      content: 'Prefers concise bullet answers in meetings.',
+    });
+    expect(await recallMemories(pid, 'concise bullet answers', null, T0)).toEqual([]); // pending
+    await approveMemory(m.id);
+    const out = await recallMemories(pid, 'concise bullet answers', null, T0);
+    expect(out.map((x) => x.id)).toEqual([m.id]);
+  });
+
+  it('refuses an empty memory', () => {
+    const pid = seedProfile();
+    expect(() =>
+      createMemory({ profileId: pid, packId: null, category: 'fact', content: '  ' }),
+    ).toThrow();
   });
 });

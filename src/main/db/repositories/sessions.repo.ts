@@ -1,4 +1,4 @@
-import { asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { db, schema } from '../index';
 import type {
   AiAnswer,
@@ -16,6 +16,7 @@ const toSession = (r: typeof schema.sessions.$inferSelect): Session => ({
   id: r.id,
   profileId: r.profileId,
   jobId: r.packId, // shared field name kept for IPC compatibility
+  activity: r.activity as Session['activity'],
   mode: r.mode as Session['mode'],
   kind: r.kind as Session['kind'],
   interviewType: r.interviewType as Session['interviewType'],
@@ -47,14 +48,23 @@ const toReport = (r: typeof schema.sessionReports.$inferSelect): SessionReport =
 });
 
 export const sessionsRepo = {
-  /** Sessions with job (title/company) + profile name + a per-question type
-   *  breakdown, newest first. */
-  list(): SessionListItem[] {
+  /**
+   * Sessions with job (title/company) + profile name + a per-question type
+   * breakdown, newest first.
+   *
+   * Scoped to ONE profile. It used to return every session in the database,
+   * which was invisible while there was one profile and wrong the moment there
+   * were two: Sessions and Insights showed other people's conversations, and
+   * the practice averages on Insights mixed them together. `profileId` is
+   * optional only for the callers that genuinely mean everything (data stats).
+   */
+  list(profileId?: string): SessionListItem[] {
     const rows = db()
       .select({
         id: schema.sessions.id,
         profileId: schema.sessions.profileId,
         jobId: schema.sessions.packId,
+        activity: schema.sessions.activity,
         mode: schema.sessions.mode,
         kind: schema.sessions.kind,
         interviewType: schema.sessions.interviewType,
@@ -69,6 +79,7 @@ export const sessionsRepo = {
       .from(schema.sessions)
       .leftJoin(schema.contextPacks, eq(schema.contextPacks.id, schema.sessions.packId))
       .leftJoin(schema.profiles, eq(schema.profiles.id, schema.sessions.profileId))
+      .where(profileId ? eq(schema.sessions.profileId, profileId) : undefined)
       .orderBy(desc(schema.sessions.createdAt))
       .all();
 
@@ -94,6 +105,7 @@ export const sessionsRepo = {
       id: r.id,
       profileId: r.profileId,
       jobId: r.jobId,
+      activity: r.activity as Session['activity'],
       mode: r.mode as Session['mode'],
       kind: r.kind as Session['kind'],
       interviewType: r.interviewType as Session['interviewType'],
@@ -199,7 +211,23 @@ export const sessionsRepo = {
     return this.getReport(report.sessionId)!;
   },
 
+  /**
+   * Drop a session's retrievable archive (docs/16-CONTINUITY.md).
+   *
+   * `chunks.source_id` is a plain column, not a foreign key, so SQLite cannot
+   * cascade this for us — and an archive that outlives its session would keep
+   * grounding answers in a conversation the user deleted. Embeddings DO cascade
+   * from `chunks`, so the vector goes with it.
+   */
+  deleteArchive(sessionId: string): void {
+    db()
+      .delete(schema.chunks)
+      .where(and(eq(schema.chunks.sourceType, 'session'), eq(schema.chunks.sourceId, sessionId)))
+      .run();
+  },
+
   delete(id: string): void {
+    this.deleteArchive(id); // must go first: deleting the session loses the id
     db().delete(schema.sessions).where(eq(schema.sessions.id, id)).run();
   },
 
@@ -223,10 +251,41 @@ export const sessionsRepo = {
     );
   },
 
+  /** How many transcript turns were captured — the save prompt says so, because
+   *  "keep this conversation?" deserves an answer to "was there one?". */
+  turnCount(id: string): number {
+    return (
+      db()
+        .select({ c: sql<number>`count(*)` })
+        .from(schema.transcriptChunks)
+        .where(eq(schema.transcriptChunks.sessionId, id))
+        .get()?.c ?? 0
+    );
+  },
+
   /** Practice Loop aggregates over every sparring drill's per-answer coaching
    *  (answer_feedback ⨝ sessions kind='sparring'). Small local data — computed
    *  in one pass, no pagination needed. */
-  practiceStats(): PracticeStats {
+  /** Practice trend + per-competency averages. Scoped like `list` — an average
+   *  across two people's rehearsals describes neither of them. */
+  /**
+   * File a finished session into a Space (or out of every Space, with null).
+   *
+   * "Keep this?" is also "keep it WHERE?" — a call you did not set a Space for
+   * often turns out to belong to one, and the Space is what makes the archive
+   * and its memories reachable from the next call in that context. Filing has
+   * to happen BEFORE the archive is written, since both are scoped from this
+   * column.
+   */
+  setPack(sessionId: string, packId: string | null): void {
+    db()
+      .update(schema.sessions)
+      .set({ packId })
+      .where(eq(schema.sessions.id, sessionId))
+      .run();
+  },
+
+  practiceStats(profileId?: string): PracticeStats {
     const rows = db()
       .select({
         sessionId: schema.answerFeedback.sessionId,
@@ -236,7 +295,11 @@ export const sessionsRepo = {
       })
       .from(schema.answerFeedback)
       .innerJoin(schema.sessions, eq(schema.sessions.id, schema.answerFeedback.sessionId))
-      .where(eq(schema.sessions.kind, 'sparring'))
+      .where(
+        profileId
+          ? and(eq(schema.sessions.kind, 'sparring'), eq(schema.sessions.profileId, profileId))
+          : eq(schema.sessions.kind, 'sparring'),
+      )
       .orderBy(asc(schema.sessions.createdAt), asc(schema.answerFeedback.createdAt))
       .all();
 
@@ -284,8 +347,10 @@ export const sessionsRepo = {
     return { total: rows.length, live: rows.filter((r) => r.status === 'live').length };
   },
 
-  /** Delete every session (and its cascaded transcript/questions/answers/report). */
+  /** Delete every session (and its cascaded transcript/questions/answers/report),
+   *  together with every conversation archive — those do not cascade. */
   deleteAll(): void {
+    db().delete(schema.chunks).where(eq(schema.chunks.sourceType, 'session')).run();
     db().delete(schema.sessions).run();
   },
 };

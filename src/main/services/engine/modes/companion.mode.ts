@@ -178,7 +178,7 @@ async function buildCard(
   }
 
   // Context card: only exists when retrieval finds something to stand on.
-  const chunks = await ground(ctx.profileId, ctx.turnText, ctx.packId);
+  const chunks = await ground(ctx.profileId, ctx.turnText, ctx.packId, 'companion');
   if (chunks.length === 0) return null;
   const numbered = chunks
     .map((c, i) => `[${i + 1}] (${c.sourceType}) ${c.content.slice(0, 500)}`)

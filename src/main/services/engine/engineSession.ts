@@ -289,7 +289,7 @@ export class EngineSession {
     try {
       // Retrieval (an embeddings call) is INSIDE the try so a failure here is
       // surfaced + un-wedges the card too — not just generate failures.
-      context = await ground(profile.id, questionText, session.packId);
+      context = await ground(profile.id, questionText, session.packId, this.mode.id);
       // Approved memory joins the grounding (consent-gated; [] when off —
       // recall never throws). Cited separately from documents as [M1]….
       memories = await recallMemories(profile.id, questionText, session.packId);
