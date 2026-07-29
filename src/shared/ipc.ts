@@ -53,7 +53,11 @@ export const IPC = {
     page: 'jobs:page',
     get: 'jobs:get',
     save: 'jobs:save', // create or update + parse + index
-    setNotes: 'jobs:set-notes', // update just the client notes (no re-parse)
+    setNotes: 'jobs:set-notes',
+    // Rewrite the profile's résumé against THIS Space's JD and keep it here,
+    // as one of the Space's documents. Interview Spaces only.
+    tailorResume: 'jobs:tailor-resume',
+    clearTailoredResume: 'jobs:clear-tailored-resume', // update just the client notes (no re-parse)
     setCompanionPrefs: 'jobs:set-companion-prefs', // per-Space companion overrides (no re-parse)
     brief: 'jobs:brief', // generate a grounded pre-interview prep brief
     delete: 'jobs:delete',

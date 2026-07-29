@@ -117,12 +117,17 @@ export async function indexJob(jobId: string): Promise<{ chunks: number; embedde
   const sources: { type: 'jd' | 'company' | 'tailored'; text: string }[] = [];
   if (job.jdText) sources.push({ type: 'jd', text: job.jdText });
   if (job.companyResearch) sources.push({ type: 'company', text: job.companyResearch });
-  // An application-owned job also indexes its TAILORED resume (job-scoped), which
-  // replaces the base resume in retrieval for this job's sessions (see vectorStore).
-  // Indexed here — inside indexJob's single clear-and-reinsert pass — so jd/company/
-  // tailored chunks never wipe each other.
-  const app = applicationsRepo.getByJobId(jobId);
-  if (app?.tailoredResume) sources.push({ type: 'tailored', text: app.tailoredResume });
+  // The TAILORED résumé, indexed pack-scoped so it substitutes for the base
+  // résumé while grounding THIS Space's interviews (see vectorStore, and
+  // docs/20-QUARANTINE.md §4 for why that substitution is mode-gated).
+  // Indexed here — inside indexJob's single clear-and-reinsert pass — so
+  // jd/company/tailored chunks never wipe each other.
+  //
+  // The Space's own column wins. The applications table is the legacy source:
+  // each application owned a hidden pack, which is exactly the coupling that
+  // made a tailored résumé unattachable to a Space the user actually has.
+  const tailored = job.tailoredResume ?? applicationsRepo.getByJobId(jobId)?.tailoredResume ?? null;
+  if (tailored) sources.push({ type: 'tailored', text: tailored });
   if (sources.length === 0) return { chunks: 0, embedded: 0 };
 
   const rows: { id: string; content: string }[] = [];

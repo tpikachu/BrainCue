@@ -347,6 +347,8 @@ export default function SettingsPage() {
 
       <UpdatesCard />
 
+      <AdvancedCard settings={settings} onSaved={load} />
+
       <DangerZoneCard onChanged={load} />
     </Page>
   );
@@ -552,6 +554,63 @@ function UpdatesCard() {
 
 /** Destructive actions. Both are confirmed by a native dialog in the main process,
  *  so nothing is wiped without explicit consent. */
+/**
+ * Advanced — the DB Explorer switch.
+ *
+ * Separate from the Danger zone on purpose: nothing here destroys anything, so
+ * filing it under "irreversible" would either scare people off a legitimate
+ * support tool or teach them to ignore that heading. The warning is about what
+ * the tool SHOWS, not about damage it does — it reads every table raw,
+ * including transcripts and memory, with no redaction.
+ */
+function AdvancedCard({
+  settings,
+  onSaved,
+}: {
+  settings: AppSettings;
+  onSaved: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const on = !!settings.devDbExplorer;
+
+  const toggle = async (next: boolean) => {
+    setBusy(true);
+    try {
+      await api.settings.set({ devDbExplorer: next });
+      await onSaved();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="mt-5">
+      <div className="mb-1 flex items-center justify-between">
+        <h3 className="font-medium">Advanced</h3>
+        <Badge tone="neutral">for troubleshooting</Badge>
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm text-neutral-200">Show the DB Explorer</p>
+          <p className="mt-0.5 text-xs text-neutral-500">
+            Adds a sidebar entry that browses this machine’s database directly — every table, raw
+            and unredacted, including full transcripts and everything in Memory. It is a support
+            tool for diagnosing a problem, not a feature: turn it on if you have been asked to, or
+            if you know what you are looking for. Nothing here is edited or deleted by viewing it.
+          </p>
+        </div>
+        <Switch
+          checked={on}
+          onChange={(v) => void toggle(v)}
+          disabled={busy}
+          onLabel="Shown"
+          offLabel="Hidden"
+        />
+      </div>
+    </Card>
+  );
+}
+
 function DangerZoneCard({ onChanged }: { onChanged: () => Promise<void> }) {
   const [busy, setBusy] = useState<'reset' | 'wipe' | null>(null);
   const [status, setStatus] = useState<string | null>(null);

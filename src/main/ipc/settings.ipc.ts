@@ -55,6 +55,7 @@ function readSettings(): AppSettings {
     // ran, from transcripts already stored locally — a much smaller step than
     // memory, which extracts standing claims about the person.
     sessionArchiveEnabled: settingsRepo.get(SETTINGS_KEYS.sessionArchiveEnabled) !== '0',
+    devDbExplorer: settingsRepo.get(SETTINGS_KEYS.devDbExplorer) === '1', // support tool: OFF unless asked for
     // Whose dashboard this is. Validated against the real rows: a profile can
     // be deleted from under the pointer, and a dangling id would leave every
     // surface silently empty rather than falling back to a profile that exists.
@@ -87,6 +88,7 @@ const settingsPatch = z.object({
   dataConsentAck: z.boolean().optional(),
   memoryEnabled: z.boolean().optional(),
   sessionArchiveEnabled: z.boolean().optional(),
+  devDbExplorer: z.boolean().optional(),
   activeProfileId: z.string().min(1).nullable().optional(),
   companionPrefs: z
     .object({
@@ -150,6 +152,8 @@ export function registerSettingsIpc(): void {
       );
     if (patch.companionPrefs)
       settingsRepo.setJson(SETTINGS_KEYS.companionPrefs, patch.companionPrefs);
+    if (patch.devDbExplorer !== undefined)
+      settingsRepo.set(SETTINGS_KEYS.devDbExplorer, patch.devDbExplorer ? '1' : '0');
     if (patch.tourDone !== undefined)
       settingsRepo.set(SETTINGS_KEYS.tourDone, patch.tourDone ? '1' : '0');
     return readSettings();

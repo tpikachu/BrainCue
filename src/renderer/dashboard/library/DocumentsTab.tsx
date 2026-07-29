@@ -102,6 +102,10 @@ export function DocumentsTab() {
                     <span className="flex shrink-0 gap-1.5">
                       {s.parsedJd ? <Badge tone="green">JD ✓</Badge> : <Badge tone="amber">no JD</Badge>}
                       {s.parsedCompany && <Badge tone="blue">company ✓</Badge>}
+                      {/* A tailored résumé is a document OF the Space, so it is
+                          listed with the Space's other documents rather than
+                          hidden inside the editor that produced it. */}
+                      {s.tailoredResume && <Badge tone="blue">tailored résumé ✓</Badge>}
                     </span>
                   </li>
                 ))}

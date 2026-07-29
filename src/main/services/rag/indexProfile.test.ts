@@ -48,10 +48,11 @@ vi.mock('../../providers/registry', () => ({
   }),
 }));
 
+import { eq } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import { createTestDb } from '../../test/dbHarness';
 import { profilesRepo } from '../../db/repositories/profiles.repo';
-import { reindexProfile } from './indexProfile';
+import { indexJob, reindexProfile } from './indexProfile';
 import { EMPTY_PROFILE_ABOUT, PROFILE_ABOUT_FIELDS } from '@shared/types';
 
 let seq = 0;
@@ -147,5 +148,59 @@ describe('“about you” is indexed so it can actually ground an answer', () =>
     profilesRepo.update(pid, { about: { ...EMPTY_PROFILE_ABOUT, role: '' } });
     await reindexProfile(pid);
     expect(chunksOf(pid, 'profile')).toHaveLength(0);
+  });
+});
+
+/**
+ * A tailored résumé is a document OF a Space.
+ *
+ * It used to live only on an `application`, which owned a hidden pack of its
+ * own — so it could never be attached to a Space the user actually had, and
+ * "tailor my résumé for this interview" was unexpressible. Now the Space
+ * carries it, and indexJob is what makes it groundable.
+ */
+describe('a Space carries its own tailored résumé', () => {
+  function seedSpace(profileId: string, over: Partial<typeof schema.contextPacks.$inferInsert> = {}) {
+    const id = `idx-j${++seq}`;
+    h.db
+      .insert(schema.contextPacks)
+      .values({ id, profileId, kind: 'job', title: 'Staff PM', jdText: 'Own the roadmap.', ...over })
+      .run();
+    return id;
+  }
+
+  it('indexes it pack-scoped, alongside the JD rather than instead of it', async () => {
+    const pid = seedProfile();
+    const space = seedSpace(pid, { tailoredResume: 'Sam — rewritten for the Staff PM role.' });
+
+    await indexJob(space);
+
+    const tailored = chunksOf(pid, 'tailored');
+    expect(tailored.length).toBeGreaterThan(0);
+    // Scoped to the Space: this is what keeps one role's rewrite out of every
+    // other conversation the profile has.
+    expect(tailored.every((c) => c.packId === space)).toBe(true);
+    expect(chunksOf(pid, 'jd').length).toBeGreaterThan(0); // the single pass keeps both
+  });
+
+  it('writes none when the Space has not been tailored', async () => {
+    const pid = seedProfile();
+    await indexJob(seedSpace(pid));
+    expect(chunksOf(pid, 'tailored')).toHaveLength(0);
+  });
+
+  it('removing it clears the chunks on the next index', async () => {
+    const pid = seedProfile();
+    const space = seedSpace(pid, { tailoredResume: 'Sam — rewritten for the Staff PM role.' });
+    await indexJob(space);
+    expect(chunksOf(pid, 'tailored').length).toBeGreaterThan(0);
+
+    h.db
+      .update(schema.contextPacks)
+      .set({ tailoredResume: null })
+      .where(eq(schema.contextPacks.id, space))
+      .run();
+    await indexJob(space);
+    expect(chunksOf(pid, 'tailored')).toHaveLength(0);
   });
 });

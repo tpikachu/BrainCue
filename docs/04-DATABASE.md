@@ -72,6 +72,7 @@ A Context Pack. One profile → many packs; each parsed/indexed independently.
 | jd_url | text | nullable — optional link to the original posting (reference only; not parsed) |
 | jd_text | text | nullable — JD text that is parsed + embedded |
 | parsed_jd | text(json) | structured JD JSON |
+| tailored_resume | text | nullable (0016) — the profile's résumé rewritten against THIS Space's JD. A document of the Space, like the JD beside it: indexed pack-scoped as `tailored` chunks, and it stands in for the base résumé only while grounding this Space's interviews. Replaces the old shape where a tailored résumé lived on an `application` that owned a hidden pack, so it could never attach to a Space the user had |
 | company_url | text | nullable — optional company website to research |
 | company_research | text | nullable — readable text scraped from the company site (parsed + embedded as `company` chunks) |
 | parsed_company | text(json) | nullable — structured interview-relevant research |

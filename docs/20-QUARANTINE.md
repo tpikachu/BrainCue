@@ -19,11 +19,21 @@ that must actually stop has to be gated on its own terms, in main. That is why
 the two rules below are expressed as retrieval conditions rather than as flag
 checks.
 
-## 2. `jobSearch` — Tailor Resume + the applications table
+## 2. `jobSearch` — the Tailor Resume *page* + the applications table
 
-Off. Tailor Resume belongs to the interview-copilot product; leading with it
-misrepresents what BrainCue now is. Tables, IPC, repositories, and pages are
-intact and users' rows are untouched.
+Off. The standalone page and the applications table belong to the
+interview-copilot product; leading with them misrepresents what BrainCue now
+is. Tables, IPC, repositories, and pages are intact and users' rows are
+untouched.
+
+**Tailoring itself came back, in the right place.** An interview Space now
+carries its own `tailored_resume` (migration 0016), produced from that Space's
+JD via `jobs:tailor-resume` and offered in the Space editor under the JD it
+tailors against. That is the shape the old design could not express: an
+application owned a *hidden* pack, so a tailored résumé could never attach to a
+Space the user actually had, and the only entry point navigated to `/tailor`
+carrying no Space at all. What stays off is the page, the applications table,
+and the separate résumé×JD workflow around them.
 
 **Known problems if it is flipped back**, all found by audit rather than by
 use, because nothing renders these surfaces and no test covers the flag:

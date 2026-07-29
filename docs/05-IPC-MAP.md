@@ -92,6 +92,8 @@ brief). Physical table/column names stay `jobs`/`job_id`; the rename is logical.
 | `jobs:get` | `{ id }` | `Job` |
 | `jobs:save` | `{ id?, profileId, kind?, title, company, jdUrl, jdText, companyUrl, notes }` | `{ job, keyMissing, embedded, companyResearched, companyError }` (create or update; parses JD + indexes when a key exists. `jdUrl` is reference-only. If `companyUrl` is set, best-effort scrapes + parses the company site into `parsed_company` and indexes it as `company` chunks; failures surface in `companyError`, not as an error) |
 | `jobs:set-notes` | `{ id, notes }` | `{ job }` (updates the free-form client notes) |
+| `jobs:tailor-resume` | `{ id }` | `{ job, embedded, indexError }` (interview Spaces only. Rewrites the profile's résumé against THIS Space's `jd_text` and stores it on the Space as `tailored_resume`. The model call runs BEFORE any write, so a failure leaves the Space untouched; indexing is best-effort after, so an embedding hiccup never loses the paid text — `indexError` set means saved-but-not-searchable, and re-saving the Space retries) |
+| `jobs:clear-tailored-resume` | `{ id }` | `{ job }` (drops it and re-indexes; this Space's interviews fall back to the base résumé) |
 | `jobs:brief` | `{ id }` (refuses for non-`job` Spaces — a prep brief predicts interview questions) | `InterviewBrief` (grounded pre-interview prep brief from the profile's parsed résumé × the job's parsed JD × parsed company research — likely questions, coverage gaps, strengths, company angles. Not persisted; regenerated on demand. Throws a guidance error if the key, parsed résumé, or parsed JD is missing) |
 | `jobs:delete` | `{ id }` | `{ deleted: true }` |
 

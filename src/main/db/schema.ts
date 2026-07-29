@@ -76,6 +76,12 @@ export const contextPacks = sqliteTable(
     companyUrl: text('company_url'), // optional company website to research
     companyResearch: text('company_research'), // raw text scraped from the site
     parsedCompany: text('parsed_company'), // json — structured interview-relevant research
+    // The profile's résumé rewritten against THIS Space's job description.
+    // A Space-level document like the JD beside it: it belongs to the role you
+    // are interviewing for, is indexed pack-scoped, and substitutes for the
+    // base résumé only while grounding this Space's interviews
+    // (docs/20-QUARANTINE.md §4). Null = never tailored.
+    tailoredResume: text('tailored_resume'),
     notes: text('notes'), // free-form client notes (shown when selecting + in the Cue Card)
     // Per-Space memory opt-out (only meaningful while the GLOBAL memory
     // consent is on): sessions in a disabled Space neither extract nor

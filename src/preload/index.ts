@@ -133,6 +133,14 @@ const api = {
     setCompanionPrefs: (id: string, prefs: CompanionSpaceOverrides | null) =>
       invoke(IPC.jobs.setCompanionPrefs, { id, prefs }),
     brief: (id: string) => invoke<InterviewBrief>(IPC.jobs.brief, { id }),
+    /** Rewrite this profile's résumé against this Space's JD and keep it here.
+     *  `indexError` set = the text is saved but not searchable yet. */
+    tailorResume: (id: string) =>
+      invoke<{ job: Job; embedded: number; indexError: string | null }>(IPC.jobs.tailorResume, {
+        id,
+      }),
+    clearTailoredResume: (id: string) =>
+      invoke<{ job: Job }>(IPC.jobs.clearTailoredResume, { id }),
     delete: (id: string) => invoke(IPC.jobs.delete, { id }),
   },
   applications: {

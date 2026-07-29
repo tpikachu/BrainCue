@@ -1,0 +1,1 @@
+ALTER TABLE `jobs` ADD `tailored_resume` text;

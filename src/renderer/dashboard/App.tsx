@@ -71,10 +71,13 @@ const PROFILE_NAV = [
   { to: '/reports', label: 'Insights', Icon: ReportIcon, tour: 'nav-reports' },
 ];
 
-const APP_NAV = [
+/** `showDb`: the DB Explorer reads every table raw, so it is a support tool
+ *  rather than a feature — always present in a dev build, and in a packaged one
+ *  only after the user turns it on in Settings. */
+const appNav = (showDb: boolean) => [
   { to: '/profiles', label: 'Profiles', Icon: UserIcon, tour: 'nav-profiles' },
   { to: '/settings', label: 'Settings', Icon: SettingsIcon, tour: 'nav-settings' },
-  ...(DEV ? [{ to: '/dev', label: 'DB Explorer', Icon: DatabaseIcon, tour: 'nav-dev' }] : []),
+  ...(showDb ? [{ to: '/dev', label: 'DB Explorer', Icon: DatabaseIcon, tour: 'nav-dev' }] : []),
 ];
 
 // Pages launched from Home's activity/tool cards. They have no sidebar entry
@@ -176,7 +179,7 @@ export default function App() {
 
         <nav aria-label="App" className="mt-6 space-y-1 border-t border-white/5 pt-4">
           <NavGroupLabel>App</NavGroupLabel>
-          {APP_NAV.map((n) => (
+          {appNav(DEV || !!settings?.devDbExplorer).map((n) => (
             <NavItem key={n.to} item={n} homeActive={false} />
           ))}
         </nav>
@@ -225,7 +228,11 @@ export default function App() {
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/whats-new" element={<WhatsNewPage />} />
             <Route path="/help" element={<HelpPage />} />
-            {DEV && <Route path="/dev" element={<DevDbExplorerPage />} />}
+            {/* Same condition as the nav entry, or the sidebar would offer a
+                link that redirects — and a stale deep-link would 404. */}
+            {(DEV || settings?.devDbExplorer) && (
+              <Route path="/dev" element={<DevDbExplorerPage />} />
+            )}
           </Routes>
         </div>
       </main>

@@ -462,6 +462,10 @@ export interface ContextPack {
   companyUrl: string | null;
   companyResearch: string | null;
   parsedCompany: ParsedCompany | null;
+  /** This profile's résumé rewritten against THIS Space's JD — a document of
+   *  the Space, like the JD beside it. Indexed pack-scoped, and it stands in
+   *  for the base résumé only while grounding this Space's interviews. */
+  tailoredResume: string | null;
   notes: string | null; // free-form client notes (user-facing, shown in setup + Cue Card)
   /** Per-Space memory opt-out (matters only while global memory consent is on). */
   memoryEnabled: boolean;
@@ -670,6 +674,10 @@ export interface AppSettings {
    *  default budget). */
   companionPrefs: CompanionPrefs;
   tourDone: boolean; // first-run guided tour completed/skipped
+  /** Show the raw DB Explorer in the sidebar. OFF by default and off in
+   *  packaged builds unless asked for: it reads every table directly, so it is
+   *  a support/debugging tool, not a feature. Always on in a dev build. */
+  devDbExplorer: boolean;
   shortcuts: Record<string, string>; // effective global-shortcut accelerators per action
   shortcutDefaults: Record<string, string>; // built-in default accelerator per action
 }

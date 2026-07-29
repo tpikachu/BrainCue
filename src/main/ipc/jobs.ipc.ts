@@ -6,6 +6,7 @@ import { jobsRepo } from '../db/repositories/jobs.repo';
 import { profilesRepo } from '../db/repositories/profiles.repo';
 import { parseCompany, parseJobDescription } from '../services/openai/parsing';
 import { generateBrief } from '../services/openai/brief';
+import { tailorApplication } from '../services/openai/tailor';
 import { fetchCompanySite } from '../services/documents/companyResearch';
 import { indexJob } from '../services/rag/indexProfile';
 import { apiKeyStore } from '../services/security/apiKey';
@@ -150,6 +151,64 @@ export function registerJobsIpc(): void {
       jd: job.parsedJd,
       companyResearch: job.parsedCompany,
     });
+  });
+
+  /**
+   * Tailor the profile's résumé to THIS Space's job description, and keep the
+   * result on the Space.
+   *
+   * A tailored résumé is a document about one role at one company, so it
+   * belongs to the Space that already holds that role's JD — not to a separate
+   * hidden pack the user never sees, which was the old shape and the reason
+   * "tailor for this Space" could not be expressed at all.
+   *
+   * The model call runs BEFORE any write, so a failure leaves the Space exactly
+   * as it was. Indexing is best-effort afterwards: the text is the paid result
+   * and must survive an embedding hiccup, and re-saving the Space re-indexes.
+   */
+  handle(IPC.jobs.tailorResume, zId, async ({ id }) => {
+    const job = jobsRepo.get(id);
+    if (!job) throw new Error('Space not found.');
+    if (!isInterviewSpace(job.kind))
+      throw new Error('Tailoring a résumé only applies to interview Spaces.');
+    if (!apiKeyStore.isPresent())
+      throw new Error('Add your OpenAI API key in Settings to tailor a résumé.');
+    if (!job.jdText?.trim())
+      throw new Error('Add this Space’s job description first — there is nothing to tailor to.');
+    const profile = profilesRepo.get(job.profileId);
+    if (!profile?.resumeText?.trim())
+      throw new Error('This profile has no résumé yet — add one on the profile first.');
+
+    const result = await tailorApplication({
+      baseResume: profile.resumeText,
+      jdText: job.jdText,
+      questions: [],
+    });
+    const saved = jobsRepo.update(id, { tailoredResume: result.tailoredResume });
+
+    let embedded = 0;
+    let indexError: string | null = null;
+    try {
+      ({ embedded } = await indexJob(id));
+    } catch (e) {
+      indexError = (e as Error).message;
+      log.warn('tailor: indexing failed, text kept', { jobId: id });
+    }
+    return { job: saved, embedded, indexError };
+  });
+
+  /** Drop it. The Space keeps its JD; sessions fall back to the base résumé on
+   *  the next re-index, which this triggers. */
+  handle(IPC.jobs.clearTailoredResume, zId, async ({ id }) => {
+    const job = jobsRepo.get(id);
+    if (!job) throw new Error('Space not found.');
+    const saved = jobsRepo.update(id, { tailoredResume: null });
+    try {
+      await indexJob(id);
+    } catch {
+      /* the column is already cleared; stale chunks go on the next re-index */
+    }
+    return { job: saved };
   });
 
   handle(IPC.jobs.delete, zId, ({ id }) => {

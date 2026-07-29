@@ -48,6 +48,12 @@ export function JobFormModal({
   const [fetching, setFetching] = useState(false);
   const [jdNotice, setJdNotice] = useState<Notice>(null);
   const [notice, setNotice] = useState<Notice>(null);
+  // The tailored résumé lives on the Space, so it is loaded from and written
+  // back to the row rather than held in `form` — it is produced by a model
+  // call, not typed, and must survive without the user pressing Save.
+  const [tailored, setTailored] = useState<string | null>(null);
+  const [tailoring, setTailoring] = useState(false);
+  const [tailorNotice, setTailorNotice] = useState<Notice>(null);
 
   // Reset the form to the (edited) job each time the modal opens.
   useEffect(() => {
@@ -62,6 +68,8 @@ export function JobFormModal({
     });
     setKind((job?.kind as ContextPackKind) ?? initialKind ?? DEFAULT_ACTIVITY);
     setCompanion(job?.companionPrefs ?? {});
+    setTailored(job?.tailoredResume ?? null);
+    setTailorNotice(null);
     setJdNotice(null);
     setNotice(null);
   }, [open, job?.id]);
@@ -134,6 +142,59 @@ export function JobFormModal({
       setNotice({ tone: 'err', text: (e as Error).message });
     } finally {
       setSaving(false);
+    }
+  };
+
+  /**
+   * Tailor against this Space's JD.
+   *
+   * Saves the Space first when the JD in the box has not been persisted yet:
+   * main tailors against the STORED jdText, so tailoring an unsaved edit would
+   * quietly use the previous version and produce a résumé for the wrong role.
+   */
+  const tailorResume = async () => {
+    if (!job?.id) return;
+    setTailoring(true);
+    setTailorNotice(null);
+    try {
+      if ((job.jdText ?? '') !== form.jdText.trim()) {
+        const res = await api.jobs.save({
+          id: job.id,
+          profileId,
+          kind,
+          title: form.title.trim() || copy.titleLabel,
+          company: form.company.trim() || null,
+          jdUrl: form.jdUrl.trim() || null,
+          jdText: form.jdText.trim() || null,
+          companyUrl: form.companyUrl.trim() || null,
+          notes: form.notes.trim() || null,
+        });
+        onSaved(res.job as Job);
+      }
+      const { job: saved, indexError } = await api.jobs.tailorResume(job.id);
+      setTailored(saved.tailoredResume);
+      onSaved(saved);
+      setTailorNotice(
+        indexError
+          ? { tone: 'err', text: `Written, but indexing failed — re-save this Space to retry.` }
+          : { tone: 'ok', text: 'Tailored and indexed for this Space.' },
+      );
+    } catch (e) {
+      setTailorNotice({ tone: 'err', text: (e as Error).message });
+    } finally {
+      setTailoring(false);
+    }
+  };
+
+  const clearTailored = async () => {
+    if (!job?.id) return;
+    try {
+      const { job: saved } = await api.jobs.clearTailoredResume(job.id);
+      setTailored(null);
+      onSaved(saved);
+      setTailorNotice({ tone: 'ok', text: 'Removed — interviews here use your base résumé again.' });
+    } catch (e) {
+      setTailorNotice({ tone: 'err', text: (e as Error).message });
     }
   };
 
@@ -227,6 +288,68 @@ export function JobFormModal({
             placeholder={copy.docPlaceholder}
           />
         </Field>
+
+        {/* A tailored résumé is a document about ONE role at ONE company, so it
+            lives on the Space that already holds that role's JD — right under
+            it. Offered only for interview Spaces, and only once there is a JD
+            to tailor against: without one the option is an empty promise. */}
+        {isInterviewSpace(kind) && (
+          <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-neutral-200">Tailored résumé</p>
+                <p className="mt-0.5 text-xs text-neutral-500">
+                  {tailored
+                    ? 'Kept with this Space. Interviews here are grounded in this version instead of your base résumé — everywhere else still uses the original.'
+                    : 'Rewrite your résumé against this job description and keep it here. Only interviews in this Space use it; nothing is invented — it re-frames what your résumé already says.'}
+                </p>
+                {tailorNotice && (
+                  <p
+                    className={`mt-2 text-xs ${tailorNotice.tone === 'err' ? 'text-amber-400' : 'text-emerald-400'}`}
+                  >
+                    {tailorNotice.text}
+                  </p>
+                )}
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-1.5">
+                <Button
+                  variant={tailored ? 'ghost' : 'default'}
+                  loading={tailoring}
+                  disabled={tailoring || !job?.id || !form.jdText.trim()}
+                  title={
+                    !job?.id
+                      ? 'Create the Space first, then tailor'
+                      : !form.jdText.trim()
+                        ? 'Add the job description first'
+                        : 'Rewrite your résumé for this role'
+                  }
+                  onClick={tailorResume}
+                >
+                  {tailored ? 'Redo' : 'Tailor'}
+                </Button>
+                {tailored && (
+                  <button
+                    type="button"
+                    className="text-[11px] text-neutral-500 hover:text-neutral-300"
+                    onClick={clearTailored}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+            {tailored && (
+              <details className="mt-2">
+                <summary className="cursor-pointer text-xs text-indigo-300 hover:text-indigo-200">
+                  Read it
+                </summary>
+                <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap rounded bg-black/30 p-2 text-[11px] leading-relaxed text-neutral-300">
+                  {tailored}
+                </pre>
+              </details>
+            )}
+          </div>
+        )}
 
         <Field
           label={`${copy.linkLabel} (optional)`}
