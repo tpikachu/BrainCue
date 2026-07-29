@@ -14,6 +14,7 @@ the fact.
 | [00 · Vision](00-VISION.md) | The north star: from interview copilot to ambient conversational companion, and the product principles. |
 | [01 · PRD](01-PRD.md) | The product spec: domain model, the engine, and per-mode requirements. |
 | [10 · Roadmap](10-ROADMAP.md) | Phases as release trains, what lands when, and the development rules. |
+| [The current train](TRAIN.md) | The live board: which release is being built right now, milestone by milestone. Unnumbered because it changes every PR and resets every release. |
 
 ## How v2 works
 
