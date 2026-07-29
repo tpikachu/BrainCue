@@ -6,6 +6,7 @@ import { join } from 'path';
 import { app } from 'electron';
 import { paths } from '../env';
 import { log } from '../services/security/logger';
+import { reconcileAlreadyApplied } from './reconcileMigrations';
 import { fixLegacyFkActions } from './fkRebuild';
 import * as schema from './schema';
 
@@ -136,6 +137,10 @@ export function initDb(): BetterSQLite3Database<typeof schema> {
     log.error('db: migrations folder not found — tables will be missing. Looked in:', candidates);
   } else {
     backupBeforeMigrate(sqlite, migrationsFolder);
+    // Before migrating: forgive a change that is already in the database.
+    // Drizzle runs every pending migration in ONE transaction, so a single
+    // "duplicate column name" blocks everything behind it permanently.
+    reconcileAlreadyApplied(sqlite, migrationsFolder, log);
     try {
       migrate(_db, { migrationsFolder });
       log.info(`db: migrations applied from ${migrationsFolder}`);
