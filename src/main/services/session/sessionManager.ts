@@ -1,11 +1,13 @@
 import { engine } from '../engine/engine';
 import type {
   AnswerFormat,
+  AudioSource,
   ContextPackKind,
   InterviewType,
   Presence,
   Session,
   SessionMode,
+  Speaker,
 } from '@shared/types';
 
 /**
@@ -63,12 +65,12 @@ export const sessionManager = {
     return engine.resume(sessionId, answerFormat);
   },
 
-  feedRealtimeAudio(sessionId: string, pcm: ArrayBuffer): void {
-    engine.feedRealtimeAudio(sessionId, pcm);
+  feedRealtimeAudio(sessionId: string, pcm: ArrayBuffer, source: AudioSource = 'system'): void {
+    engine.feedRealtimeAudio(sessionId, pcm, source);
   },
 
-  async processFinalTranscript(sessionId: string, text: string): Promise<void> {
-    await engine.processFinalTranscript(sessionId, text);
+  async processFinalTranscript(sessionId: string, text: string, speaker?: Speaker): Promise<void> {
+    await engine.processFinalTranscript(sessionId, text, speaker);
   },
 
   async ingestAudio(sessionId: string, audio: ArrayBuffer, mime: string): Promise<void> {

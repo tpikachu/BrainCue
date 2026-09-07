@@ -103,7 +103,7 @@ export default function ProfileEditorPage() {
       {!keyPresent && (
         <div className="mb-5 rounded-xl border border-amber-700/50 bg-amber-900/20 px-4 py-3 text-sm text-amber-200">
           You can save now, but parsing & grounded answers need an OpenAI key.{' '}
-          <Link to="/settings" className="font-medium underline">
+          <Link to="/settings/models" className="font-medium underline">
             Add it in Settings
           </Link>
           .

@@ -53,7 +53,15 @@ vi.mock('../openai/client', () => ({
     throw new Error('network disabled in tests');
   },
 }));
-vi.mock('../openai/answer', () => ({ streamAnswer: vi.fn() }));
+// A question asked in the room streams a grounded answer at balanced presence;
+// this is what the generator returns for it.
+vi.mock('../openai/answer', () => ({
+  streamAnswer: async function* () {
+    yield { type: 'delta', token: 'About $50k, ' };
+    yield { type: 'delta', token: 'per the plan.' };
+    yield { type: 'usage', prompt: 10, completion: 5 };
+  },
+}));
 vi.mock('../openai/followup', () => ({ predictFollowup: vi.fn(async () => null) }));
 vi.mock('../openai/questions', () => ({ classifyQuestion: vi.fn() }));
 vi.mock('../rag/retriever', () => ({
@@ -157,7 +165,7 @@ beforeEach(() => {
 });
 
 let seq = 0;
-function startMeeting() {
+function startMeeting(presence: 'quiet' | 'balanced' = 'balanced') {
   const profileId = `mp${++seq}`;
   h.db
     .insert(schema.profiles)
@@ -166,7 +174,7 @@ function startMeeting() {
   vi.setSystemTime(T0);
   const session = engine.start(profileId, 'general', null, 'key_points', {
     mode: 'meeting',
-    presence: 'balanced',
+    presence,
   });
   return { profileId, session };
 }
@@ -187,13 +195,19 @@ describe('meeting acceptance — the deterministic fixture', () => {
     expect(contribs(sid)).toHaveLength(0);
     expect(h.salienceCalls).toBe(0);
 
-    // --- an unanswered question matures into an open-question card ---------
-    await turn(2, 'What is our budget for the Q3 campaign?'); // held
-    await turn(3, 'Let us move on to the roadmap discussion.'); // 1 turn since
-    await turn(4, 'The roadmap has three phases planned.'); // 2 turns → card
-    const openQ = contribs(sid).filter((c) => c.kind === 'open_question');
-    expect(openQ).toHaveLength(1);
-    expect(openQ[0].title).toBe('What is our budget for the Q3 campaign?');
+    // --- a question asked in the room is answered right away (balanced) ----
+    await turn(2, 'What is our budget for the Q3 campaign?');
+    const answers = contribs(sid).filter((c) => c.kind === 'answer');
+    expect(answers).toHaveLength(1);
+    expect(answers[0].title).toBe('What is our budget for the Q3 campaign?');
+    expect(answers[0].body).toBe('About $50k, per the plan.');
+    expect(evts(EVENTS.questionDetected)).toHaveLength(1);
+    expect(evts(EVENTS.answerDelta).length).toBeGreaterThan(0);
+    // Answered, so no open-question card doubles it.
+    expect(contribs(sid).filter((c) => c.kind === 'open_question')).toHaveLength(0);
+    expect(h.retrieveCalls).toHaveLength(1); // the answer was grounded
+    await turn(3, 'Let us move on to the roadmap discussion.');
+    await turn(4, 'The roadmap has three phases planned.');
 
     // --- explicit action item: one card, with the explicit deadline --------
     await turn(6, 'I will send the launch checklist by Friday.');
@@ -212,7 +226,7 @@ describe('meeting acceptance — the deterministic fixture', () => {
     expect(ctx).toHaveLength(1);
     expect(ctx[0].body).toContain('$99 per seat');
     expect(JSON.parse(ctx[0].sourceRefs!)).toContainEqual({ type: 'chunk', id: 'cx1' });
-    expect(h.retrieveCalls).toHaveLength(1);
+    expect(h.retrieveCalls).toHaveLength(2); // the answer above + this card
 
     // --- decision card ------------------------------------------------------
     await turn(13, 'We have decided to go with the phased rollout.');
@@ -225,13 +239,13 @@ describe('meeting acceptance — the deterministic fixture', () => {
     expect(contribs(sid)).toHaveLength(before);
     engine.togglePause(sid);
 
-    // --- ambient cards are generic-only: no legacy answer-event twins -------
-    expect(evts(EVENTS.questionDetected)).toHaveLength(0);
-    expect(evts(EVENTS.answerDelta)).toHaveLength(0);
+    // --- ambient cards are generic-only: the ONLY legacy answer events are
+    //     the answered question's (one questionDetected, its deltas) ----------
+    expect(evts(EVENTS.questionDetected)).toHaveLength(1);
     const opens = evts(EVENTS.contributionOpen).map(
       (e) => (e.payload as { kind: string }).kind,
     );
-    expect(opens.sort()).toEqual(['action_item', 'context', 'decision', 'open_question']);
+    expect(opens.sort()).toEqual(['action_item', 'answer', 'context', 'decision']);
 
     // --- transcript persists with the v2 speaker vocabulary -----------------
     const turns = h.db
@@ -270,6 +284,20 @@ describe('meeting acceptance — the deterministic fixture', () => {
     const summaries = contribs(sid).filter((c) => c.kind === 'summary');
     expect(summaries).toHaveLength(1);
     expect(JSON.parse(summaries[0].meta!)).toMatchObject({ reportType: 'meeting' });
+  });
+
+  it('quiet presence: a question becomes an open-question card, never an answer', async () => {
+    const { session } = startMeeting('quiet');
+    const sid = session.id;
+    vi.setSystemTime(T0 + 2 * MIN);
+    await engine.processFinalTranscript(sid, 'What is our budget for the Q3 campaign?');
+    const openQ = contribs(sid).filter((c) => c.kind === 'open_question');
+    expect(openQ).toHaveLength(1);
+    expect(openQ[0].title).toBe('What is our budget for the Q3 campaign?');
+    expect(openQ[0].body).toContain('What is our budget for the Q3 campaign?'); // quotes the turn
+    expect(contribs(sid).filter((c) => c.kind === 'answer')).toHaveLength(0);
+    expect(evts(EVENTS.questionDetected)).toHaveLength(0);
+    engine.stop(sid);
   });
 
   it('stopping remembers NOTHING — the save prompt is the gate', async () => {

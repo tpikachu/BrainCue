@@ -13,7 +13,12 @@ export default defineConfig({
     },
     build: {
       rollupOptions: {
-        input: { index: resolve('src/main/index.ts') },
+        input: {
+          index: resolve('src/main/index.ts'),
+          // The sherpa-onnx recognizer runs in an Electron utilityProcess; it
+          // needs its own entry so main can fork out/main/stt-worker.js.
+          'stt-worker': resolve('src/main/services/stt/worker.ts'),
+        },
       },
     },
   },

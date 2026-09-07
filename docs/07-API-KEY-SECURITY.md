@@ -1,10 +1,12 @@
 # API Key Security Plan
 
-> v2 provider layer: `src/main/providers/*` never reads or stores keys — every
-> OpenAI adapter delegates to the existing service modules, so the key still
-> flows exclusively through `services/openai/client.ts` (and `realtime.ts` for
-> the socket header). Additional providers must follow the same shape: keys
-> live in the main process behind safeStorage, resolved per provider at call
+> v2 provider layer: the OpenAI adapters in `src/main/providers/openai` never
+> read or store keys — they delegate to the existing service modules, so the
+> OpenAI key still flows exclusively through `services/openai/client.ts` (and
+> `realtime.ts` for the socket header). Since v2.2 the other providers
+> (Anthropic, Google Gemini, Groq, OpenRouter) follow the same shape through
+> **one** store, `services/security/providerKeys.ts` — see "Keys per provider"
+> below: main process only, safeStorage at rest, resolved per provider at call
 > time, never over IPC. The architecture test pins that no key-store or API
 > host markers enter the renderer bundle.
 
@@ -55,6 +57,30 @@ interface ApiKeyStore {
 - Only a boolean `apiKeyPresent` (from `settings:get`).
 - A masked display like `sk-…last4` is **not** provided by default (last-4 could
   be added later if desired; MVP exposes presence only).
+
+## Keys per provider (v2.2, `services/security/providerKeys.ts`)
+Every cloud provider in `shared/providers.ts` gets its own key under exactly
+the rules above — the principles are per key, not per vendor:
+- **Storage**: `provider_key_enc:<provider>` (safeStorage ciphertext, base64) +
+  `provider_key_present:<provider>` ('1'/'0') in the settings table. `openai`
+  delegates to `apiKeyStore`, so there is ONE OpenAI key wherever it was
+  entered (old field, Language Models panel, or the dev env var).
+- **Interface**: `isPresent(p)` / `presence()` (booleans — the only shape that
+  crosses IPC), `set(p, plaintext)`, `clear(p)`, and `getDecrypted(p)` — **MAIN
+  ONLY**, never returned over IPC.
+- **Resolution at call time**: an adapter asks `providers/keys.ts`
+  (`requireProviderKey`) when a task actually routes to it — the store is
+  imported lazily there so the registry stays loadable without the DB. No key
+  → the call fails fast with "<Provider> needs an API key — add one in
+  Settings → Language Models." Clients are cached per key fingerprint
+  (`length:last4`), never the key itself, and rebuilt when it changes.
+- **Test flow**: `providers/testKey.ts` does a cheap `GET /models` per provider
+  and returns `{ ok, model }` or a user-safe `{ ok:false, error }` — vendor
+  SDK errors are normalized (`normalizeProviderError` / `normalizeCompatError`)
+  and never carry the key.
+- **Logging**: the logger's `sk-…` redaction covers OpenAI, Anthropic (`sk-ant-`)
+  and OpenRouter (`sk-or-`) keys; Google and Groq keys are never logged either
+  — adapters log nothing about a request but its outcome.
 
 ## Test flow
 `settings:test-api-key` does a cheap call (e.g. list models / tiny embedding) in

@@ -10,14 +10,17 @@ import {
   emitContributionOpen,
   emitContributionReset,
 } from '../../ipc/contributionBridge';
-import { normalizeOpenAIError } from '../openai/client';
+import { normalizeProviderError } from '../../providers/normalizeError';
 import { profilesRepo } from '../../db/repositories/profiles.repo';
 import { log } from '../security/logger';
 import { recallMemories } from '../memory/recall';
 import { ground } from './grounding';
 import { enginePersistence as persist } from './persistence/enginePersistence';
+import { EchoGuard } from './echoGuard';
 import { summonedPolicy } from './trigger/summonedPolicy';
+import type { AudioSource, Speaker } from '@shared/types';
 import type { RealtimeSttSession } from '../../providers/types';
+import type { SessionHistory, SessionHistoryItem } from '../openai/answer';
 import type { ContextEvent } from './contextEvent';
 import type { AmbientPolicy, ModeDefinition, RuntimeSettings } from './modeDefinition';
 
@@ -28,6 +31,18 @@ interface LastQuestion {
   questionId: string;
   text: string;
 }
+
+/** In-session history budget. Sized for the prompt, not the archive: enough
+ *  to resolve a follow-up against the last few exchanges, small enough that
+ *  the CONTEXT/MEMORY blocks stay the dominant grounding. */
+const HISTORY_MAX_ITEMS = 10;
+const HISTORY_TURN_CHARS = 300;
+const HISTORY_ANSWER_CHARS = 700;
+/** A question this short is almost always referential ("and the timeline?"),
+ *  so retrieval embeds it together with the previous question. */
+const REFERENTIAL_MAX_WORDS = 8;
+
+const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 
 /**
  * One live conversation session: the generic flow
@@ -51,12 +66,30 @@ export class EngineSession {
   answering = false; // an answer is currently being generated (avoid overlap)
   answerAbort: AbortController | null = null; // cancels the in-flight answer (clear/regen)
   lastQuestion: LastQuestion | null = null;
+  /** What this session has heard and answered so far, oldest first. Handed to
+   *  the generator so question N knows about question N-1 — without it every
+   *  cue was a cold start and "what about the second option?" was unanswerable.
+   *  Prompt-only: the DB rows remain the record. */
+  private readonly history: SessionHistoryItem[] = [];
   // Coding sessions default to "listen but don't auto-answer" so a generated coding
   // answer isn't replaced when the remote speaker talks. We keep transcribing and
   // remember the last utterance so toggling answering on can answer it.
   suppressAnswers = false;
   pendingQuestionText: string | null = null;
-  transcriber: RealtimeSttSession | null = null;
+  /** One live transcriber per captured stream (engine.begin opens them from
+   *  the activity's capture plan). Rehearsals hold none. */
+  readonly transcribers: Partial<Record<AudioSource, RealtimeSttSession>> = {};
+  /** The stream whose turns may trigger a contribution (the call, or the mic
+   *  for solo activities). Informational — the speaker on each final decides. */
+  triggerSource: AudioSource = 'system';
+  /** Latest RMS level per stream — the Cue Card meter shows the louder one. */
+  readonly levels: Record<AudioSource, number> = { system: 0, mic: 0 };
+  /** Drops the microphone's copy of what the call just said (laptop
+   *  speakers → the mic hears the call). See echoGuard.ts. */
+  private readonly echo = new EchoGuard({
+    // Word count only — transcript text never goes to the log.
+    onDrop: (words) => log.info(`echo guard: dropped the microphone's copy of a call turn (${words} words)`),
+  });
   /** Ambient trigger state (Meeting/Companion) — per-session cooldowns/
    *  dedupe/pending questions. Null for Q&A modes (interview). */
   readonly ambientPolicy: AmbientPolicy | null;
@@ -103,11 +136,14 @@ export class EngineSession {
     return this.stopped;
   }
 
-  /** Abort in-flight work and release the transcriber. Idempotent. */
+  /** Abort in-flight work and release every transcriber. Idempotent. */
   teardown(): void {
     this.answerAbort?.abort();
-    this.transcriber?.stop();
-    this.transcriber = null;
+    this.echo.flush(); // held own turns are the user's last words — keep them
+    for (const source of Object.keys(this.transcribers) as AudioSource[]) {
+      this.transcribers[source]?.stop();
+      delete this.transcribers[source];
+    }
     this.stopped = true;
   }
 
@@ -116,7 +152,7 @@ export class EngineSession {
   async handleEvent(ev: ContextEvent): Promise<void> {
     switch (ev.kind) {
       case 'transcript_final':
-        return this.onTranscriptFinal(ev.text);
+        return this.onTranscriptFinal(ev.text, ev.speaker);
       case 'direct_ask':
         return this.directAsk(ev.text);
       default:
@@ -127,11 +163,28 @@ export class EngineSession {
   }
 
   /** Persist a finalized transcript turn, run the trigger policy, and (when it
-   *  says act) generate the contribution. */
-  async onTranscriptFinal(text: string): Promise<void> {
+   *  says act) generate the contribution.
+   *
+   *  Every turn — whoever said it — is persisted, broadcast to the transcript
+   *  and remembered in the in-session history. But only the REMOTE speaker's
+   *  turns (the call; the user themselves in a solo activity) go on to the
+   *  trigger / ambient policy: the user's own microphone turns are what they
+   *  said, never a question to answer. `speaker` defaults to the remote one so
+   *  every v1 caller keeps its behaviour. */
+  async onTranscriptFinal(text: string, speaker: Speaker = this.mode.remoteSpeaker): Promise<void> {
     if (!text || this.stopped || this.paused) return;
-    const tcId = persist.finalTranscript(this.sessionId, this.mode.remoteSpeaker, text);
-    broadcast(EVENTS.transcriptDelta, { text, isFinal: true, speaker: this.mode.remoteSpeaker });
+    const own = speaker !== this.mode.remoteSpeaker;
+    if (own) {
+      // The user's own words: kept and remembered, never answered — and held
+      // briefly so the microphone's echo of the call (speakers, no headphones)
+      // is dropped instead of showing every remote turn twice.
+      this.echo.ownTurn(text, () => {
+        if (!this.stopped) this.commitTurn(text, speaker);
+      });
+      return;
+    }
+    this.echo.remoteTurn(text);
+    const tcId = this.commitTurn(text, speaker);
 
     // Ambient modes (Meeting): the turn runs the ambient trigger and may
     // become a quiet card — never a streamed auto-answer. Direct asks still
@@ -180,6 +233,20 @@ export class EngineSession {
     }
   }
 
+  /** Persist a turn, broadcast it to the transcript and remember it in the
+   *  in-session history. The user's own turns carry their speaker so the
+   *  prompt can label them "You said:"; remote turns keep the v1 item shape
+   *  (pinned by parity). */
+  private commitTurn(text: string, speaker: Speaker): string {
+    const tcId = persist.finalTranscript(this.sessionId, speaker, text);
+    broadcast(EVENTS.transcriptDelta, { text, isFinal: true, speaker });
+    const clipped = clip(text, HISTORY_TURN_CHARS);
+    this.remember(
+      speaker !== this.mode.remoteSpeaker ? { role: 'heard', text: clipped, speaker } : { role: 'heard', text: clipped },
+    );
+    return tcId;
+  }
+
   /** Ambient turn (Meeting): evaluate → maybe build a card → persist +
    *  broadcast (generic contribution events only). Failures are logged
    *  silence — a broken card must never interrupt a meeting. */
@@ -187,6 +254,18 @@ export class EngineSession {
     try {
       const decision = await this.ambientPolicy!.evaluate(text, Date.now());
       if (this.stopped || !decision.act || !decision.kind) return;
+      // A question at balanced/active presence streams a grounded answer
+      // through the same path a summon uses, instead of a card that only
+      // quotes the question back. One answer at a time: while one is still
+      // streaming, the new question falls through to the card below.
+      if (decision.answer && !this.answering) {
+        await this.answerQuestion(
+          text,
+          { type: 'meeting', confidence: decision.confidence, strategy: 'grounded' },
+          transcriptChunkId,
+        );
+        return;
+      }
       const card = await this.mode.ambient!.buildCard(decision, {
         turnText: text,
         transcriptChunkId,
@@ -289,7 +368,8 @@ export class EngineSession {
     try {
       // Retrieval (an embeddings call) is INSIDE the try so a failure here is
       // surfaced + un-wedges the card too — not just generate failures.
-      context = await ground(profile.id, questionText, session.packId, this.mode.id);
+      const history = this.historyBefore(questionText);
+      context = await ground(profile.id, this.retrievalQuery(questionText), session.packId, this.mode.id);
       // Approved memory joins the grounding (consent-gated; [] when off —
       // recall never throws). Cited separately from documents as [M1]….
       memories = await recallMemories(profile.id, questionText, session.packId);
@@ -307,6 +387,7 @@ export class EngineSession {
         memories,
         profile,
         settings: this.settings,
+        history,
         signal: abort.signal,
       })) {
         if (ev.type === 'delta') {
@@ -331,7 +412,7 @@ export class EngineSession {
       // A real failure (auth, quota, network drop, model-not-found): surface it and
       // clear the Cue Card's streaming state, instead of leaving the card spinning
       // forever with no error (the most common live failure — e.g. an expired key).
-      broadcast(EVENTS.sessionError, { message: normalizeOpenAIError(e) });
+      broadcast(EVENTS.sessionError, { message: normalizeProviderError(e) });
       emitContributionDone(questionId);
       throw e;
     } finally {
@@ -345,6 +426,7 @@ export class EngineSession {
       }
     }
 
+    this.rememberAnswer(questionText, answer);
     persist.replaceAnswer({
       questionId,
       directAnswer: answer,
@@ -418,5 +500,51 @@ export class EngineSession {
     emitContributionReset(qid);
     await this.generateContribution(qid, text);
     return { regenerated: true };
+  }
+
+  /** The history the model should see for THIS question: everything except
+   *  the question itself — its own `heard` turn (pushed by onTranscriptFinal
+   *  before the trigger ran) and, on a regenerate, its own previous take. */
+  private historyBefore(questionText: string): SessionHistory | undefined {
+    const self = clip(questionText, HISTORY_TURN_CHARS);
+    const items = this.history.filter((h) =>
+      h.role === 'heard' ? h.text !== self : h.question !== self,
+    );
+    return items.length ? items : undefined;
+  }
+
+  /** Append to the in-session history, dropping the oldest past the budget. */
+  private remember(item: SessionHistoryItem): void {
+    this.history.push(item);
+    if (this.history.length > HISTORY_MAX_ITEMS) this.history.splice(0, this.history.length - HISTORY_MAX_ITEMS);
+  }
+
+  /** Record a completed answer. A regenerate of the same question updates its
+   *  entry instead of adding a second; a detected question replaces the
+   *  `heard` turn it came from so the exchange appears once. */
+  private rememberAnswer(question: string, answer: string): void {
+    const text = answer.trim();
+    if (!text) return;
+    const clipped = clip(text, HISTORY_ANSWER_CHARS);
+    const existing = this.history.find((h) => h.role === 'asked' && h.question === question);
+    if (existing && existing.role === 'asked') {
+      existing.answer = clipped;
+      return;
+    }
+    const last = this.history[this.history.length - 1];
+    if (last?.role === 'heard' && last.text === clip(question, HISTORY_TURN_CHARS)) this.history.pop();
+    this.remember({ role: 'asked', question: clip(question, HISTORY_TURN_CHARS), answer: clipped });
+  }
+
+  /** The text retrieval embeds. A short follow-up carries the previous
+   *  question with it, so "and the timeline?" retrieves chunks about the
+   *  thing being asked about instead of about timelines in general. */
+  private retrievalQuery(questionText: string): string {
+    if (questionText.trim().split(/\s+/).length > REFERENTIAL_MAX_WORDS) return questionText;
+    for (let i = this.history.length - 1; i >= 0; i--) {
+      const h = this.history[i];
+      if (h.role === 'asked') return `${h.question} ${questionText}`;
+    }
+    return questionText;
   }
 }

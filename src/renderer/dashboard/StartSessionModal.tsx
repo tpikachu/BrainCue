@@ -47,8 +47,7 @@ export function StartSessionModal(props: {
   const [activity, setActivity] = useState<ContextPackKind>(DEFAULT_ACTIVITY);
   const [spaceId, setSpaceId] = useState(props.initialSpaceId ?? '');
   const [spaces, setSpaces] = useState<Job[]>([]);
-  const [source, setSource] = useState<'system' | 'mic'>('system');
-  const [presence, setPresence] = useState<Presence>('quiet'); // meetings: quiet by default
+  const [presence, setPresence] = useState<Presence>('balanced'); // meetings: answer questions asked in the room
   const [companionPresence, setCompanionPresence] = useState<CompanionPresence>('assistive');
   const [budgetCents, setBudgetCents] = useState<number | null>(null);
   const [creatingSpace, setCreatingSpace] = useState(false);
@@ -63,7 +62,7 @@ export function StartSessionModal(props: {
     void loadSettings();
     setActivity(props.initialActivity ?? DEFAULT_ACTIVITY);
     setSpaceId(props.initialSpaceId ?? '');
-    setPresence('quiet');
+    setPresence('balanced');
     setCreatingSpace(false);
     setError(null);
   }, [props.open, props.initialSpaceId, props.initialActivity, loadSettings]);
@@ -75,13 +74,6 @@ export function StartSessionModal(props: {
       setBudgetCents(settings.companionPrefs.budgetCents);
     }
   }, [settings]);
-
-  // The activity sets what it listens to. A meeting is the other side of a call;
-  // a solo session is you. Still a default, not a lock — an in-person meeting is
-  // a microphone, and the control below stays live.
-  useEffect(() => {
-    setSource(config.listensTo);
-  }, [config.listensTo]);
 
   // Spaces are per-profile (they ground the answers in that profile's world).
   useEffect(() => {
@@ -111,13 +103,14 @@ export function StartSessionModal(props: {
   const blocker = startBlocker({
     profile,
     apiKeyPresent: !!settings?.apiKeyPresent,
+    sttReady: !!settings?.sttReady,
     sessionLive: !!live.session,
     activity,
     spaceId,
   });
   const summary = useMemo(
-    () => captureSummary({ source, spaceTitle, activity }),
-    [source, spaceTitle, activity],
+    () => captureSummary({ listensTo: config.listensTo, spaceTitle, activity }),
+    [config.listensTo, spaceTitle, activity],
   );
 
   const start = async () => {
@@ -125,8 +118,6 @@ export function StartSessionModal(props: {
     setStarting(true);
     setError(null);
     try {
-      // Persist the chosen source so the Cue Card + next session agree with it.
-      await api.settings.set({ audio: { source, micDeviceId: settings?.audio?.micDeviceId ?? null } });
       await live.startNew({
         profileId,
         jobId: spaceId || null,
@@ -134,7 +125,9 @@ export function StartSessionModal(props: {
         // means nothing anywhere else. The session row keeps its 'general' default.
         // Companion replies are spoken persona prose, not glanceable cues.
         answerFormat: mode === 'companion' ? 'explanation' : 'key_points',
-        source,
+        // What it hears is the activity's call (shared/activities.ts): a call
+        // is the call AND your microphone, a solo session is your microphone.
+        listensTo: config.listensTo,
         micDeviceId: settings?.audio?.micDeviceId ?? null,
         activity,
         presence:
@@ -276,36 +269,25 @@ export function StartSessionModal(props: {
           </p>
         </Field>
 
-        {/* 3 · Input source. Defaulted by the activity, still yours to change. */}
-        <fieldset>
-          <legend className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
-            Listen to
-          </legend>
-          <div className="flex gap-2" role="radiogroup" aria-label="Audio source">
-            {(
-              [
-                ['system', 'System audio', 'the other side of your call'],
-                ['mic', 'Microphone', 'in-person / your own voice'],
-              ] as const
-            ).map(([value, label, hint]) => (
-              <button
-                key={value}
-                type="button"
-                role="radio"
-                aria-checked={source === value}
-                onClick={() => setSource(value)}
-                className={`flex-1 rounded-xl border p-3 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400 ${
-                  source === value
-                    ? 'border-indigo-400/50 bg-indigo-500/10'
-                    : 'border-white/5 bg-neutral-900/60 hover:bg-neutral-900'
-                }`}
-              >
-                <span className="block font-medium text-neutral-100">{label}</span>
-                <span className="mt-0.5 block text-xs text-neutral-400">{hint}</span>
-              </button>
-            ))}
-          </div>
-        </fieldset>
+        {/* 3 · What it hears. Not a question any more: a call is heard on BOTH
+            sides — the call's audio and your microphone — and questions are
+            taken from the call, never from you. A solo session is just you.
+            Said plainly, so what happens on Start is never a surprise. */}
+        <p className="text-xs leading-snug text-neutral-400" data-testid="hears">
+          {config.listensTo === 'mic' ? (
+            <>
+              <span className="font-medium text-neutral-300">Hears your microphone.</span> No call —
+              questions come from what you say.
+            </>
+          ) : (
+            <>
+              <span className="font-medium text-neutral-300">
+                Hears the call (system audio) and your microphone.
+              </span>{' '}
+              Questions come from the call; your own words are kept in the transcript, never answered.
+            </>
+          )}
+        </p>
 
         {/* 3b · Presence — how present it should be. The one dial that genuinely
             varies WITHIN an activity, so it stays a question. */}

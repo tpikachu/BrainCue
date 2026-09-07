@@ -17,6 +17,7 @@ import { registerOverlayIpc } from './overlay.ipc';
 import { registerWindowIpc } from './window.ipc';
 import { registerDataIpc } from './data.ipc';
 import { registerUpdateIpc } from './update.ipc';
+import { registerSttIpc } from './stt.ipc';
 import { registerDevIpc } from './dev.ipc';
 import { registerConfirmIpc } from '../services/ui/confirm';
 
@@ -41,6 +42,7 @@ export function registerIpc(): void {
   registerWindowIpc();
   registerDataIpc();
   registerUpdateIpc();
+  registerSttIpc();
   registerConfirmIpc();
   registerDevIpc(); // no-op in packaged builds
 }

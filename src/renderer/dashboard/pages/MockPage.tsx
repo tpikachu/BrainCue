@@ -199,7 +199,7 @@ export default function MockPage() {
           {!settings?.apiKeyPresent && (
             <p className="mt-3 text-xs text-amber-400">
               No OpenAI key —{' '}
-              <Link to="/settings" className="underline">
+              <Link to="/settings/models" className="underline">
                 add it in Settings
               </Link>
             </p>

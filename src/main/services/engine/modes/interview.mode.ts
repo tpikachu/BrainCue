@@ -15,6 +15,7 @@ export const interviewMode: ModeDefinition = {
   id: 'interview',
   sources: ['mic', 'system', 'ask', 'screen', 'clipboard'],
   remoteSpeaker: 'interviewer',
+  localSpeaker: 'candidate', // the legacy pair — the same label Practice writes for the user
   trigger: reactiveQuestionPolicy,
   allowedContributions: ['answer', 'code'],
   surfaces: ['overlay', 'report'],
@@ -28,6 +29,7 @@ export const interviewMode: ModeDefinition = {
       question: input.question,
       contextChunks: input.contextChunks,
       memories: input.memories,
+      history: input.history,
       profile: input.profile,
       // Answer format + pronunciation are chosen per run (this round) and can
       // be toggled live from the Cue Card.

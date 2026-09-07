@@ -61,10 +61,10 @@ export const TOUR_STEPS: TourStep[] = [
 
   {
     chapter: 'Setup',
-    route: '/settings',
+    route: '/settings/models',
     target: 'settings-key',
     title: '1 · Your key, your models',
-    body: 'BrainCue has no account and no server of its own. Paste an OpenAI key in Settings and every call is billed to you directly — which is also why it is careful about making them. The key is encrypted by your operating system’s keychain and stays in the background process; the part of the app you can see never receives it, only whether one is present.',
+    body: 'BrainCue has no account and no server of its own. Settings → Language Models holds your keys — OpenAI is the required one (retrieval and the default models run there); Anthropic, Google Gemini, Groq and OpenRouter are optional extras you can pick per task — and every call is billed to you directly, which is also why it is careful about making them. Keys are encrypted by your operating system’s keychain and stay in the background process; the part of the app you can see never receives them, only whether each is present. The Speech-to-Text section next to it is where you choose how BrainCue hears the room: OpenAI’s cloud transcriber, or an on-device model that never sends audio anywhere.',
   },
   {
     chapter: 'Setup',
@@ -92,7 +92,7 @@ export const TOUR_STEPS: TourStep[] = [
     route: '/home',
     target: 'activity-meeting',
     title: '5 · It is built to stay quiet',
-    body: 'An assistant in a real conversation is judged by when it does NOT speak. Presence is an explicit threshold you set at the start — Summoned only, Quiet, Balanced, or Active — not a mood. On Quiet, the default, most turns never reach a model at all: silence, small talk, and anything below the confidence bar are filtered out before a call is made, which is why an hour of listening costs so little.',
+    body: 'An assistant in a real conversation is judged by when it does NOT speak. Presence is an explicit threshold you set at the start — Summoned only, Quiet, Balanced, or Active — not a mood. On Balanced, the default, a question asked in the room gets a grounded answer in the Cue Card; everything else must clear a confidence bar and a cooldown before a card appears, and small talk never reaches a model at all — which is why an hour of listening costs so little. Quiet turns questions into cards instead of answers.',
   },
   {
     chapter: 'Using it',
@@ -141,7 +141,7 @@ export const TOUR_STEPS: TourStep[] = [
   },
   {
     chapter: 'Afterwards',
-    route: '/settings',
+    route: '/settings/privacy',
     target: 'settings-privacy',
     title: '13 · Staying invisible, and in control',
     body: 'Privacy Mode hides every BrainCue window from screen capture and recording, and can be toggled with a shortcut mid-call. Every shortcut is rebindable. Your data — transcripts, documents, embeddings, summaries, memory — lives in a local database on this machine, which is why Settings → Danger zone can genuinely erase all of it, and why there is no backup but yours.',

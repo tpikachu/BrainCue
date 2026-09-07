@@ -179,6 +179,19 @@ export function TextArea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement
   return <textarea {...props} className={`${inputBase} resize-y ${props.className ?? ''}`} />;
 }
 
+/** One row of a {@link Dropdown}. The optional fields turn a flat list into a
+ *  grouped menu: rows sharing a `group` render under one header (in the order
+ *  given — keep a group's rows adjacent), `description` is a second dimmer
+ *  line, `disabled` rows are shown but not selectable (their `title` says why). */
+export interface DropdownOption {
+  value: string;
+  label: string;
+  description?: string;
+  group?: string;
+  disabled?: boolean;
+  title?: string;
+}
+
 /** In-window replacement for a native `<select>`. A native select's option list
  *  opens as a SEPARATE OS popup window that does NOT inherit the app window's
  *  screen-capture exclusion — with Privacy Mode on, the dropdown list is still
@@ -193,13 +206,16 @@ export function Dropdown({
   buttonClassName = 'flex w-full items-center justify-between gap-2 rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-indigo-500',
   className = '',
   disabled = false,
+  buttonLabel,
 }: {
   value: string;
-  options: { value: string; label: string }[];
+  options: DropdownOption[];
   onChange: (value: string) => void;
   buttonClassName?: string;
   className?: string;
   disabled?: boolean;
+  /** Override the closed-state text (default: the selected option's label). */
+  buttonLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [openUp, setOpenUp] = useState(false);
@@ -259,7 +275,7 @@ export function Dropdown({
           setOpen((v) => !v);
         }}
       >
-        <span className="truncate">{selected?.label ?? value}</span>
+        <span className="truncate">{buttonLabel ?? selected?.label ?? value}</span>
         <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 shrink-0 text-neutral-500" aria-hidden>
           <path
             fillRule="evenodd"
@@ -271,18 +287,30 @@ export function Dropdown({
       {open && (
         <ul
           role="listbox"
-          className={`absolute left-0 z-[60] max-h-56 w-full min-w-max overflow-y-auto rounded-lg border border-neutral-700 bg-neutral-900 py-1 shadow-xl shadow-black/50 ${
+          className={`absolute left-0 z-[60] max-h-64 w-full min-w-max max-w-[22rem] overflow-y-auto rounded-lg border border-neutral-700 bg-neutral-900 py-1 shadow-xl shadow-black/50 ${
             openUp ? 'bottom-full mb-1' : 'top-full mt-1'
           }`}
         >
-          {options.map((o) => (
-            <li key={o.value} role="option" aria-selected={o.value === value}>
+          {options.map((o, i) => (
+            <li key={o.value} role="option" aria-selected={o.value === value} aria-disabled={o.disabled || undefined}>
+              {o.group && o.group !== options[i - 1]?.group && (
+                <div
+                  role="presentation"
+                  className={`px-3 pb-0.5 pt-1.5 text-[10px] font-medium uppercase tracking-wider text-neutral-500 ${
+                    i > 0 ? 'mt-1 border-t border-white/5' : ''
+                  }`}
+                >
+                  {o.group}
+                </div>
+              )}
               <button
                 type="button"
-                className={`block w-full px-3 py-1.5 text-left text-sm transition-colors ${
+                disabled={o.disabled}
+                title={o.title}
+                className={`block w-full px-3 py-1.5 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                   o.value === value
                     ? 'bg-indigo-600/25 text-indigo-200'
-                    : 'text-neutral-200 hover:bg-neutral-800'
+                    : 'text-neutral-200 enabled:hover:bg-neutral-800'
                 }`}
                 onClick={(e) => {
                   // Same <label> quirk as the toggle button above: inside a
@@ -295,7 +323,10 @@ export function Dropdown({
                   onChange(o.value);
                 }}
               >
-                {o.label}
+                <span className="block truncate">{o.label}</span>
+                {o.description && (
+                  <span className="block truncate text-[11px] leading-snug text-neutral-500">{o.description}</span>
+                )}
               </button>
             </li>
           ))}

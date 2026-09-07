@@ -22,7 +22,6 @@ export function SettingsModal(props: {
   voicePrefs: VoicePrefs | null;
   onSaveVoicePrefs: (patch: Partial<VoicePrefs>) => void;
 }) {
-  const [audioSource, setAudioSource] = useState<'system' | 'mic'>('system');
   const [micDeviceId, setMicDeviceId] = useState<string | null>(null);
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
   // Coding-solver model + reasoning effort (persisted overrides; '' = use default).
@@ -40,10 +39,7 @@ export function SettingsModal(props: {
     // Seed from persisted settings on every open (fresh, not a boot snapshot).
     void api.settings.get().then((s) => {
       const ss = s as AppSettings;
-      if (ss.audio) {
-        setAudioSource(ss.audio.source);
-        setMicDeviceId(ss.audio.micDeviceId);
-      }
+      if (ss.audio) setMicDeviceId(ss.audio.micDeviceId);
       setCodingModel(ss.models?.coding ?? '');
       setCodingEffort(ss.reasoningEfforts?.coding ?? '');
       setCodingLanguage(ss.codingLanguage ?? 'javascript');
@@ -88,12 +84,11 @@ export function SettingsModal(props: {
     }
   }, [props.open, props.voicePrefs !== null]);
 
-  const saveAudio = (next: { source?: 'system' | 'mic'; micDeviceId?: string | null }) => {
-    const source = next.source ?? audioSource;
-    const device = next.micDeviceId !== undefined ? next.micDeviceId : micDeviceId;
-    setAudioSource(source);
+  // A session hears the call AND the microphone (there is no source to pick);
+  // the one audio preference left is WHICH microphone.
+  const saveAudio = (device: string | null) => {
     setMicDeviceId(device);
-    void api.settings.set({ audio: { source, micDeviceId: device } });
+    void api.settings.set({ audio: { micDeviceId: device } });
   };
 
   // Persist the coding-solver model/effort. Read-modify-write against FRESH
@@ -127,35 +122,23 @@ export function SettingsModal(props: {
           <div className="space-y-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Audio</p>
             <div>
-              <span className="mb-1 block text-xs font-medium text-neutral-400">Listen to</span>
+              <span className="mb-1 block text-xs font-medium text-neutral-400">Microphone</span>
               <Dropdown
-                value={audioSource}
+                value={micDeviceId ?? ''}
                 options={[
-                  { value: 'system', label: 'Interviewer (system audio)' },
-                  { value: 'mic', label: 'Microphone (in-person)' },
+                  { value: '', label: 'System default' },
+                  ...micDevices.map((d, i) => ({
+                    value: d.deviceId,
+                    label: d.label || `Microphone ${i + 1}`,
+                  })),
                 ]}
-                onChange={(v) => saveAudio({ source: v as 'system' | 'mic' })}
+                onChange={(v) => saveAudio(v || null)}
               />
             </div>
-            {audioSource === 'mic' && (
-              <div>
-                <span className="mb-1 block text-xs font-medium text-neutral-400">Microphone</span>
-                <Dropdown
-                  value={micDeviceId ?? ''}
-                  options={[
-                    { value: '', label: 'System default' },
-                    ...micDevices.map((d, i) => ({
-                      value: d.deviceId,
-                      label: d.label || `Microphone ${i + 1}`,
-                    })),
-                  ]}
-                  onChange={(v) => saveAudio({ micDeviceId: v || null })}
-                />
-              </div>
-            )}
             <p className="text-xs text-neutral-500">
-              Applies to your next interview (the running one keeps its device).
-              {audioSource === 'mic' && micDevices.every((d) => !d.label)
+              A session hears the call (system audio) and this microphone; questions come from the
+              call. Applies to your next session (the running one keeps its device).
+              {micDevices.every((d) => !d.label)
                 ? ' Grant microphone access once to see device names.'
                 : ''}
             </p>

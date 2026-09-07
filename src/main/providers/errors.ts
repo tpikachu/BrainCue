@@ -11,15 +11,20 @@ const CAPABILITY_LABEL: Record<Capability, string> = {
 
 /** A mode/feature needs a capability the selected provider doesn't offer.
  *  The message is user-safe — it surfaces verbatim in the session-error
- *  banner (PRD §6.7: capability gaps degrade clearly, never silently). */
+ *  banner (PRD §6.7: capability gaps degrade clearly, never silently). A
+ *  caller that knows the fix (e.g. per-task routing: "pick a vision-capable
+ *  model for the coding solver") passes it as `hint` to replace the generic
+ *  message. */
 export class CapabilityUnavailableError extends Error {
   constructor(
     readonly capability: Capability,
     readonly provider: string,
+    hint?: string,
   ) {
     super(
-      `${CAPABILITY_LABEL[capability]} isn't available from the '${provider}' provider. ` +
-        `Switch the ${capability} provider in Settings.`,
+      hint ??
+        `${CAPABILITY_LABEL[capability]} isn't available from the '${provider}' provider. ` +
+          `Switch the ${capability} provider in Settings.`,
     );
     this.name = 'CapabilityUnavailableError';
   }

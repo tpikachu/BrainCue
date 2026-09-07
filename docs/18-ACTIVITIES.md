@@ -29,11 +29,11 @@ told, by the answer prompt, that the user was a candidate being assessed.
 A `ModeDefinition` is configuration over one engine, and reading all three shows
 what it actually configures:
 
-| Mode | Listens to | Speaks when | Frames the user as |
-| --- | --- | --- | --- |
-| interview | them (system audio) | a question is detected | a candidate being assessed |
-| meeting | them (system audio) | the ambient policy fires | themselves, in a conversation |
-| companion | **you** (microphone) | the interjection policy fires | themselves, with a persona |
+| Mode | Hears | Questions from | Speaks when | Frames the user as |
+| --- | --- | --- | --- | --- |
+| interview | the call (system audio) **and** your microphone | the call | a question is detected | a candidate being assessed |
+| meeting | the call (system audio) **and** your microphone | the call | the ambient policy fires | themselves, in a conversation |
+| companion | **you** (microphone) | you | the interjection policy fires | themselves, with a persona |
 
 Every column is a dial the start flow **already showed separately** — *Listen
 to*, *Presence*, and the answer framing from
@@ -47,7 +47,7 @@ conflict.
 call?"* — and nothing else about what BrainCue will be. The engine mode is
 derived (`shared/activities.ts`), so what was shown and what runs cannot drift.
 
-| Activity | Runs | Listens to | Needs a résumé |
+| Activity | Runs | `listensTo` | Needs a résumé |
 | --- | --- | --- | --- |
 | Meeting or call | meeting | system | no |
 | Project discussion | meeting | system | no |
@@ -60,6 +60,29 @@ derived (`shared/activities.ts`), so what was shown and what runs cannot drift.
 
 `ModeDefinition` stays exactly as it was — it is the right internal
 architecture. It simply stops being a question.
+
+### `listensTo` means "which streams", not "which one" (2026-09-07)
+
+There used to be a *Listen to* control on the start modal, defaulted by the
+activity and flippable: system audio **or** the microphone. That was the
+wrong question — someone on a call does not want to choose between hearing
+the call and hearing themselves — so the control is gone and a session hears
+**both**. `ActivityConfig.listensTo` is kept, with a new meaning, resolved by
+`capturePlan()` in the same file and used by the renderer and the engine
+alike:
+
+| `listensTo` | Streams captured | Questions come from |
+| --- | --- | --- |
+| `'system'` — a call | the call's system audio **and** your microphone | the call. Your own words are transcribed and kept (`you` / `candidate`), shown in the transcript and remembered for the next answer, but never run the trigger. |
+| `'mic'` — solo (Game, Just me) | your microphone | you — the mic **is** the trigger source, exactly as before. |
+
+The start modal prints this as a passive line under the activity ("Hears the
+call (system audio) and your microphone. Questions come from the call.");
+Home's chip says *Hears: call + mic* / *Hears: microphone*. If the
+system-audio picker is refused, the session goes on with the microphone alone
+and says so (a non-fatal notice); if the microphone is denied, with the call
+alone; with neither it does not start. The old `audio.source` preference is
+kept in the schema for old settings files but nothing reads or writes it.
 
 Four consequences worth naming:
 

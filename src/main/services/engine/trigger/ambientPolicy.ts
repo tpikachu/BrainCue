@@ -1,9 +1,5 @@
 import type { ContributionKind, Presence } from '@shared/types';
-import {
-  answersQuestion,
-  evaluateTurnHeuristics,
-  type HeuristicVerdict,
-} from './meetingHeuristics';
+import { evaluateTurnHeuristics } from './meetingHeuristics';
 import { classifySalience, type SalienceClassifier } from './salience';
 import { PRESENCE_LEVELS, WARNING_FLOOR, type AmbientKind } from './presence';
 
@@ -27,6 +23,9 @@ export interface AmbientDecision {
   /** Why (for logs/tests): 'greeting', 'cooldown', 'duplicate', 'below-floor', … */
   reason: string;
   usedClassifier: boolean;
+  /** A question asked in the room at a presence that answers questions: the
+   *  engine streams a grounded answer instead of building a card. */
+  answer?: boolean;
 }
 
 const silent = (reason: string, usedClassifier = false): AmbientDecision => ({
@@ -40,9 +39,6 @@ const silent = (reason: string, usedClassifier = false): AmbientDecision => ({
   usedClassifier,
 });
 
-/** How many substantive turns a raised question may go unaddressed before it
- *  becomes an open-question card. */
-const OPEN_QUESTION_AFTER_TURNS = 2;
 /** Rolling turn window handed to the classifier for context. */
 const RECENT_WINDOW = 6;
 
@@ -62,7 +58,6 @@ export class AmbientTriggerPolicy {
   private readonly lastKindEmitAt = new Map<AmbientKind, number>();
   private readonly seen = new Set<string>();
   private readonly recent: string[] = [];
-  private pendingQuestion: { text: string; title: string; turnsSince: number } | null = null;
 
   constructor(presence: Presence, classify: SalienceClassifier = classifySalience) {
     this.presence = presence;
@@ -82,17 +77,11 @@ export class AmbientTriggerPolicy {
     const verdict = evaluateTurnHeuristics(text);
     if (verdict.type === 'skip') return silent(verdict.reason); // classifier never called
 
-    // A substantive turn advances (or resolves) any pending open question.
-    // One decision per turn: a matured open question outranks the turn's own
-    // signal (the un-answered question is the older debt).
-    const matured = this.trackPendingQuestion(text, verdict);
     const prior = [...this.recent]; // classifier context = turns BEFORE this one
     this.remember(text);
 
     let candidate: Candidate;
-    if (matured) {
-      candidate = matured;
-    } else if (verdict.type === 'action_item') {
+    if (verdict.type === 'action_item') {
       candidate = {
         kind: 'action_item',
         title: verdict.title,
@@ -111,10 +100,19 @@ export class AmbientTriggerPolicy {
         usedClassifier: false,
       };
     } else if (verdict.type === 'question') {
-      // Questions are HELD, not emitted — they only become open-question
-      // cards if the conversation moves on without answering them.
-      this.pendingQuestion = { text, title: verdict.title, turnsSince: 0 };
-      return silent('question-held');
+      // A question asked in the room is the highest-value moment this trigger
+      // sees, so it is acted on NOW: a card at quiet, a streamed grounded
+      // answer at balanced/active (the engine reads `answer`). It used to be
+      // held for two turns and dropped the moment any later turn shared a
+      // word with it — which in a real meeting meant never.
+      candidate = {
+        kind: 'open_question',
+        title: verdict.title,
+        confidence: verdict.confidence,
+        owner: null,
+        deadline: null,
+        usedClassifier: false,
+      };
     } else {
       // Ambiguous → the classifier may score it; code still decides below.
       const result = await this.classify(text, prior);
@@ -140,14 +138,21 @@ export class AmbientTriggerPolicy {
   ): AmbientDecision {
     const floor = c.kind === 'warning' ? Math.max(cfg.minConfidence.warning, WARNING_FLOOR) : cfg.minConfidence[c.kind];
     if (c.confidence < floor) return silent('below-floor', c.usedClassifier);
-    if (now - this.lastEmitAt < cfg.cooldownMs) return silent('cooldown', c.usedClassifier);
-    const lastKind = this.lastKindEmitAt.get(c.kind) ?? -Infinity;
-    if (now - lastKind < cfg.perKindCooldownMs) return silent('kind-cooldown', c.usedClassifier);
+    // Questions skip the cooldowns: the room does not pace its questions to our
+    // card cadence, and a missed one is exactly the failure users report. The
+    // duplicate filter still applies — the same question twice is one card.
+    const isQuestion = c.kind === 'open_question';
+    if (!isQuestion) {
+      if (now - this.lastEmitAt < cfg.cooldownMs) return silent('cooldown', c.usedClassifier);
+      const lastKind = this.lastKindEmitAt.get(c.kind) ?? -Infinity;
+      if (now - lastKind < cfg.perKindCooldownMs) return silent('kind-cooldown', c.usedClassifier);
+    }
     const key = `${c.kind}:${normalize(c.title)}`;
     if (this.seen.has(key)) return silent('duplicate', c.usedClassifier);
 
     this.seen.add(key);
-    this.lastEmitAt = now;
+    // A question must not push back the next action item or decision either.
+    if (!isQuestion) this.lastEmitAt = now;
     this.lastKindEmitAt.set(c.kind, now);
     return {
       act: true,
@@ -158,29 +163,7 @@ export class AmbientTriggerPolicy {
       deadline: c.deadline,
       reason: 'emitted',
       usedClassifier: c.usedClassifier,
-    };
-  }
-
-  /** Advance the pending-question tracker with this substantive turn. Returns
-   *  the matured open-question candidate when the question went unanswered
-   *  long enough. */
-  private trackPendingQuestion(text: string, verdict: HeuristicVerdict): Candidate | null {
-    const pending = this.pendingQuestion;
-    if (!pending || verdict.type === 'question') return null;
-    if (answersQuestion(text, pending.text)) {
-      this.pendingQuestion = null;
-      return null;
-    }
-    pending.turnsSince += 1;
-    if (pending.turnsSince < OPEN_QUESTION_AFTER_TURNS) return null;
-    this.pendingQuestion = null;
-    return {
-      kind: 'open_question',
-      title: pending.title,
-      confidence: 0.8, // deterministic maturation, not a model score
-      owner: null,
-      deadline: null,
-      usedClassifier: false,
+      answer: isQuestion && cfg.answerQuestions,
     };
   }
 

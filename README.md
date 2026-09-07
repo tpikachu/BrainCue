@@ -30,7 +30,7 @@ takes afterwards.
 
 | Activity | You are… | BrainCue… |
 | --- | --- | --- |
-| **Meeting or call** | in a standup, a client call, a sync | sits in quietly; surfaces context, open questions, action items, decisions |
+| **Meeting or call** | in a standup, a client call, a sync | answers questions asked in the room; surfaces context, action items, decisions |
 | **Project discussion** | talking about ongoing work | recalls what was decided before, and what is still open |
 | **Interview** | the candidate | hears each question and streams a grounded answer cue, framed as you |
 | **Study or tutoring** | learning something | pulls up the part of your material that bears on what was just said |
@@ -233,7 +233,7 @@ six-stage pipeline every mode configures;
 
 ## Getting started
 ```bash
-npm install               # Node 20.11+; also rebuilds better-sqlite3 for Electron
+npm install               # Node 22+ (24 recommended); also rebuilds better-sqlite3 for Electron
 npm run dev               # launch the app with HMR
 ```
 An OpenAI key is optional in dev (copy `.env.example` to `.env`, or set it in

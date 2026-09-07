@@ -26,6 +26,8 @@ asarUnpack:
   - "**/node_modules/better-sqlite3/**"
   # koffi loads its prebuilt .node from disk (the display-affinity oracle)
   - "**/node_modules/koffi/**"
+  # sherpa-onnx (local STT): the .node addon + onnxruntime DLLs must be real files
+  - "**/node_modules/sherpa-onnx-*/**"
 win:
   icon: resources/icon.ico
   target:

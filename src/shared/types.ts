@@ -639,13 +639,34 @@ export interface OverlayPrefs {
 }
 
 /** Audio capture preferences (configured in the Cue Card settings modal). */
+import type { CloudProviderId } from './providers';
+import type { SttPrefs } from './stt';
+
+/** One captured audio stream: the call's loopback (`system`) or the user's
+ *  microphone (`mic`). A live session normally carries BOTH — the activity's
+ *  `listensTo` (shared/activities.ts `capturePlan`) says which streams are
+ *  opened and which one questions are taken from. */
+export type AudioSource = 'system' | 'mic';
+
 export interface AudioPrefs {
-  source: 'system' | 'mic'; // interviewer's system audio vs the microphone
+  /** Legacy (pre dual-stream). Kept so persisted settings keep validating; no
+   *  UI writes it and nothing reads it — a session hears the call AND the mic. */
+  source?: 'system' | 'mic';
   micDeviceId: string | null; // specific mic input (null = OS default)
 }
 
 export interface AppSettings {
   apiKeyPresent: boolean;
+  /** Per cloud provider: is a key stored? `openai` mirrors `apiKeyPresent`.
+   *  Booleans only — keys never cross to the renderer (docs/07). */
+  providerKeys: Record<CloudProviderId, boolean>;
+  /** Speech-to-text engine + local model choice (shared/stt.ts). */
+  stt: SttPrefs;
+  /** Can a live session transcribe with the current choice — cloud needs the
+   *  OpenAI key, local needs its model fully downloaded. */
+  sttReady: boolean;
+  /** First-run setup (name → transcription → AI) finished or skipped. */
+  onboardingDone: boolean;
   models: Record<string, string>; // user overrides only
   modelPreset: string; // active cost/quality preset: 'balanced' | 'low_cost' | 'best'
   modelDefaults: Record<string, string>; // effective per-task defaults (the active preset's table)
@@ -686,6 +707,11 @@ export interface AppSettings {
 export interface TranscriptDeltaEvent {
   text: string;
   isFinal: boolean;
+  /** The remote side carries the mode's `remoteSpeaker` ('them' / 'interviewer';
+   *  'you' for solo activities, where the user IS the trigger source); the
+   *  user's own microphone turns carry the mode's `localSpeaker` ('you' /
+   *  'candidate'). Interim (non-final) deltas are broadcast for the trigger
+   *  stream only. */
   speaker: Speaker;
 }
 export interface AnswerDeltaEvent {

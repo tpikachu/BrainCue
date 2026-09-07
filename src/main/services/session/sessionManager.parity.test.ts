@@ -467,3 +467,85 @@ describe('engine behaviors surfaced by the extraction (v2)', () => {
     sessionManager.stop(session.id);
   });
 });
+
+describe('in-session history (question N knows about question N-1)', () => {
+  const question = async () => ({ isQuestion: true, type: 'behavioral', confidence: 0.9, strategy: 'star' });
+
+  it('the first question carries no history; the second carries the first exchange once', async () => {
+    const { session } = startSession();
+    const inputs: Record<string, unknown>[] = [];
+    h.classify = question;
+    h.streamAnswer = (input) => {
+      inputs.push(input);
+      return defaultStream();
+    };
+
+    await sessionManager.processFinalTranscript(session.id, 'Tell me about a migration you led?');
+    await sessionManager.processFinalTranscript(session.id, 'What was the hardest part of that migration project?');
+
+    expect(inputs).toHaveLength(2);
+    expect(inputs[0].history).toBeUndefined();
+    // The detected question replaces the `heard` turn it came from — the
+    // exchange appears exactly once, with the answer that was streamed.
+    expect(inputs[1].history).toEqual([
+      { role: 'asked', question: 'Tell me about a migration you led?', answer: 'Hello world' },
+    ]);
+    sessionManager.stop(session.id);
+  });
+
+  it('non-question turns are remembered as heard, and a short follow-up retrieves with the previous question', async () => {
+    const { profileId, session } = startSession();
+    const inputs: Record<string, unknown>[] = [];
+    h.streamAnswer = (input) => {
+      inputs.push(input);
+      return defaultStream();
+    };
+
+    await sessionManager.processFinalTranscript(session.id, 'Thanks for joining, we have a few topics today.');
+    h.classify = question;
+    await sessionManager.processFinalTranscript(session.id, 'Which database did you pick for the rewrite?');
+    await sessionManager.processFinalTranscript(session.id, 'And why that one?');
+
+    expect(inputs[0].history).toEqual([
+      { role: 'heard', text: 'Thanks for joining, we have a few topics today.' },
+    ]);
+    expect(inputs[1].history).toEqual([
+      { role: 'heard', text: 'Thanks for joining, we have a few topics today.' },
+      { role: 'asked', question: 'Which database did you pick for the rewrite?', answer: 'Hello world' },
+    ]);
+    // Retrieval for the referential follow-up embeds the previous question too;
+    // the long first question retrieved on its own text.
+    expect(h.retrieveCalls.map((c) => c[1])).toEqual([
+      'Which database did you pick for the rewrite?',
+      'Which database did you pick for the rewrite? And why that one?',
+    ]);
+    expect(h.retrieveCalls[0][0]).toBe(profileId);
+    sessionManager.stop(session.id);
+  });
+
+  it('regenerating a question updates its history entry instead of adding a second', async () => {
+    const { session } = startSession();
+    const inputs: Record<string, unknown>[] = [];
+    let take = 0;
+    h.classify = question;
+    h.streamAnswer = (input) => {
+      inputs.push(input);
+      take += 1;
+      const text = take === 1 ? 'First take' : 'Second take';
+      return (async function* (): AsyncGenerator<AnswerEvent> {
+        yield { type: 'delta', token: text };
+        yield { type: 'meta', riskWarning: null };
+      })();
+    };
+
+    await sessionManager.processFinalTranscript(session.id, 'Describe your leadership style?');
+    await sessionManager.regenerate();
+    await sessionManager.processFinalTranscript(session.id, 'How does that show up in conflict?');
+
+    expect(inputs).toHaveLength(3);
+    expect(inputs[2].history).toEqual([
+      { role: 'asked', question: 'Describe your leadership style?', answer: 'Second take' },
+    ]);
+    sessionManager.stop(session.id);
+  });
+});

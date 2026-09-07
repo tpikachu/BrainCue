@@ -110,11 +110,13 @@ const FAQS: { group: string; items: Faq[] }[] = [
         q: 'Why is it staying quiet?',
         a: (
           <>
-            Because that is the default, and it is deliberate. An ambient assistant is judged by
-            when it does <i>not</i> speak. <b>Presence</b> sets an explicit threshold — Summoned
-            only, Quiet, Balanced, or Active — and you pick it when the session starts. If you
-            want an answer right now, ask: press the summon shortcut and talk, or type into the
-            Cue Card.
+            Check the <b>Presence</b> you picked when the session started. On <b>Balanced</b>, the
+            default, a question asked in the room is answered in the Cue Card right away;
+            everything else — context, action items, decisions — must clear a confidence bar and
+            a cooldown, because an ambient assistant is judged by when it does <i>not</i> speak.
+            On <b>Quiet</b> a question only becomes a card; on <b>Summoned only</b> nothing is
+            automatic. If you want an answer right now, ask: press the summon shortcut and talk,
+            or type into the Cue Card.
           </>
         ),
       },
@@ -279,10 +281,25 @@ const FAQS: { group: string; items: Faq[] }[] = [
         q: 'Nothing is being transcribed.',
         a: (
           <>
-            Check three things in order: the API key is set in Settings, the microphone
-            permission is granted (Home shows its state), and the audio source matches the
-            conversation — <b>System audio</b> for an online call, <b>Microphone</b> for the room
-            you are in. On macOS, system audio additionally needs a virtual audio device.
+            Check three things in order: a transcription engine is ready (an API key in Settings,
+            or a downloaded local model), the microphone permission is granted (Home shows its
+            state), and the <b>system-audio picker was accepted</b> when the session started. A
+            call is heard on both sides — the call&rsquo;s audio and your microphone — and
+            questions come from the call; if the picker was cancelled, only your own words are
+            transcribed and nothing is answered. Stop and start again to get the picker back. On
+            macOS, system audio additionally needs a virtual audio device.
+          </>
+        ),
+      },
+      {
+        q: 'The transcript shows the other side\u2019s words twice.',
+        a: (
+          <>
+            On laptop speakers your microphone hears the call too, so a remote turn can arrive
+            from both streams. BrainCue drops the microphone&rsquo;s copy when the call said the
+            same words within a couple of seconds, so an occasional duplicate means the two
+            transcripts disagreed on the wording. <b>Headphones</b> remove the echo entirely and
+            are the best setup for a call.
           </>
         ),
       },

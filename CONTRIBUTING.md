@@ -39,14 +39,13 @@ label, a version milestone, and (if scheduled for the current train) a board
 row. Then it's ready to build against.
 
 **Labels and milestones:** `kind:*` says what an issue *is* (bug, feature);
-`triage` → `accepted` / `blocked` say where it stands; `bounty:*` and `eval:*`
-belong to the GitTensor pipeline below — don't set them yourself. Version
-targeting uses GitHub **milestones** (v2.2.0, …), which close when the train
-ships. There are no priority labels: the board's ordering is the priority.
+`triage` → `accepted` / `blocked` say where it stands. Version targeting uses
+GitHub **milestones** (v2.2.0, …), which close when the train ships. There are
+no priority labels: the board's ordering is the priority.
 
 ## Getting set up
 
-**Prerequisites:** Node **20.11+** (declared in `engines`; `.nvmrc` matches),
+**Prerequisites:** Node **22+** (declared in `engines`; `.nvmrc` says 24, which CI also uses),
 network access for the Electron binary download during install, and — only when
 npm has no prebuilt better-sqlite3 for the pinned Electron — a C++ toolchain
 for the source rebuild (Windows: Visual Studio Build Tools + Python; macOS:
@@ -206,44 +205,15 @@ test kills.
 
 ## Pull requests
 
+- **Start from an issue** for features and enhancements — an `accepted` one
+  (see "Where work comes from"), linked with `Closes #<issue>` in the PR body.
+  Small fixes and doc corrections can skip this.
 - One logical change per PR; keep unrelated refactors out of it.
 - Explain **why** in the description, not just what — the diff already says what.
 - Say what you ran and what you couldn't (e.g. "no macOS machine, Windows only").
 - Screenshots or a short clip for UI changes are very welcome.
-
-## Contributing via GitTensor (Bittensor SN74)
-
-BrainCue is preparing for listing as a GitTensor master repository — merged
-PRs here would earn TAO for registered miners. Until listing lands this
-section is forward-looking, but the workflow below is already how the repo
-runs, and it is designed around how SN74 actually scores
-([docs/13-GITTENSOR.md](docs/13-GITTENSOR.md) has the full mechanics):
-
-- **Start from an issue — enforced.** Your PR body must contain
-  `Closes #<issue>` or the intake gate (a required check) fails; fixing the
-  description re-runs it, no push needed. Prefer maintainer-labeled
-  `bounty:*` issues: they carry SN74's maintainer-issue multiplier (×1.66)
-  and they're the work we will actually merge. Unsolicited scope has the
-  highest close risk, and closed PRs damage your credibility ratio (the 0.80
-  eligibility floor).
-- **Approval is the merge.** When a maintainer approves your PR and the
-  required checks are green, it merges automatically (native auto-merge,
-  armed on every PR) — no waiting on a second click.
-- **Every PR is evaluated automatically** (see [eval/](eval/)): intake
-  guards, a secret scan, unit coverage of your changed lines (advisory floor
-  70%), and a rubric-pinned LLM review that scores eight dimensions with
-  file:line evidence. The scorecard comment tells you exactly what to fix
-  **before** a human reviews — bot feedback never counts as a "changes
-  requested" review, so iterating against it is free.
-- **We don't casually close PRs.** A failed evaluation gets `eval:needs-work`
-  and a fix window; closes happen on abandonment or bad faith. Your
-  credibility is safe with honest work.
-- **One concern per PR**, ≤ 40 files / ≤ 2500 lines for external PRs, no
-  binaries. Splitting one concern across many PRs to farm per-PR score is
-  detected and collapsed.
-- **Tests and docs pay here.** SN74's own token scoring underweights them
-  (×0.05 / ×0.08), so we deliberately price them back in with labeled
-  `bounty:test` / `bounty:docs` issues.
+- **Approval is the merge.** When a maintainer approves and CI is green, the
+  PR merges automatically (native auto-merge, armed on every PR).
 
 ## Reporting bugs
 

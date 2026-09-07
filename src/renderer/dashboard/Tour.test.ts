@@ -60,10 +60,19 @@ describe('the guided tour', () => {
     // typo'd or retired route lands the user on a blank screen mid-tour with
     // the spotlight fixed to nothing.
     const app = readFileSync(join(RENDERER, 'dashboard', 'App.tsx'), 'utf8');
-    const routes = new Set([...app.matchAll(/<Route\s+path="([^"]+)"/g)].map((m) => m[1]));
+    // A registered path may carry params (`/settings/:section`), which a step
+    // fills in (`/settings/models`) — match each segment, `:x` against any one.
+    const routes = [...app.matchAll(/<Route\s+path="([^"]+)"/g)].map(
+      (m) => new RegExp(`^${m[1].replace(/:[^/]+/g, '[^/]+')}$`),
+    );
+    const registered = (r: string) => routes.some((re) => re.test(r));
     const used = [...new Set(TOUR_STEPS.map((s) => s.route).filter((r): r is string => !!r))];
     expect(used.length, 'no step navigates — the tour is spotlighting nav items again').toBeGreaterThan(3);
-    expect(used.filter((r) => !routes.has(r))).toEqual([]);
+    expect(used.filter((r) => !registered(r))).toEqual([]);
+    // Guard the matcher: a param route must accept a filled-in section and
+    // reject a nested path it does not register.
+    expect(registered('/settings/models')).toBe(true);
+    expect(registered('/settings/models/extra')).toBe(false);
   });
 
   it('points at components, not just at the sidebar', () => {

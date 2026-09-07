@@ -1,10 +1,12 @@
 import { providerFor } from '../../providers/registry';
+import { normalizeSpeaker } from '@shared/types';
 import type {
   AnswerFormat,
   InterviewType,
   Profile,
   RetrievedChunk,
   RetrievedMemory,
+  Speaker,
 } from '@shared/types';
 
 /**
@@ -17,6 +19,20 @@ import type {
  * as a pitch. `conversation` is the framing for every other mode.
  */
 export type AnswerFraming = 'interview' | 'conversation';
+
+/**
+ * What has already happened in THIS live session, oldest first: turns the
+ * app heard, and questions it already answered. Threaded into the answer
+ * prompt so question N can resolve "that", "the second one", "what about the
+ * timeline?" against question N-1 — every answer used to be a cold start.
+ * The engine owns the buffer (size, clipping); this layer only renders it.
+ */
+export type SessionHistoryItem =
+  /** A finalized turn. `speaker` says whose: the remote side ("Heard:") or
+   *  the user's own microphone ("You said:"). Absent = remote (v1 shape). */
+  | { role: 'heard'; text: string; speaker?: Speaker }
+  | { role: 'asked'; question: string; answer: string };
+export type SessionHistory = SessionHistoryItem[];
 
 export interface AnswerInput {
   question: string;
@@ -33,6 +49,9 @@ export interface AnswerInput {
   framing?: AnswerFraming;
   /** Only meaningful under `interview` framing; ignored otherwise. */
   interviewType?: InterviewType;
+  /** Earlier turns + answered questions of this session. Absent/empty leaves
+   *  the prompt byte-identical — history only ever ADDS a section. */
+  history?: SessionHistory;
   signal?: AbortSignal;
 }
 
@@ -126,6 +145,31 @@ const CLOSING_RULE: Record<AnswerFraming, string> = {
     '  question genuinely asks about it. Say the useful thing and stop.',
 };
 
+/** What to do when the context cannot support the question. The interview
+ *  text is v1, byte-for-byte. The conversation text exists because the
+ *  interview wording ("not in their background… transferable skills") never
+ *  fired in a meeting: asked for a budget with no notes, the model produced a
+ *  plausible dollar figure — the one thing a cue card must never do. */
+const FABRICATION_GUARD: Record<AnswerFraming, string> = {
+  interview:
+    '- FABRICATION GUARD: if the context can\'t support what\'s asked, do NOT make it up. Begin\n' +
+    '  the answer with "⚠", state in one short clause that it\'s not in their background, then\n' +
+    '  pivot to a grounded, cited, transferable-skills framing (this is the riskWarning case).',
+  conversation:
+    '- FABRICATION GUARD: if the context does not contain the specific thing asked for — a\n' +
+    '  figure, a date, a decision, a name, a status — do NOT make it up, and NEVER produce a\n' +
+    '  plausible-sounding number or range in its place. Begin the answer with "⚠", say in one\n' +
+    '  short clause that it is not in their notes, then give only what IS grounded: what the\n' +
+    '  notes do say about it, who or where would have the answer, or the one question to ask\n' +
+    '  back. A short honest answer beats a confident invented one every time.',
+};
+
+/** The card's risk line when nothing in the Space matched the question. */
+const NO_CONTEXT_WARNING: Record<AnswerFraming, string> = {
+  interview: 'No matching profile experience found.',
+  conversation: 'Nothing in this Space covers this — the answer is not grounded.',
+};
+
 const buildSystem = (framing: AnswerFraming): string => `${ROLE[framing]}
 Rules:
 - FORMAT is a HARD constraint. Obey the requested format EXACTLY — even if you have more
@@ -150,17 +194,28 @@ Rules:
 - Ground every SPECIFIC claim (employers, projects, metrics, dates) ONLY in the context.
   Use (company) context to tailor — but NEVER invent the ${SUBJECT[framing]}'s own experience or
   numbers that aren't there. Generic best-practice statements need no citation.
-- FABRICATION GUARD: if the context can't support what's asked, do NOT make it up. Begin
-  the answer with "⚠", state in one short clause that it's not in their background, then
-  pivot to a grounded, cited, transferable-skills framing (this is the riskWarning case).
+${FABRICATION_GUARD[framing]}
 ${CLOSING_RULE[framing]}
 - Formatting: lead with the single most important line; **bold** only the few words that
   anchor the eye mid-glance; bullets for KEY POINTS and connected sentences for everything
   else; no headers, no stage directions, no meta-commentary — every word on the card must
   be safe to say out loud.`;
 
-function buildContext(chunks: RetrievedChunk[]): string {
-  if (chunks.length === 0) return '(no relevant profile context found)';
+/** What stands in for the context when nothing matched. The interview line is
+ *  v1. The conversation line is deliberately blunt and sits exactly where the
+ *  model looks for facts: with only the system-prompt guard, a meeting answer
+ *  to "what is our Q3 budget" still asserted a status ("pending finance
+ *  approval") it had no basis for. */
+const NO_CONTEXT_LINE: Record<AnswerFraming, string> = {
+  interview: '(no relevant profile context found)',
+  conversation:
+    '(NOTHING in this Space matches the question. You have NO facts about it — no figure, no ' +
+    'status, no decision, no owner. Apply the FABRICATION GUARD: start with "⚠", say it is not ' +
+    'in the notes, and do not assert anything about it as if it were known.)',
+};
+
+function buildContext(chunks: RetrievedChunk[], framing: AnswerFraming = 'interview'): string {
+  if (chunks.length === 0) return NO_CONTEXT_LINE[framing];
   return chunks.map((c, i) => `[${i + 1}] (${c.sourceType}) ${c.content}`).join('\n\n');
 }
 
@@ -169,6 +224,21 @@ function buildContext(chunks: RetrievedChunk[]): string {
  *  for tests. */
 export function buildMemoryBlock(memories: RetrievedMemory[]): string {
   return memories.map((m, i) => `[M${i + 1}] (${m.category}) ${m.content}`).join('\n\n');
+}
+
+/** Renders the session-so-far block: what was heard and what was already
+ *  answered, oldest first, labeled so the model never mistakes it for CONTEXT. */
+export function buildHistoryBlock(history: SessionHistory): string {
+  return history
+    .map((h) => {
+      if (h.role !== 'heard') return `Asked: ${h.question}\nYou answered: ${h.answer}`;
+      // The user's own words (their microphone) are labeled as theirs, so the
+      // model can tell what was put to them from what they already said —
+      // "you" is the same person the answer is written as (first person).
+      const own = h.speaker !== undefined && normalizeSpeaker(h.speaker) === 'you';
+      return own ? `You said: ${h.text}` : `Heard: ${h.text}`;
+    })
+    .join('\n');
 }
 
 /**
@@ -202,7 +272,7 @@ export async function* streamAnswer(input: AnswerInput): AsyncGenerator<AnswerEv
         : `About them: ${input.profile.name}`,
     '',
     'CONTEXT:',
-    buildContext(input.contextChunks),
+    buildContext(input.contextChunks, framing),
     // Memory only ever ADDS a section — with none recalled, the prompt stays
     // byte-identical to v1 (pinned by the existing answer tests).
     ...(input.memories?.length
@@ -210,6 +280,17 @@ export async function* streamAnswer(input: AnswerInput): AsyncGenerator<AnswerEv
           '',
           `MEMORY (the ${SUBJECT[framing]}'s own saved notes — cite as [M1], [M2]…, separate from the CONTEXT numbers):`,
           buildMemoryBlock(input.memories),
+        ]
+      : []),
+    // The session so far — also additive only. Placed right before the
+    // question so a referential follow-up reads against the thing it refers to.
+    ...(input.history?.length
+      ? [
+          '',
+          'EARLIER IN THIS CONVERSATION (oldest first). Use it to resolve references in the ' +
+            'QUESTION ("that", "the second option", "what about the timeline") and to avoid ' +
+            'repeating an answer already given. Do NOT cite it and do NOT restate it:',
+          buildHistoryBlock(input.history),
         ]
       : []),
     '',
@@ -253,6 +334,6 @@ export async function* streamAnswer(input: AnswerInput): AsyncGenerator<AnswerEv
 
   yield {
     type: 'meta',
-    riskWarning: input.contextChunks.length === 0 ? 'No matching profile experience found.' : null,
+    riskWarning: input.contextChunks.length === 0 ? NO_CONTEXT_WARNING[framing] : null,
   };
 }

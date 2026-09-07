@@ -1,16 +1,15 @@
 import { openai } from './client';
 import { model, reasoningParam } from './models';
-import { codingRules } from './codingPrompt';
+import { visionSolvePrompt } from './codingPrompt';
 import type { AnswerEvent } from './answer';
 import type { AnswerFormat } from '@shared/types';
 
 /**
- * Solve a problem from ONE OR MORE screenshots using the 'coding' model (multimodal,
- * a reasoning model by default). A long LeetCode-style problem scrolls past one
- * viewport, so the user captures several overlapping screenshots top-to-bottom and we
- * send them ALL in a single request, instruction-first, in scroll order — the model
- * reconstructs/dedupes them (far more robust than client-side pixel stitching).
- * detail:'high' because code legibility is the whole game.
+ * OpenAI transport for the screenshot solver ('coding' model — multimodal, a
+ * reasoning model by default). The prompt is shared with the other vision
+ * adapters (`visionSolvePrompt`); this file only shapes the Responses-API
+ * request: instruction-first, images in scroll order, detail:'high' because
+ * code legibility is the whole game. Reached through `providerFor('vision')`.
  */
 export async function* solveFromImages(
   dataUrls: string[],
@@ -18,13 +17,7 @@ export async function* solveFromImages(
   format: AnswerFormat,
   signal?: AbortSignal,
 ): AsyncGenerator<AnswerEvent> {
-  const system = `You are shown a screenshot containing a coding/technical interview problem (and possibly code). Read it carefully, transcribe the problem accurately, then solve it.\n${codingRules(language, format)}`;
-  const intro =
-    dataUrls.length > 1
-      ? `The following ${dataUrls.length} images are consecutive, top-to-bottom (possibly ` +
-        `overlapping) screenshots of ONE coding problem. Reconstruct the full problem text ` +
-        `(dedupe the overlapping regions), then solve it.`
-      : 'Solve the problem shown in this screenshot.';
+  const { system, intro } = visionSolvePrompt(dataUrls.length, language, format);
   const content = [
     { type: 'input_text' as const, text: intro },
     ...dataUrls.map((url) => ({

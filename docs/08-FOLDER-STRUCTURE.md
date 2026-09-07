@@ -17,16 +17,8 @@ AI_Inter/
 │
 ├─ CONTRIBUTING.md              # setup, gate, IPC contract, invariants
 ├─ SECURITY.md / CODE_OF_CONDUCT.md
-├─ .github/workflows/           # ci.yml · release.yml · pages.yml · pr-eval.yml
-│                               #   · pr-eval-report.yml (privileged workflow_run
-│                               #     follower: scorecard comment + LLM review)
+├─ .github/workflows/           # ci.yml · release.yml · pages.yml · auto-merge.yml
 ├─ .github/                     # CODEOWNERS · PR template · ISSUE_TEMPLATE/
-│
-├─ eval/                        # automated PR evaluation (docs/13-GITTENSOR.md)
-│  ├─ config/                   # weights.json · labels.json · rubric.md
-│  ├─ gates/                    # intake.mjs · secret-scan.mjs · coverage-diff.mjs
-│  ├─ llm/                      # review.mjs — schema-constrained LLM review
-│  └─ package.json              # isolated deps (openai) for the LLM stage
 │
 ├─ scripts/
 │  ├─ run-electron-vite.mjs     # dev/preview launcher
@@ -114,6 +106,14 @@ AI_Inter/
 │  │  │  │  ├─ sessionManager.ts# live session orchestration
 │  │  │  │  ├─ report.ts        # post-session report generation
 │  │  │  │  └─ privacy.ts       # screen-capture privacy affinity
+│  │  │  ├─ stt/                # speech-to-text engine choice + local engine (see 22-LOCAL-STT.md)
+│  │  │  │  ├─ index.ts         # seam: readSttPrefs / sttReady / applySttSelection
+│  │  │  │  ├─ prefs.ts         # persisted SttPrefs
+│  │  │  │  ├─ modelStore.ts    # <userData>/models/stt/<id>: installed(), bytesOnDisk(), active downloads
+│  │  │  │  ├─ downloader.ts    # resumable, size-verified download (Range + .part)
+│  │  │  │  ├─ worker.ts        # sherpa-onnx recognizer — a utilityProcess (out/main/stt-worker.js)
+│  │  │  │  ├─ localRealtimeStt.ts  # the `local` RealtimeSttProvider driving the worker
+│  │  │  │  └─ protocol.ts  pcm.ts   # worker messages; PCM16→Float32 + 24k→16k helpers
 │  │  │  └─ security/
 │  │  │     ├─ apiKey.ts        # safeStorage-backed ApiKeyStore
 │  │  │     └─ logger.ts        # redacting logger

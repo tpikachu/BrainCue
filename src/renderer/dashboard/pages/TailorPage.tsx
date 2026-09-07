@@ -143,14 +143,15 @@ export default function TailorPage() {
     if (session) return;
     setBusyAppId(app.id);
     try {
-      const a = settings?.audio ?? { source: 'system' as const, micDeviceId: null };
       await live.startNew({
         profileId: app.profileId,
         jobId: app.jobId,
         interviewType: 'general',
         answerFormat: 'key_points',
-        source: a.source,
-        micDeviceId: a.micDeviceId,
+        // An interview is a call: heard on both sides, questions from the call.
+        activity: 'job',
+        listensTo: 'system',
+        micDeviceId: settings?.audio?.micDeviceId ?? null,
       });
     } finally {
       setBusyAppId(null);
@@ -397,7 +398,7 @@ export default function TailorPage() {
           {!settings?.apiKeyPresent && (
             <p className="mt-3 text-xs text-amber-400">
               ⚠ No OpenAI key —{' '}
-              <Link to="/settings" className="underline">
+              <Link to="/settings/models" className="underline">
                 add it in Settings
               </Link>
               .

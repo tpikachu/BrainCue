@@ -32,6 +32,31 @@ const DECISION =
 const QUESTION_LEAD =
   /^(who|what|when|where|why|how|which|should|shall|can|could|would|will|do|does|did|are|is|was|were|have|has)\b/i;
 
+// --- unpunctuated questions ---------------------------------------------------
+// A streaming transcriber often finalizes a turn before the closing "?" lands
+// (the local engine's endpoint fires on trailing silence, and punctuation is
+// the last token out), so "What is our budget for Q3" must still read as a
+// question. Peel the conversational lead — "So," "Okay" — and a vocative —
+// "Michael," / "Michael What…" — then ask whether what is left opens like one.
+const DISCOURSE_LEAD = /^(?:(?:so|okay|ok|and|but|um+|uh+|well|now|alright|right)[,\s]+)+/i;
+const VOCATIVE_LEAD = /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?(?:[,:]\s+|\s+(?=[A-Z]))/;
+const WH_LEAD = /^(who|what|when|where|why|how|which)\b/i;
+const AUX_LEAD = /^(should|shall|can|could|would|will|do|does|did|are|is|was|were|have|has)\b/i;
+// "What we need is more time" is a statement: a wh-word followed by a subject
+// pronoun is a relative clause, not a question.
+const WH_THEN_SUBJECT = /^(?:who|what|when|where|why|how|which)\s+(?:we|i|they|you|he|she|it|people|everyone|that|this)\b/i;
+
+/** The turn with its conversational lead and vocative removed. */
+function questionCore(t: string): string {
+  return t.replace(DISCOURSE_LEAD, '').replace(VOCATIVE_LEAD, '').trim();
+}
+
+function opensLikeQuestion(t: string): boolean {
+  const core = questionCore(t);
+  if (wordCount(core) < 4) return false;
+  return AUX_LEAD.test(core) || (WH_LEAD.test(core) && !WH_THEN_SUBJECT.test(core));
+}
+
 const wordCount = (t: string): number => t.trim().split(/\s+/).filter(Boolean).length;
 
 /** First sentence (or the whole turn if unpunctuated), trimmed for card titles. */
@@ -61,6 +86,12 @@ export function evaluateTurnHeuristics(text: string): HeuristicVerdict {
 
   if (/\?\s*$/.test(t) || (QUESTION_LEAD.test(t) && t.includes('?'))) {
     return { type: 'question', confidence: 0.75, title: titleOf(t) };
+  }
+  // No question mark, but it opens like one. Slightly less confident: clears
+  // balanced/active (0.7 / 0.6) on its own, still goes to the classifier at
+  // quiet (0.75).
+  if (opensLikeQuestion(t)) {
+    return { type: 'question', confidence: 0.72, title: titleOf(t) };
   }
 
   return { type: 'ambiguous' };

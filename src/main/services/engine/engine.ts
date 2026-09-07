@@ -16,14 +16,17 @@ import { companionMode } from './modes/companion.mode';
 import { getOrGenerateMeetingReport } from './meetingReport';
 import { enginePersistence } from './persistence/enginePersistence';
 import { createRealtimeSource, pcmLevel } from './sourceAdapter';
-import { activity as activityConfig, modeFor } from '@shared/activities';
+import { activity as activityConfig, capturePlan, modeFor } from '@shared/activities';
+import type { CapturePlan } from '@shared/activities';
 import type {
   AnswerFormat,
+  AudioSource,
   ContextPackKind,
   InterviewType,
   Presence,
   Session,
   SessionMode,
+  Speaker,
 } from '@shared/types';
 import type { ModeDefinition } from './modeDefinition';
 
@@ -49,6 +52,22 @@ function resolveMode(opts: { activity?: ContextPackKind | null; mode?: SessionMo
   if (opts.mode) return opts.mode;
   if (opts.activity) return modeFor(opts.activity);
   return 'interview';
+}
+
+/**
+ * Which audio streams this session transcribes, and which one may trigger.
+ *
+ * The activity decides (shared/activities.ts `capturePlan`): a call hears the
+ * call AND the user's microphone, questions come from the call; a solo
+ * activity hears the microphone and questions come from it. A session with no
+ * activity — the rehearsal facades, v1 rows on resume — hears the remote side
+ * only, exactly as v1 did (a companion-mode row without an activity still
+ * listens to the user).
+ */
+function resolveCapture(opts: { activity?: ContextPackKind | null }, mode: SessionMode): CapturePlan {
+  if (opts.activity) return capturePlan(activityConfig(opts.activity).listensTo);
+  if (mode === 'companion') return capturePlan('mic');
+  return { streams: ['system'], triggerSource: 'system' };
 }
 
 function toSession(r: typeof schema.sessions.$inferSelect): Session {
@@ -118,30 +137,39 @@ class Engine {
     // capture-exclusion at capture start; the always-on protection observer
     // (startProtectionObserver) detects and heals that within one tick.
 
-    // Real sessions stream STT via the Realtime API. A mock rehearsal has no
-    // mic — its questions come from the AI interviewer — so skip the transcriber.
+    // Real sessions stream STT through the selected realtime provider — one
+    // transcriber PER captured stream (the call's system audio and the user's
+    // microphone; see resolveCapture), each tagging its turns with a speaker.
+    // Only the trigger stream's turns can become a cue; the other stream is
+    // transcribed and remembered so the answer knows what the user already
+    // said. A mock rehearsal has no audio at all — its questions come from the
+    // AI interviewer — so it opens none.
     if (!opts.ephemeral) {
-      const transcriber = createRealtimeSource(
-        {
-          onDelta: (text) => {
-            // Ambient policies gate on "the user is (still) speaking" — feed
-            // them interim activity so a decision mid-classify can defer.
-            session.ambientPolicy?.noteInterim?.(Date.now());
-            broadcast(EVENTS.transcriptDelta, {
-              text,
-              isFinal: false,
-              speaker: session.mode.remoteSpeaker,
-            });
+      const plan = resolveCapture(opts, modeDef.id);
+      session.triggerSource = plan.triggerSource;
+      for (const source of plan.streams) {
+        const isTrigger = source === plan.triggerSource;
+        const speaker: Speaker = isTrigger ? modeDef.remoteSpeaker : modeDef.localSpeaker;
+        session.transcribers[source] = createRealtimeSource(
+          {
+            onDelta: (text) => {
+              // Ambient policies gate on "someone is (still) speaking" — feed
+              // them interim activity so a decision mid-classify can defer.
+              session.ambientPolicy?.noteInterim?.(Date.now());
+              // Interim text is shown for the trigger stream only: the UI keeps
+              // ONE in-flight line, and two streams' partials interleaved into
+              // it would be unreadable. The user's own words arrive as finals.
+              if (isTrigger) broadcast(EVENTS.transcriptDelta, { text, isFinal: false, speaker });
+            },
+            onFinal: (text) => void this.processFinalTranscript(opts.sessionId, text, speaker),
+            onError: (message) => broadcast(EVENTS.sessionError, { message }),
+            // Socket lifecycle → a subtle "reconnecting audio…" pill in the Cue Card
+            // (an unexpected drop mid-session now recovers itself; see realtime.ts).
+            onStatus: (status) => broadcast(EVENTS.transcriberStatus, { status }, ['overlay']),
           },
-          onFinal: (text) => void this.processFinalTranscript(opts.sessionId, text),
-          onError: (message) => broadcast(EVENTS.sessionError, { message }),
-          // Socket lifecycle → a subtle "reconnecting audio…" pill in the Cue Card
-          // (an unexpected drop mid-session now recovers itself; see realtime.ts).
-          onStatus: (status) => broadcast(EVENTS.transcriberStatus, { status }, ['overlay']),
-        },
-        opts.language || 'en',
-      );
-      session.transcriber = transcriber; // opened already-started by the provider
+          opts.language || 'en',
+        ); // opened already-started by the provider
+      }
     }
 
     broadcast(EVENTS.sessionState, { status: 'live', paused: false });
@@ -254,26 +282,32 @@ class Engine {
     );
   }
 
-  /** Feed streaming PCM16 (24kHz mono) audio from the renderer to the transcriber. */
-  feedRealtimeAudio(sessionId: string, pcm: ArrayBuffer): void {
+  /** Feed streaming PCM16 (24kHz mono) audio from the renderer to the
+   *  transcriber of the stream it came from. Frames for a stream this session
+   *  did not open (a v1 caller's mic frames) are dropped. */
+  feedRealtimeAudio(sessionId: string, pcm: ArrayBuffer, source: AudioSource = 'system'): void {
     const s = this.current;
     if (!s || s.sessionId !== sessionId || s.paused) return;
-    s.transcriber?.appendAudio(Buffer.from(pcm).toString('base64'));
-    // Drive the Cue Card audio meter — the mic stream lives in the dashboard
+    s.transcribers[source]?.appendAudio(Buffer.from(pcm).toString('base64'));
+    // Drive the Cue Card audio meter — the streams live in the dashboard
     // renderer, so we compute the level here (from the PCM we already receive)
-    // and broadcast it, throttled to ~12/sec.
+    // and broadcast it, throttled to ~12/sec. With two streams the meter shows
+    // whichever is louder right now, so it moves for the call AND for the user.
+    s.levels[source] = pcmLevel(pcm);
     const now = Date.now();
     if (now - s.lastLevelAt >= 80) {
       s.lastLevelAt = now;
-      broadcast(EVENTS.audioLevel, { level: pcmLevel(pcm) }, ['overlay']);
+      broadcast(EVENTS.audioLevel, { level: Math.max(s.levels.system, s.levels.mic) }, ['overlay']);
     }
   }
 
-  /** Persist a finalized transcript turn and run it through the mode's trigger. */
-  async processFinalTranscript(sessionId: string, text: string): Promise<void> {
+  /** Persist a finalized transcript turn and run it through the mode's trigger.
+   *  `speaker` defaults to the mode's remote speaker (the trigger stream); the
+   *  user's own mic turns pass the mode's local speaker and are only recorded. */
+  async processFinalTranscript(sessionId: string, text: string, speaker?: Speaker): Promise<void> {
     const s = this.current;
     if (!text || !s || s.sessionId !== sessionId || s.paused) return;
-    await s.handleEvent({ kind: 'transcript_final', sessionId, text });
+    await s.handleEvent({ kind: 'transcript_final', sessionId, text, speaker });
   }
 
   /** Chunked STT fallback (used only if Realtime is unavailable). */

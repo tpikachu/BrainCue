@@ -9,7 +9,7 @@ import type {
   SessionMode,
   Speaker,
 } from '@shared/types';
-import type { AnswerEvent } from '../openai/answer';
+import type { AnswerEvent, SessionHistory } from '../openai/answer';
 import type { TriggerPolicy } from './trigger/triggerPolicy';
 import type { AmbientDecision } from './trigger/ambientPolicy';
 
@@ -33,6 +33,9 @@ export interface GenerateInput {
   memories: RetrievedMemory[];
   profile: Profile;
   settings: RuntimeSettings;
+  /** What this session already heard and answered, oldest first — so a
+   *  follow-up question is answered as a follow-up. Undefined on question 1. */
+  history?: SessionHistory;
   signal: AbortSignal;
 }
 
@@ -104,6 +107,12 @@ export interface ModeDefinition {
    *  keeps the legacy 'interviewer' so rows and the Cue Card are unchanged;
    *  new modes use the v2 vocabulary ('them'). */
   remoteSpeaker: Speaker;
+  /** Speaker label for the user's OWN microphone turns when a session hears
+   *  both streams (shared/activities.ts `capturePlan`). Interview keeps the
+   *  legacy pair ('interviewer' / 'candidate' — what Practice already writes
+   *  for the candidate); meetings use the v2 'you'. These turns are persisted,
+   *  shown and remembered, but never run the trigger. */
+  localSpeaker: Speaker;
   /** When should an automatic contribution happen? (Direct asks bypass this —
    *  the engine routes them through the summoned policy.) */
   trigger: TriggerPolicy;

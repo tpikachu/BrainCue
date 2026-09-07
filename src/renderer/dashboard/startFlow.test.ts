@@ -35,16 +35,24 @@ describe('the start catalog — one list, not two', () => {
 });
 
 describe('startBlocker — the explicit-start gate', () => {
-  const ok = { profile: profile(), apiKeyPresent: true, sessionLive: false };
+  const ok = { profile: profile(), apiKeyPresent: true, sttReady: true, sessionLive: false };
 
   it('passes when a keyed profile is picked and nothing is live', () => {
     expect(startBlocker(ok)).toBeNull();
   });
 
-  it('blocks in priority order: live session > key > profile', () => {
+  it('blocks in priority order: live session > key > transcription > profile', () => {
     expect(startBlocker({ ...ok, sessionLive: true })).toMatch(/already live/);
     expect(startBlocker({ ...ok, apiKeyPresent: false })).toMatch(/API key/);
+    expect(startBlocker({ ...ok, sttReady: false })).toMatch(/Transcription is not set up/);
     expect(startBlocker({ ...ok, profile: undefined })).toMatch(/profile/i);
+  });
+
+  it('names the missing key before missing transcription — one fix can clear both', () => {
+    // Cloud engine + no key: sttReady is false too, but "add the key" is the
+    // actionable message. Local engine with a model but no key: still the key.
+    expect(startBlocker({ ...ok, apiKeyPresent: false, sttReady: false })).toMatch(/API key/);
+    expect(startBlocker({ ...ok, apiKeyPresent: false, sttReady: false })).not.toMatch(/Transcription/);
   });
 
   it('asks for a résumé before an interview', () => {
@@ -123,17 +131,23 @@ describe('spacesFor — a Space is a saved activity', () => {
 });
 
 describe('captureSummary — the transparency contract', () => {
-  it('names the chosen audio source', () => {
-    expect(captureSummary({ source: 'system', spaceTitle: null }).captured[0]).toMatch(
+  it('says a call is heard on BOTH sides, and that questions come from the call', () => {
+    const call = captureSummary({ listensTo: 'system', spaceTitle: null }).captured[0];
+    expect(call).toMatch(/System audio/);
+    expect(call).toMatch(/microphone/);
+    expect(call).toMatch(/Questions are taken from the call/);
+    // Both streams leave the machine when the cloud engine transcribes.
+    expect(captureSummary({ listensTo: 'system', spaceTitle: null }).sent[0]).toMatch(/both streams/);
+    expect(captureSummary({ listensTo: 'mic', spaceTitle: null }).captured[0]).toMatch(/microphone/);
+    expect(captureSummary({ listensTo: 'mic', spaceTitle: null }).captured[0]).not.toMatch(
       /System audio/,
     );
-    expect(captureSummary({ source: 'mic', spaceTitle: null }).captured[0]).toMatch(/microphone/);
   });
 
   it('scopes the sent-chunks line to the Space when one is selected', () => {
-    const withSpace = captureSummary({ source: 'system', spaceTitle: 'Stripe · Platform PM' });
+    const withSpace = captureSummary({ listensTo: 'system', spaceTitle: 'Stripe · Platform PM' });
     expect(withSpace.sent[1]).toContain('Stripe · Platform PM');
-    const noSpace = captureSummary({ source: 'system', spaceTitle: null });
+    const noSpace = captureSummary({ listensTo: 'system', spaceTitle: null });
     expect(noSpace.sent[1]).toContain('your profile');
     expect(noSpace.sent[1]).not.toContain('Space');
   });
@@ -142,11 +156,11 @@ describe('captureSummary — the transparency contract', () => {
     // A Space is the only place a conversation is kept, so starting without one
     // means keeping nothing. Discovering that after the call is discovering it
     // too late.
-    const noSpace = captureSummary({ source: 'system', spaceTitle: null }).captured.join(' ');
+    const noSpace = captureSummary({ listensTo: 'system', spaceTitle: null }).captured.join(' ');
     expect(noSpace).toMatch(/nothing is summarised or remembered/i);
 
     const withSpace = captureSummary({
-      source: 'system',
+      listensTo: 'system',
       spaceTitle: 'Senior engineer · Acme',
     }).captured.join(' ');
     expect(withSpace).toContain('Senior engineer · Acme');
@@ -154,7 +168,7 @@ describe('captureSummary — the transparency contract', () => {
   });
 
   it('always states what NEVER leaves the machine (key, full docs, screen)', () => {
-    const { neverSent } = captureSummary({ source: 'system', spaceTitle: null });
+    const { neverSent } = captureSummary({ listensTo: 'system', spaceTitle: null });
     expect(neverSent.join(' ')).toMatch(/API key/);
     expect(neverSent.join(' ')).toMatch(/résumé|documents/);
     expect(neverSent.join(' ')).toMatch(/screen/i);
@@ -163,17 +177,17 @@ describe('captureSummary — the transparency contract', () => {
   it('describes the pipeline of the activity’s MODE, not the activity', () => {
     // A project call and a standup are different activities that run the same
     // mode — so they must promise exactly the same things.
-    expect(captureSummary({ source: 'system', spaceTitle: null, activity: 'project' })).toEqual(
-      captureSummary({ source: 'system', spaceTitle: null, activity: 'meeting' }),
+    expect(captureSummary({ listensTo: 'system', spaceTitle: null, activity: 'project' })).toEqual(
+      captureSummary({ listensTo: 'system', spaceTitle: null, activity: 'meeting' }),
     );
-    expect(captureSummary({ source: 'system', spaceTitle: null, activity: 'meeting' }).sent.join(' '))
+    expect(captureSummary({ listensTo: 'system', spaceTitle: null, activity: 'meeting' }).sent.join(' '))
       .toMatch(/salience scoring/);
-    expect(captureSummary({ source: 'system', spaceTitle: null, activity: 'job' }).sent.join(' '))
+    expect(captureSummary({ listensTo: 'system', spaceTitle: null, activity: 'job' }).sent.join(' '))
       .toMatch(/Per detected question/);
   });
 
   it('solo: mic-only capture bounded to the session, and the no-model-call promise', () => {
-    const s = captureSummary({ source: 'system', spaceTitle: null, activity: 'solo' });
+    const s = captureSummary({ listensTo: 'system', spaceTitle: null, activity: 'solo' });
     // Whatever source was toggled, a companion session always captures the
     // microphone, and only while the session runs (explicit consent boundary).
     expect(s.captured[0]).toMatch(/microphone/i);
