@@ -1,8 +1,11 @@
-import type { AnswerFormat, InterviewType } from '@shared/types';
+import type { AnswerFormat, AppSettings, InterviewType } from '@shared/types';
+import type { CloudProviderId } from '@shared/providers';
 import { Dropdown } from '../../components/ui';
 import { TrashIcon } from '../../components/icons';
+import { pickerTask } from '../../lib/modelChoice';
 import { ctrlSelect, noDrag } from '../lib/style';
 import { Btn } from './Btn';
+import { ModelChip } from './ModelChip';
 
 const INTERVIEW_TYPES: { value: InterviewType; label: string }[] = [
   { value: 'general', label: 'General' },
@@ -12,7 +15,7 @@ const INTERVIEW_TYPES: { value: InterviewType; label: string }[] = [
   { value: 'system_design', label: 'System design' },
 ];
 
-/** Answer controls (labeled): interview type, format, listen-only (coding),
+/** Answer controls (labeled): interview type, model, format, listen-only (coding),
  *  history, pronunciation, clear. All dynamic — change them anytime mid-interview. */
 export function AnswerControls(props: {
   interviewType: InterviewType;
@@ -20,7 +23,10 @@ export function AnswerControls(props: {
   pronunciation: boolean;
   answerInterviewer: boolean;
   historyEnabled: boolean;
+  /** Persisted settings (for the model chip); null until loaded. */
+  settings: AppSettings | null;
   onChangeType: (t: InterviewType) => void;
+  onPickModel: (task: 'answer' | 'coding', provider: CloudProviderId, id: string) => void;
   onChangeFormat: (f: AnswerFormat) => void;
   onTogglePronunciation: () => void;
   onToggleAnswerInterviewer: () => void;
@@ -44,6 +50,13 @@ export function AnswerControls(props: {
           buttonClassName={`flex items-center gap-1 ${ctrlSelect}`}
         />
       </span>
+      {/* Which model answers THIS session's questions: the solver in a coding
+          interview, the live cue otherwise. Picking re-answers the current one. */}
+      <ModelChip
+        settings={props.settings}
+        task={pickerTask(props.interviewType)}
+        onPick={(provider, id) => props.onPickModel(pickerTask(props.interviewType), provider, id)}
+      />
       <span className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-neutral-500">
         Format
         <span className="flex overflow-hidden rounded-md ring-1 ring-neutral-700">

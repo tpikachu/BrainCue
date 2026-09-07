@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import { api } from '../lib/api';
 import { floatTo16BitPCM, rms } from '../lib/pcm';
-import type { Presence, Session } from '@shared/types';
+import { resolveCapture, type Attempt } from '../lib/captureStreams';
+import type { AudioSource, Presence, Session } from '@shared/types';
 import type { SavePrompt } from '@shared/ipc';
 
-export type AudioSource = 'mic' | 'system';
+export type { AudioSource };
 
 export interface Line {
   id: number;
@@ -13,10 +14,15 @@ export interface Line {
 }
 
 /**
- * The live interview session lives HERE, not in the SessionPage component, so it
- * survives route changes — navigating away from Live Session no longer drops the
- * session or stops the microphone. Audio capture (AudioContext/stream/processor)
- * are module singletons; transcript/question events are subscribed once.
+ * The live session lives HERE, not in a page component, so it survives route
+ * changes — navigating away from the session no longer drops it or stops the
+ * audio. Audio capture (AudioContext/streams/processors) are module
+ * singletons; transcript/question events are subscribed once.
+ *
+ * A session hears BOTH the call (system loopback) and the user's microphone
+ * (shared/activities.ts `capturePlan`); each stream is pumped separately to
+ * main tagged with its source, where each has its own transcriber. Solo
+ * activities (`listensTo: 'mic'`) open the microphone alone.
  */
 interface LiveSessionState {
   session: Session | null;
@@ -24,11 +30,13 @@ interface LiveSessionState {
   transcript: Line[];
   interim: string;
   speaking: boolean;
-  micError: string | null; // audio-capture failure (denied mic / no system audio)
+  /** Audio-capture failure (nothing could be captured → no session), or a
+   *  non-fatal notice that ONE of the two streams is missing (session runs). */
+  micError: string | null;
   clearMicError: () => void;
   sessionError: string | null; // backend session failure (transcription socket, OpenAI)
   clearSessionError: () => void;
-  stream: MediaStream | null; // exposed for the waveform
+  stream: MediaStream | null; // the primary stream, exposed for the waveform
   pendingSave: SavePrompt | null; // a just-stopped session awaiting save/discard
   clearPendingSave: () => void;
 
@@ -40,7 +48,9 @@ interface LiveSessionState {
     interviewType?: string;
     answerFormat: string;
     jobId: string | null;
-    source: AudioSource;
+    /** What the session hears (the activity's `listensTo`): `'system'` = the
+     *  call AND the microphone, `'mic'` = the microphone alone. Default: a call. */
+    listensTo?: 'system' | 'mic';
     micDeviceId?: string | null;
     /** What this call IS (shared/activities.ts) — the ONE thing the user picks.
      *  The engine derives the mode from it; the renderer never sends one. */
@@ -54,7 +64,7 @@ interface LiveSessionState {
   }) => Promise<void>;
   resumeExisting: (a: {
     sessionId: string;
-    source: AudioSource;
+    listensTo?: 'system' | 'mic';
     micDeviceId?: string | null;
     prior: Line[];
   }) => Promise<void>;
@@ -67,20 +77,31 @@ interface LiveSessionState {
 const MAX_TRANSCRIPT = 500;
 
 // --- audio capture singletons (outside React) ---
+interface Pump {
+  source: AudioSource;
+  stream: MediaStream;
+  node: ScriptProcessorNode;
+}
 let ctx: AudioContext | null = null;
-let node: ScriptProcessorNode | null = null;
-let mediaStream: MediaStream | null = null;
+let pumps: Pump[] = [];
 let lineId = 0;
+/** Latest RMS per stream — `speaking` follows whichever is louder. */
+const levels: Record<AudioSource, number> = { system: 0, mic: 0 };
+const SPEAKING_RMS = 0.012;
 
-async function getStream(source: AudioSource, micDeviceId?: string | null): Promise<MediaStream> {
-  if (source === 'system') {
-    const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-    display.getVideoTracks().forEach((t) => t.stop());
-    if (display.getAudioTracks().length === 0) {
-      throw new Error('No system audio captured. Use Microphone, or check audio is playing.');
-    }
-    return display;
+async function getSystemStream(): Promise<MediaStream> {
+  const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+  display.getVideoTracks().forEach((t) => t.stop());
+  if (display.getAudioTracks().length === 0) {
+    display.getTracks().forEach((t) => t.stop());
+    throw new Error('No system audio captured — check that audio is playing.');
   }
+  return display;
+}
+
+/** The microphone also hears the speakers, so echo cancellation and noise
+ *  suppression stay ON: the call's voices are the other stream's job. */
+async function getMicStream(micDeviceId?: string | null): Promise<MediaStream> {
   return navigator.mediaDevices.getUserMedia({
     audio: {
       ...(micDeviceId ? { deviceId: { exact: micDeviceId } } : {}),
@@ -90,6 +111,35 @@ async function getStream(source: AudioSource, micDeviceId?: string | null): Prom
       channelCount: 1,
     },
   });
+}
+
+const attempt = async (p: Promise<MediaStream>): Promise<Attempt<MediaStream>> => {
+  try {
+    return { ok: true, stream: await p };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message || String(e) };
+  }
+};
+
+/** Acquire every stream the activity wants. A refused system-audio picker or
+ *  a denied microphone degrades to the other stream (see lib/captureStreams);
+ *  with neither this throws and no session is created. */
+async function acquire(
+  listensTo: 'system' | 'mic',
+  micDeviceId?: string | null,
+): Promise<ReturnType<typeof resolveCapture<MediaStream>>> {
+  const attempts: Partial<Record<AudioSource, Attempt<MediaStream>>> = {};
+  if (listensTo === 'system') {
+    // The picker is modal — take it first, then the (silent) mic prompt.
+    attempts.system = await attempt(getSystemStream());
+  }
+  attempts.mic = await attempt(getMicStream(micDeviceId));
+  try {
+    return resolveCapture(listensTo, attempts);
+  } catch (e) {
+    for (const a of Object.values(attempts)) if (a.ok) a.stream.getTracks().forEach((t) => t.stop());
+    throw e;
+  }
 }
 
 export const useLiveSession = create<LiveSessionState>((set, get) => {
@@ -137,41 +187,54 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
     }
   });
 
-  // Wire an already-acquired stream into the PCM pipeline. The stream is acquired
-  // by the caller FIRST (see startNew/resumeExisting) so a denied mic or cancelled
-  // system-audio picker never leaves a phantom "live" session with no audio.
-  async function attachCapture(sessionId: string, stream: MediaStream): Promise<void> {
+  // Wire already-acquired streams into the PCM pipeline: one AudioContext, one
+  // source → ScriptProcessor pump per stream, each frame sent to main tagged
+  // with the stream it came from. The streams are acquired by the caller FIRST
+  // (see startNew/resumeExisting) so a refused picker or a denied mic never
+  // leaves a phantom "live" session with no audio.
+  async function attachCapture(
+    sessionId: string,
+    capture: ReturnType<typeof resolveCapture<MediaStream>>,
+  ): Promise<void> {
     try {
-      mediaStream = stream;
-      set({ stream, micError: null });
+      const primary = capture.streams[capture.order[0]] ?? null;
+      set({ stream: primary, micError: capture.notice });
+      levels.system = 0;
+      levels.mic = 0;
 
       ctx = new AudioContext({ sampleRate: 24000 });
       await ctx.resume();
-      const src = ctx.createMediaStreamSource(stream);
-      node = ctx.createScriptProcessor(4096, 1, 1);
-      node.onaudioprocess = (e) => {
-        const input = e.inputBuffer.getChannelData(0);
-        set({ speaking: rms(input) > 0.012 });
-        api.session.sendRealtimeAudio(sessionId, floatTo16BitPCM(input).buffer as ArrayBuffer);
-      };
       const mute = ctx.createGain();
       mute.gain.value = 0;
-      src.connect(node);
-      node.connect(mute);
       mute.connect(ctx.destination);
+      for (const source of capture.order) {
+        const stream = capture.streams[source]!;
+        const src = ctx.createMediaStreamSource(stream);
+        const node = ctx.createScriptProcessor(4096, 1, 1);
+        node.onaudioprocess = (e) => {
+          const input = e.inputBuffer.getChannelData(0);
+          levels[source] = rms(input);
+          set({ speaking: Math.max(levels.system, levels.mic) > SPEAKING_RMS });
+          api.session.sendRealtimeAudio(sessionId, floatTo16BitPCM(input).buffer as ArrayBuffer, source);
+        };
+        src.connect(node);
+        node.connect(mute);
+        pumps.push({ source, stream, node });
+      }
     } catch (e) {
       set({ micError: (e as Error).message });
     }
   }
 
   function stopCapture(): void {
-    if (node) node.onaudioprocess = null;
-    node?.disconnect();
-    node = null;
+    for (const p of pumps) {
+      p.node.onaudioprocess = null;
+      p.node.disconnect();
+      p.stream.getTracks().forEach((t) => t.stop());
+    }
+    pumps = [];
     void ctx?.close().catch(() => {});
     ctx = null;
-    mediaStream?.getTracks().forEach((t) => t.stop());
-    mediaStream = null;
     set({ stream: null, speaking: false });
   }
 
@@ -189,12 +252,24 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
     pendingSave: null,
     clearPendingSave: () => set({ pendingSave: null }),
 
-    startNew: async ({ profileId, interviewType, answerFormat, jobId, source, micDeviceId, activity, presence, companionPresence, budgetCents }) => {
-      // Acquire audio FIRST: if the user denies the mic or cancels the system-audio
-      // picker, we never create a session that displays "live" with nothing flowing.
-      let stream: MediaStream;
+    startNew: async ({
+      profileId,
+      interviewType,
+      answerFormat,
+      jobId,
+      listensTo = 'system',
+      micDeviceId,
+      activity,
+      presence,
+      companionPresence,
+      budgetCents,
+    }) => {
+      // Acquire audio FIRST: with nothing captured we never create a session
+      // that displays "live" with nothing flowing. One missing stream is a
+      // notice, not a failure.
+      let capture: ReturnType<typeof resolveCapture<MediaStream>>;
       try {
-        stream = await getStream(source, micDeviceId);
+        capture = await acquire(listensTo, micDeviceId);
       } catch (e) {
         set({ micError: (e as Error).message, sessionError: null });
         return;
@@ -211,13 +286,13 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
       )) as Session;
       lineId = 0;
       set({ session: s, transcript: [], interim: '', paused: false, micError: null, sessionError: null });
-      await attachCapture(s.id, stream);
+      await attachCapture(s.id, capture);
     },
 
-    resumeExisting: async ({ sessionId, source, micDeviceId, prior }) => {
-      let stream: MediaStream;
+    resumeExisting: async ({ sessionId, listensTo = 'system', micDeviceId, prior }) => {
+      let capture: ReturnType<typeof resolveCapture<MediaStream>>;
       try {
-        stream = await getStream(source, micDeviceId);
+        capture = await acquire(listensTo, micDeviceId);
       } catch (e) {
         set({ micError: (e as Error).message, sessionError: null });
         return;
@@ -225,7 +300,7 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
       const s = (await api.session.resume(sessionId)) as Session;
       lineId = prior.length;
       set({ session: s, transcript: prior, interim: '', paused: false, micError: null, sessionError: null });
-      await attachCapture(s.id, stream);
+      await attachCapture(s.id, capture);
     },
 
     stop: async () => {

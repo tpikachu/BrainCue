@@ -45,18 +45,22 @@ Theme in one line: harden the four promises the product now rests on —
 provider choice, memory you can seed, data you can take with you, and modes
 that either earn their way out of Labs or say why not.
 
-**Now in flight:** nothing — next up is 5.1 (multi-provider).
+**Now in flight:** 5.1 (multi-provider), 5.7 (local STT), 5.8 (Settings + onboarding), 5.9 (meetings answer questions) and 5.10 (hear both sides) — all on `feature/v2.2-trust-local-stt-onboarding`, one PR.
 
 | # | Milestone | Status | Branch / PR | Notes |
 | --- | --- | --- | --- | --- |
-| 5.1 | Multi-provider v1 — Anthropic on the chat + vision seam | ⬜ | — | First: biggest, and nothing else depends on it |
+| 5.1 | Multi-provider v1 — Anthropic on the chat + vision seam | 🔨 | `feature/v2.2-trust-local-stt-onboarding` | Anthropic native + Google/Groq/OpenRouter via OpenAI-compatible; per-task routing + per-provider keys in main (see [06](06-OPENAI-SERVICE.md)); Settings UI + Cue Card picker land with the renderer work |
 | 5.2 | Memory learns from documents (`sourceKind: 'imported'`) | ⬜ | — | Same review queue; sensitive filter before persistence |
 | 5.3 | Export & backup — one portable file, round-trips | ⬜ | — | Before 5.4, so encryption has an explicit-plaintext path to point at |
 | 5.4 | Encryption at rest — safeStorage-wrapped AES-GCM, dual-read | ⬜ | — | Design: [07-API-KEY-SECURITY](07-API-KEY-SECURITY.md) |
 | 5.5 | Labs graduation — written criteria, then a verdict per mode | ⬜ | — | Last: wants real-world hours accumulated during the train |
 | 5.6a | Spike: entities design (doc + schema sketch, no code) | ⬜ | — | Go/no-go only |
-| 5.6b | Spike: local STT (whisper.cpp) for always-on | ⬜ | — | Go/no-go only |
+| 5.6b | Spike: local STT (whisper.cpp) for always-on | ✅ | — | Verdict: **go**, but not whisper.cpp — cache-aware streaming (Nemotron on sherpa-onnx) is the right architecture for live cues. Became 5.7. |
 | 5.6c | Spike: lexical index caching | ⬜ | — | Default is **no** per the recall benchmark; only if profiling disagrees |
+| 5.7 | Local STT engine — Nemotron on sherpa-onnx, model download + Speech-to-Text settings | 🔨 | `feature/v2.2-trust-local-stt-onboarding` | Added 2026-09-06 (user report: transcription slow, wants on-device). Engine + downloader + utility-process worker shipped ([22](22-LOCAL-STT.md)); not yet exercised against a downloaded model on a real call |
+| 5.8 | Settings sections + first-run onboarding (name → transcription → AI) + download strip | 🔨 | `feature/v2.2-trust-local-stt-onboarding` | Added 2026-09-06 (user report: tour launched under the name dialog). Settings IA in [11](11-UX-NAVIGATION.md) |
+| 5.9 | Meetings answer questions asked in the room (Balanced default) | 🔨 | `feature/v2.2-trust-local-stt-onboarding` | Added 2026-09-06 (user report: "question detection not working"). The held-question tracker is gone; quiet = card, balanced/active = grounded answer ([01-PRD §7.3](01-PRD.md)). Verified live 2026-09-07 on both STT engines (real key, TTS audio): question → answer with no classifier delay |
+| 5.10 | Hear both sides: system audio + microphone, questions only from the call; "Listen to" choice removed | 🔨 | `feature/v2.2-trust-local-stt-onboarding` | Added 2026-09-07 (user: "asking the user to pick a source doesn't make sense"). One transcriber per stream, own turns tagged `you`/`candidate` and kept in history but never trigger; echo guard drops the mic's copy of the call on laptop speakers (verified live 2026-09-07) ([06](06-OPENAI-SERVICE.md), [22](22-LOCAL-STT.md)) |
 
 ## Decision log
 
@@ -64,3 +68,7 @@ that either earn their way out of Labs or say why not.
 | --- | --- |
 | 2026-07-29 | Train themed "Trust" (hardening over breadth); Anthropic chosen as the first second-provider — the seam is vendor-neutral, Google can follow the same path. |
 | 2026-07-29 | PR order set: 5.1 → 5.2 → 5.3 → 5.4 → 5.5, spikes interleave; 5.3 lands before 5.4 so the export path exists before encryption claims "plaintext only by explicit action". |
+| 2026-09-06 | OpenAI-compatible transport used for Google/Groq/OpenRouter so one adapter covers three vendors; Anthropic gets a native adapter (Messages API differs). |
+| 2026-09-06 | Three user reports pulled into the train as 5.7–5.9 (local STT, Settings + onboarding, meeting questions) ahead of 5.2–5.5; they share one branch because the Settings IA, the STT engine and the provider keys all land on the same screens. |
+| 2026-09-07 | Meetings default to **Balanced** presence and answer spoken questions; the two-turn "hold" was removed because in real meetings almost any next turn shared a word with the question and nothing ever surfaced. |
+| 2026-09-07 | Local STT models are the sherpa-onnx INT8 exports fetched per file from Hugging Face (resumable, size-verified), not the GitHub `.tar.bz2` bundles — no archive extraction in the app. |

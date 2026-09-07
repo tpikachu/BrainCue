@@ -448,7 +448,7 @@ layout: null
       <div class="card">
         <h3>Meeting or call <span class="badge b-labs">Labs</span></h3>
         <p class="who">A standup, a client call, a sync</p>
-        <p>Sits in quietly and surfaces context, unanswered questions, action items, and decisions — only above a confidence threshold you set.</p>
+        <p>Answers questions asked in the room, and surfaces context, action items, and decisions — only above a confidence threshold you set.</p>
       </div>
       <div class="card">
         <h3>Project discussion <span class="badge b-labs">Labs</span></h3>
@@ -694,7 +694,6 @@ layout: null
       <div class="docs-col card">
         <h3>Process &amp; history</h3>
         <ul>
-          <li><a href="13-GITTENSOR.html">GitTensor plan</a><small>The automated PR evaluation pipeline + SN74 listing plan</small></li>
           <li><a href="sessions/README.html">Session log</a><small>The running development diary, one file per day</small></li>
           <li><a href="09-MVP-PLAN.html">MVP plan</a><small>Historical — the record of the v1 build</small></li>
           <li><a href="https://github.com/tpikachu/BrainCue/tree/master/changelog">Changelog</a><small>What shipped in each release</small></li>
@@ -708,29 +707,29 @@ layout: null
 <section id="contribute">
   <div class="wrap">
     <p class="eyebrow r"><span class="no">08</span> Built in the open</p>
-    <h2 class="r">Every PR gets <em class="flair">a scorecard</em>, not a shrug</h2>
+    <h2 class="r">Every PR gets <em class="flair">a real review</em>, not a shrug</h2>
     <p class="lede r" style="margin-bottom:36px">
-      BrainCue runs a published, automated evaluation pipeline on every pull
-      request — and pays deliberate attention to the work most projects undervalue.
+      BrainCue is developed in public with a shared board, a written roadmap,
+      and a contributing guide that says exactly how work gets in.
     </p>
     <div class="grid r">
       <div class="card">
         <h3>📋 A published standard</h3>
-        <p>Instant intake gates, a secret scan, coverage of your changed lines, and a rubric-pinned AI review across eight dimensions. Every scorecard embeds the hash of the rubric that scored it — the rules can't move silently.</p>
+        <p>Typecheck, tests, and a full build run on every pull request. The design docs lead the code, and every change that alters documented behaviour updates the doc in the same PR.</p>
       </div>
       <div class="card">
-        <h3>🤝 Feedback that's free to act on</h3>
-        <p>The bot never closes PRs and never files "changes requested" — a failed check is a fix window, not a rejection. When a maintainer approves, the merge is automatic.</p>
+        <h3>🤝 Approval is the merge</h3>
+        <p>A failed check is a fix window, not a rejection. When a maintainer approves and CI is green, the PR merges automatically — no second click, no waiting.</p>
       </div>
       <div class="card">
-        <h3>💰 A priced backlog</h3>
-        <p>Work starts from maintainer-labeled <b>bounty</b> issues — features, tests, docs, performance, security — difficulty-tiered from starter to advanced. BrainCue is also preparing for listing on Bittensor's GitTensor subnet, where merged PRs earn contributors TAO.</p>
+        <h3>🗺️ A visible backlog</h3>
+        <p>Work starts from labeled issues — features, tests, docs, performance, security — triaged by a maintainer and tied to a roadmap milestone. The <b>accepted</b> label means it is ready to build against.</p>
       </div>
     </div>
     <div class="cta r" style="justify-content:flex-start; margin-top:30px">
       <a class="btn primary" href="https://github.com/tpikachu/BrainCue/blob/master/CONTRIBUTING.md">Read CONTRIBUTING</a>
-      <a class="btn" href="https://github.com/tpikachu/BrainCue/issues?q=is%3Aissue+is%3Aopen+label%3Adifficulty%3Astarter">Starter bounties</a>
-      <a class="btn" href="13-GITTENSOR.html">The evaluation pipeline</a>
+      <a class="btn" href="https://github.com/tpikachu/BrainCue/issues?q=is%3Aissue+is%3Aopen+label%3Aaccepted">Accepted issues</a>
+      <a class="btn" href="BOARD.html">The board</a>
     </div>
   </div>
 </section>
@@ -779,7 +778,7 @@ layout: null
       <a href="https://github.com/tpikachu/BrainCue/issues">Issues</a>
       <a href="00-VISION.html">Vision</a>
       <a href="10-ROADMAP.html">Roadmap</a>
-      <a href="13-GITTENSOR.html">GitTensor</a>
+      <a href="BOARD.html">Board</a>
     </div>
     <div>MIT licensed · Local-first · Bring your own AI key</div>
   </div>

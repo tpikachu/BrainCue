@@ -63,10 +63,18 @@ export const SETTINGS_KEYS = {
   companionPrefs: 'companion_prefs', // json CompanionPrefs (personality, presence, DND, budget)
   activeProfileId: 'active_profile_id', // whose dashboard this is (see docs/19-ACTIVE-PROFILE.md)
   devDbExplorer: 'dev_db_explorer', // raw table browser in the sidebar ('1'/'0'; absent = off)
+  sttPrefs: 'stt_prefs', // json SttPrefs (engine cloud|local + local model id)
+  onboardingDone: 'onboarding_done', // first-run setup finished/skipped ('1'/'0'; absent = not done)
+  /** Encrypted key + presence flag per NON-OpenAI cloud provider (the OpenAI
+   *  key keeps its original keys above). */
+  providerKeyEnc: (provider: string) => `provider_key_enc:${provider}`,
+  providerKeyPresent: (provider: string) => `provider_key_present:${provider}`,
 } as const;
 
 /** Non-secret settings cleared by a factory reset (everything except the API key). */
 const APP_SETTING_KEYS: string[] = [
+  SETTINGS_KEYS.sttPrefs,
+  SETTINGS_KEYS.onboardingDone,
   SETTINGS_KEYS.models,
   SETTINGS_KEYS.modelPreset,
   SETTINGS_KEYS.reasoningEfforts,

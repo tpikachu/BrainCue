@@ -10,6 +10,7 @@ import { Badge, Page } from '../../components/ui';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useLiveSession } from '../../store/useLiveSession';
 import { StartSessionModal } from '../StartSessionModal';
+import { SetupChecklist } from '../SetupChecklist';
 import { durationMs, fmtDur } from '../../lib/format';
 import {
   BoltIcon,
@@ -19,7 +20,6 @@ import {
   LibraryIcon,
   MicIcon,
   MockIcon,
-  SettingsIcon,
   SparklesIcon,
   UsersIcon,
 } from '../../components/icons';
@@ -147,18 +147,10 @@ export default function HomePage() {
           </Link>
         ))}
 
-      {settings && !settings.apiKeyPresent && (
-        <Link
-          to="/settings"
-          className="mb-4 flex items-center justify-between rounded-2xl border border-amber-500/20 bg-amber-500/10 px-5 py-3.5 transition-colors hover:bg-amber-500/15"
-        >
-          <span className="flex items-center gap-3 text-sm text-amber-200">
-            <SettingsIcon className="h-4 w-4" />
-            Add your OpenAI API key — nothing can listen or answer without it.
-          </span>
-          <span className="text-sm text-amber-300">Open Settings →</span>
-        </Link>
-      )}
+      {/* What a live session still needs (transcription, the OpenAI key) —
+          the reminder behind every "Later" in first-run setup. Hidden once
+          both are ready. */}
+      <SetupChecklist />
 
       {/* Primary actions. "Talk to BrainCue" joined when voice shipped
           (FLAGS.voice) — a summon starts push-to-talk listening in the Cue
@@ -207,15 +199,10 @@ export default function HomePage() {
           tone={micState === 'granted' ? 'ok' : micState === 'denied' ? 'warn' : 'idle'}
         />
         <StatusChip
-          label="Listening to"
-          // Companion always listens to YOUR mic, whatever the saved default.
-          value={
-            session?.mode === 'companion'
-              ? 'microphone'
-              : settings?.audio?.source === 'mic'
-                ? 'microphone'
-                : 'system audio'
-          }
+          label="Hears"
+          // A call is heard on both sides — the call and your microphone —
+          // and questions come from the call. A solo session is your mic only.
+          value={session?.mode === 'companion' ? 'microphone' : 'call + mic'}
           tone="idle"
         />
         <StatusChip label="Screen" value="on demand" tone="idle" />
@@ -281,7 +268,7 @@ export default function HomePage() {
           <ActivityCard
             Icon={UsersIcon}
             title={ACTIVITIES.meeting.label}
-            desc="Sits in quietly and surfaces context, open questions, action items, and decisions — only when confident. Remembers each call, so the next one starts where this one ended."
+            desc="Answers questions asked in the room, and surfaces context, action items, and decisions — only when confident. Remembers each call, so the next one starts where this one ended."
             labs
             tour="activity-meeting"
             onClick={() => {

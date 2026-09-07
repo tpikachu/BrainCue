@@ -107,9 +107,19 @@ export default function InterviewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileId, jobQuery, jobPage]);
 
-  // Can a round start at all (profile + key + parsed resume). Per-row Start also
-  // requires no other session to be live (single live session at a time).
-  const canStartBase = !!profileId && !!settings?.apiKeyPresent && !!selectedProfile?.parsedResume;
+  // Can a round start at all (profile + key + a way to transcribe + parsed
+  // resume). Per-row Start also requires no other session to be live (single
+  // live session at a time). `startHint` is the disabled button's tooltip —
+  // it says WHICH piece is missing, in the same order as `startBlocker`.
+  const canStartBase =
+    !!profileId && !!settings?.apiKeyPresent && !!settings?.sttReady && !!selectedProfile?.parsedResume;
+  const startHint = !settings?.apiKeyPresent
+    ? 'OpenAI key missing — add it in Settings → Language Models'
+    : !settings?.sttReady
+      ? 'Transcription is not set up — choose an engine in Settings → Speech-to-Text'
+      : !selectedProfile?.parsedResume
+        ? 'Add and parse a résumé on this profile first'
+        : undefined;
 
   const selectJob = (job: Job) => setJobId(job.id);
   const openNew = () => {
@@ -129,7 +139,7 @@ export default function InterviewPage() {
     void loadJobs();
   };
 
-  const audioPrefs = () => settings?.audio ?? { source: 'system' as const, micDeviceId: null };
+  const micDeviceId = () => settings?.audio?.micDeviceId ?? null;
 
   // Start a brand-new session for an interview. Type/format/length use defaults
   // and are adjusted live in the Cue Card; the audio device comes from settings.
@@ -138,14 +148,15 @@ export default function InterviewPage() {
     setJobId(job.id);
     setBusyJobId(job.id);
     try {
-      const a = audioPrefs();
       await live.startNew({
         profileId,
         jobId: job.id,
         interviewType: 'general',
         answerFormat: 'key_points',
-        source: a.source,
-        micDeviceId: a.micDeviceId,
+        // An interview is a call: heard on both sides, questions from the call.
+        activity: 'job',
+        listensTo: 'system',
+        micDeviceId: micDeviceId(),
       });
     } finally {
       setBusyJobId(null);
@@ -163,11 +174,10 @@ export default function InterviewPage() {
         speaker: c.speaker,
         text: c.text,
       }));
-      const a = audioPrefs();
       await live.resumeExisting({
         sessionId: sess.id,
-        source: a.source,
-        micDeviceId: a.micDeviceId,
+        listensTo: 'system',
+        micDeviceId: micDeviceId(),
         prior,
       });
     } finally {
@@ -220,6 +230,7 @@ export default function InterviewPage() {
               <Button
                 variant="success"
                 disabled={!canStartBase || !!session}
+                title={startHint}
                 loading={busyJobId === j.id}
                 onClick={() => resume(prior)}
               >
@@ -229,6 +240,7 @@ export default function InterviewPage() {
               <Button
                 variant="success"
                 disabled={!canStartBase || !!session}
+                title={startHint}
                 loading={busyJobId === j.id}
                 onClick={() => start(j)}
               >
@@ -311,8 +323,17 @@ export default function InterviewPage() {
           {!settings?.apiKeyPresent && (
             <p className="mt-2 text-xs text-amber-400">
               ⚠ No OpenAI key —{' '}
-              <Link to="/settings" className="underline">
+              <Link to="/settings/models" className="underline">
                 add it in Settings
+              </Link>
+              .
+            </p>
+          )}
+          {settings?.apiKeyPresent && !settings.sttReady && (
+            <p className="mt-2 text-xs text-amber-400">
+              ⚠ Transcription is not set up —{' '}
+              <Link to="/settings/speech" className="underline">
+                choose an engine in Settings
               </Link>
               .
             </p>

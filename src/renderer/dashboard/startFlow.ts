@@ -70,8 +70,8 @@ export function spacesFor<T extends { kind?: string | null }>(
  *  threshold/cooldown levels in the engine's trigger/presence.ts. */
 export const PRESENCE_OPTIONS: { value: Presence; label: string; desc: string }[] = [
   { value: 'summoned', label: 'Summoned only', desc: 'Never speaks up — answers only when you ask.' },
-  { value: 'quiet', label: 'Quiet', desc: 'Rare, high-confidence cards only. The default.' },
-  { value: 'balanced', label: 'Balanced', desc: 'Speaks up on clear action items, decisions, and gaps.' },
+  { value: 'quiet', label: 'Quiet', desc: 'Rare, high-confidence cards only. Questions become cards, not answers.' },
+  { value: 'balanced', label: 'Balanced', desc: 'Answers questions asked in the room; notes clear action items and decisions. The default.' },
   { value: 'active', label: 'Active', desc: 'Contributes whenever it plausibly helps.' },
 ];
 
@@ -116,12 +116,18 @@ export const BUDGET_OPTIONS: { value: number | null; label: string }[] = [
 export function startBlocker(a: {
   profile: Profile | undefined;
   apiKeyPresent: boolean;
+  /** Can the chosen transcription engine run — cloud needs the OpenAI key,
+   *  local needs its model downloaded (`AppSettings.sttReady`). */
+  sttReady: boolean;
   sessionLive: boolean;
   activity?: ContextPackKind;
   spaceId?: string | null;
 }): string | null {
   if (a.sessionLive) return 'A session is already live — stop it first.';
+  // The key first: with the cloud engine it is ALSO what makes transcription
+  // ready, so it is the one fix that can clear both.
   if (!a.apiKeyPresent) return 'Add your OpenAI API key in Settings.';
+  if (!a.sttReady) return 'Transcription is not set up — choose an engine under Settings → Speech-to-Text.';
   if (!a.profile) return 'Pick a profile.';
   const config = ACTIVITIES[a.activity ?? DEFAULT_ACTIVITY];
   if (config?.needsResume && !a.profile.parsedResume)
@@ -135,7 +141,9 @@ export function startBlocker(a: {
  *  locally and what leaves the machine. Mirrors the PRD privacy contract —
  *  keep the strings honest when the pipeline changes. */
 export function captureSummary(a: {
-  source: 'system' | 'mic';
+  /** The activity's `listensTo`: a call ('system') is heard on BOTH sides —
+   *  the call's audio and the microphone; 'mic' is the microphone alone. */
+  listensTo: 'system' | 'mic';
   spaceTitle: string | null;
   activity?: ContextPackKind;
 }): { captured: string[]; sent: string[]; neverSent: string[] } {
@@ -149,8 +157,8 @@ export function captureSummary(a: {
     captured: [
       mode === 'companion'
         ? 'Your microphone, transcribed in real time — ONLY while this session runs (nothing listens before Start or after Stop).'
-        : a.source === 'system'
-          ? 'System audio (the other side of your call), transcribed in real time.'
+        : a.listensTo === 'system'
+          ? 'System audio (the other side of your call) AND your microphone, both transcribed in real time. Questions are taken from the call only.'
           : 'Your microphone, transcribed in real time.',
       'The transcript stays in the local database on this machine.',
       // What survives the session, said before it starts. A Space is the only
@@ -161,7 +169,9 @@ export function captureSummary(a: {
         : 'Afterwards: nothing is summarised or remembered — pick a Space for that (you can still choose one when it ends).',
     ],
     sent: [
-      'Audio to OpenAI for transcription (Realtime API, your key).',
+      a.listensTo === 'system' && mode !== 'companion'
+        ? 'Audio — both streams — to the transcription engine (OpenAI Realtime with your key, or nothing at all with the local engine).'
+        : 'Audio to the transcription engine (OpenAI Realtime with your key, or nothing at all with the local engine).',
       ...(mode === 'meeting'
         ? [
             'Ambiguous turns: the turn + a few recent turns, for salience scoring (deterministic rules filter greetings/small talk first).',

@@ -8,10 +8,11 @@ import type { AmbientCard, AmbientCardContext, ModeDefinition } from '../modeDef
 
 /**
  * Meeting Copilot as a ModeDefinition — a CONFIGURATION over the shared
- * engine, not a fork. Quiet by default: finalized turns run the ambient
+ * engine, not a fork. Balanced by default: finalized turns run the ambient
  * trigger (heuristics → salience classifier → deterministic gates); acted
- * decisions become cards. Direct asks ("summon") stream a grounded answer
- * through the same generate path the interview uses.
+ * decisions become cards, and a question asked in the room streams a grounded
+ * answer (at quiet it becomes an open-question card instead). Direct asks
+ * ("summon") stream through the same generate path the interview uses.
  *
  * Groundedness rules baked in here:
  *  - action/decision/question/warning card bodies QUOTE the transcript turn —
@@ -95,12 +96,13 @@ export const meetingMode: ModeDefinition = {
   id: 'meeting',
   sources: ['mic', 'system', 'ask'],
   remoteSpeaker: 'them', // v2 vocabulary — meetings never had legacy rows
+  localSpeaker: 'you', // the user's own mic turns: kept, never answered
   // The Q&A trigger never fires in ambient modes (finalized turns route
   // through `ambient`); direct asks go through the summoned policy.
   trigger: { evaluate: async () => ({ act: false, kind: null, reason: 'ambient-mode' }) },
   allowedContributions: ['context', 'open_question', 'action_item', 'decision', 'warning', 'answer'],
   surfaces: ['overlay', 'report'],
-  defaultPresence: 'quiet', // meetings hate interruptions
+  defaultPresence: 'balanced', // answers questions asked in the room; quiet = cards only
   reportStrategy: 'meeting_report',
 
   // Summoned answers reuse the shared grounded generator — but NOT the
@@ -111,6 +113,7 @@ export const meetingMode: ModeDefinition = {
       question: input.question,
       contextChunks: input.contextChunks,
       memories: input.memories,
+      history: input.history,
       profile: input.profile,
       format: input.settings.answerFormat,
       pronunciation: false, // spoken-cue pronunciation aids are an interview thing

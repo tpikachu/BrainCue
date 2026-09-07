@@ -15,16 +15,19 @@ import SparringPage from './pages/SparringPage';
 import TailorPage from './pages/TailorPage';
 import SessionsPage from './pages/SessionsPage';
 import ReportsPage from './pages/ReportsPage';
-import SettingsPage from './pages/SettingsPage';
+import SettingsPage from './pages/settings';
 import WhatsNewPage from './pages/WhatsNewPage';
 import HelpPage from './pages/HelpPage';
 import DevDbExplorerPage from './pages/DevDbExplorerPage';
 import { Titlebar } from './Titlebar';
 import { SidebarStatus } from './SidebarStatus';
 import { UpdateBanner } from './UpdateBanner';
+import { DownloadStrip } from './DownloadStrip';
 import { SavePromptModal } from './SavePromptModal';
 import { ProfileSwitcher } from './ProfileSwitcher';
-import { NewProfileModal } from './NewProfileModal';
+import { Onboarding } from './onboarding/Onboarding';
+import { onboardingEntry, shouldAutoStartTour } from './onboarding/onboardingFlow';
+import { useOnboardingStore } from '../store/useOnboardingStore';
 import { useProfileStore } from '../store/useProfileStore';
 import {
   ChevronLeftIcon,
@@ -99,6 +102,7 @@ export default function App() {
   const { profiles, activeId, loaded: profilesLoaded, load: loadProfiles } = useProfileStore();
   const activeProfile = profiles.find((p) => p.id === activeId);
   const { running, start, stop } = useTourStore();
+  const { open: onboardingOpen, openAt: openOnboarding } = useOnboardingStore();
   const navigate = useNavigate();
   const location = useLocation();
   const [version, setVersion] = useState('');
@@ -120,7 +124,7 @@ export default function App() {
   // data, and wiping everything from Settings → Danger zone. Without this the
   // shell keeps a list the database no longer agrees with — a wipe leaves
   // deleted profiles in the switcher, and seeding the first profile leaves the
-  // non-dismissable first-run modal covering an app that now has one.
+  // onboarding's name step waiting on a profile that now exists.
   useEffect(() => {
     void loadProfiles();
     return api.events.onDataChanged(() => void loadProfiles());
@@ -131,11 +135,30 @@ export default function App() {
     return api.events.onNavigate((p) => navigate((p as { path: string }).path));
   }, [navigate]);
 
-  // Auto-launch the tour once for a brand-new user (tourDone is persisted, so
-  // finishing/skipping prevents it from showing again).
+  // First run (docs/11-UX-NAVIGATION.md "First run"). The rule is pure —
+  // `onboardingEntry` — and only consulted while the overlay is closed, so a
+  // profile created on its first step does not re-open it at a different one.
+  // An upgrading install that is already set up is marked done silently.
   useEffect(() => {
-    if (settings && !settings.tourDone) start();
-  }, [settings, start]);
+    if (onboardingOpen) return;
+    const entry = onboardingEntry({
+      profilesLoaded,
+      profileCount: profiles.length,
+      settings,
+    });
+    if (entry.kind === 'open') openOnboarding(entry.step);
+    else if (entry.kind === 'mark-done') {
+      void api.settings.set({ onboardingDone: true }).then(() => loadSettings());
+    }
+  }, [settings, profilesLoaded, profiles.length, onboardingOpen, openOnboarding, loadSettings]);
+
+  // Auto-launch the tour once, AFTER onboarding: it used to start the moment
+  // settings loaded, underneath the non-dismissable first-run dialog, where
+  // it could not be used. `tourDone` is persisted, so finishing or skipping
+  // prevents it from showing again; Settings and Help can replay it.
+  useEffect(() => {
+    if (shouldAutoStartTour({ settings, profileCount: profiles.length, onboardingOpen })) start();
+  }, [settings, profiles.length, onboardingOpen, start]);
 
   const finishTour = async () => {
     stop();
@@ -147,7 +170,16 @@ export default function App() {
     <div className="flex h-screen flex-col bg-gradient-to-b from-neutral-950 to-neutral-900 text-neutral-100">
       <Titlebar />
       <UpdateBanner />
+      <DownloadStrip />
       <div className="flex min-h-0 flex-1">
+      {/* First run: the setup flow replaces the sidebar and pages until it is
+          finished — there is no dashboard behind it worth showing, and an app
+          of empty lists reads as broken rather than as "start here". The
+          title bar and download strip above stay live. */}
+      {onboardingOpen ? (
+        <Onboarding />
+      ) : (
+        <>
       <aside className="flex w-60 shrink-0 flex-col border-r border-white/5 bg-neutral-950/60 p-4">
         <Link
           to="/whats-new"
@@ -225,7 +257,10 @@ export default function App() {
             />
             <Route path="/sessions" element={<SessionsPage />} />
             <Route path="/reports" element={<ReportsPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
+            {/* Settings is sub-navigated (pages/settings/sections.ts); the bare
+                path — the tray, Help, old links — lands on the first section. */}
+            <Route path="/settings" element={<Navigate to="/settings/preferences" replace />} />
+            <Route path="/settings/:section" element={<SettingsPage />} />
             <Route path="/whats-new" element={<WhatsNewPage />} />
             <Route path="/help" element={<HelpPage />} />
             {/* Same condition as the nav entry, or the sidebar would offer a
@@ -236,22 +271,15 @@ export default function App() {
           </Routes>
         </div>
       </main>
+        </>
+      )}
       </div>
 
       {/* Global: sessions can be started from several pages and stopped from the
           Cue Card — the save-or-discard prompt must appear wherever the user is. */}
       <SavePromptModal />
-      {/* First run: BrainCue works for one person, and nothing below can do
-          anything without knowing who. Not dismissable — there is no dashboard
-          behind it to go back to, and an app of empty lists reads as broken
-          rather than as "start here". */}
-      <NewProfileModal
-        open={profilesLoaded && profiles.length === 0}
-        dismissable={false}
-        onClose={() => {}}
-      />
 
-      {running && <Tour steps={TOUR_STEPS} onClose={finishTour} />}
+      {running && !onboardingOpen && <Tour steps={TOUR_STEPS} onClose={finishTour} />}
     </div>
   );
 }

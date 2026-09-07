@@ -253,4 +253,87 @@ describe('answer framing', () => {
       expect(sys, framing).toMatch(/FABRICATION GUARD/i);
     }
   });
+
+  it('the interview guard is the v1 text; the conversation guard forbids invented figures', async () => {
+    await collect(streamAnswer(baseInput({ framing: 'interview' })));
+    expect(system()).toContain(
+      '- FABRICATION GUARD: if the context can\'t support what\'s asked, do NOT make it up. Begin\n' +
+        '  the answer with "⚠", state in one short clause that it\'s not in their background, then\n' +
+        '  pivot to a grounded, cited, transferable-skills framing (this is the riskWarning case).',
+    );
+    await collect(streamAnswer(baseInput({ framing: 'conversation' })));
+    const sys = system();
+    // Asked for a Q3 budget with no notes, the meeting answer used to state a
+    // dollar figure. The rule now names the failure and what to do instead.
+    expect(sys).toMatch(/NEVER produce a\s+plausible-sounding number or range/);
+    expect(sys).toMatch(/not in their notes/);
+    expect(sys).not.toMatch(/transferable-skills/);
+  });
+
+  it('with no context, the conversation prompt says so where the facts would be', async () => {
+    await collect(streamAnswer({ ...baseInput({ framing: 'interview' }), contextChunks: [] }));
+    expect(userPrompt()).toContain('CONTEXT:\n(no relevant profile context found)');
+    await collect(streamAnswer({ ...baseInput({ framing: 'conversation' }), contextChunks: [] }));
+    expect(userPrompt()).toMatch(/CONTEXT:\n\(NOTHING in this Space matches the question/);
+    expect(userPrompt()).toMatch(/no figure, no status, no decision, no owner/);
+  });
+
+  it('the no-context risk line is framed for the room it is shown in', async () => {
+    const interview = await collect(streamAnswer({ ...baseInput({ framing: 'interview' }), contextChunks: [] }));
+    expect(interview.at(-1)).toEqual({ type: 'meta', riskWarning: 'No matching profile experience found.' });
+    const meeting = await collect(streamAnswer({ ...baseInput({ framing: 'conversation' }), contextChunks: [] }));
+    expect(meeting.at(-1)).toEqual({
+      type: 'meta',
+      riskWarning: 'Nothing in this Space covers this — the answer is not grounded.',
+    });
+  });
+});
+
+describe('streamAnswer — in-session history', () => {
+  it('adds the session-so-far block right before the QUESTION, heard and answered items labeled', async () => {
+    await collect(
+      streamAnswer(
+        baseInput({
+          history: [
+            { role: 'heard', text: 'Let us start with the platform rewrite.' },
+            { role: 'asked', question: 'Which database did you pick?', answer: 'Postgres, for the JSONB support.' },
+          ],
+        }),
+      ),
+    );
+    const p = userPrompt();
+    expect(p).toContain('EARLIER IN THIS CONVERSATION');
+    expect(p).toContain('Heard: Let us start with the platform rewrite.');
+    expect(p).toContain('Asked: Which database did you pick?\nYou answered: Postgres, for the JSONB support.');
+    expect(p).toMatch(/Do NOT cite it/);
+    expect(p.indexOf('EARLIER IN THIS CONVERSATION')).toBeLessThan(p.indexOf('QUESTION:'));
+    // History is additive only: it must not displace the CONTEXT block.
+    expect(p.indexOf('CONTEXT:')).toBeLessThan(p.indexOf('EARLIER IN THIS CONVERSATION'));
+  });
+
+  it("labels the user's own microphone turns as theirs, and remote turns as heard", async () => {
+    await collect(
+      streamAnswer(
+        baseInput({
+          history: [
+            { role: 'heard', text: 'What about the timeline?' },
+            { role: 'heard', text: 'I covered the timeline in my intro.', speaker: 'candidate' },
+            { role: 'heard', text: 'Sure, the Q3 plan.', speaker: 'you' },
+          ],
+        }),
+      ),
+    );
+    const p = userPrompt();
+    expect(p).toContain('Heard: What about the timeline?');
+    expect(p).toContain('You said: I covered the timeline in my intro.');
+    expect(p).toContain('You said: Sure, the Q3 plan.');
+  });
+
+  it('leaves the prompt untouched when history is absent or empty', async () => {
+    await collect(streamAnswer(baseInput()));
+    const without = userPrompt();
+    await collect(streamAnswer(baseInput({ history: [] })));
+    expect(userPrompt()).toBe(without);
+    expect(without).not.toContain('EARLIER IN THIS CONVERSATION');
+  });
 });

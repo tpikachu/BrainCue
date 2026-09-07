@@ -42,6 +42,29 @@ const CODING_DELIVERY: Record<AnswerFormat, string> = {
     'problem — that scaffold is for behavioural answers about your own experience.',
 };
 
+/**
+ * The screenshot-solver prompt every vision adapter sends (OpenAI, Anthropic,
+ * OpenAI-compatible) — one place, so the providers differ only in transport.
+ * A long problem scrolls past one viewport, so the user captures several
+ * overlapping screenshots top-to-bottom and they all go in ONE request, in
+ * scroll order; the model reconstructs/dedupes them (far more robust than
+ * client-side pixel stitching).
+ */
+export function visionSolvePrompt(
+  imageCount: number,
+  language: string,
+  format: AnswerFormat,
+): { system: string; intro: string } {
+  const system = `You are shown a screenshot containing a coding/technical interview problem (and possibly code). Read it carefully, transcribe the problem accurately, then solve it.\n${codingRules(language, format)}`;
+  const intro =
+    imageCount > 1
+      ? `The following ${imageCount} images are consecutive, top-to-bottom (possibly ` +
+        `overlapping) screenshots of ONE coding problem. Reconstruct the full problem text ` +
+        `(dedupe the overlapping regions), then solve it.`
+      : 'Solve the problem shown in this screenshot.';
+  return { system, intro };
+}
+
 export function codingRules(language: string, format: AnswerFormat = 'explanation'): string {
   return `You are an expert competitive programmer and senior software engineer, answering
 AS the candidate in a live coding interview.

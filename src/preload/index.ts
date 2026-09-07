@@ -1,9 +1,18 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { EVENTS, IPC } from '@shared/ipc';
-import type { AnswerPrefs, ClientInfo, ConfirmRequest, SavePrompt, UpdateStatus } from '@shared/ipc';
+import type {
+  AnswerPrefs,
+  ClientInfo,
+  ConfirmRequest,
+  SavePrompt,
+  SttDownloadProgress,
+  SttModelStatus,
+  UpdateStatus,
+} from '@shared/ipc';
 import type {
   Application,
   ApplicationListItem,
+  AudioSource,
   CompanionSpaceOverrides,
   CompanionStatusEvent,
   Contribution,
@@ -54,7 +63,14 @@ const api = {
     setApiKey: (key: string) => invoke(IPC.settings.setApiKey, { key }),
     clearApiKey: () => invoke(IPC.settings.clearApiKey),
     testApiKey: () => invoke(IPC.settings.testApiKey),
+    setProviderKey: (provider: string, key: string) =>
+      invoke<{ providerKeys: Record<string, boolean> }>(IPC.settings.setProviderKey, { provider, key }),
+    clearProviderKey: (provider: string) =>
+      invoke<{ providerKeys: Record<string, boolean> }>(IPC.settings.clearProviderKey, { provider }),
+    testProviderKey: (provider: string) =>
+      invoke<{ ok: boolean; model?: string; error?: string }>(IPC.settings.testProviderKey, { provider }),
     listModels: () => invoke<string[]>(IPC.settings.listModels),
+    listProviderModels: (provider: string) => invoke<string[]>(IPC.settings.listProviderModels, { provider }),
     setShortcuts: (shortcuts: Record<string, string>) =>
       invoke<{ shortcuts: Record<string, string> }>(IPC.settings.setShortcuts, { shortcuts }),
     resetShortcuts: () =>
@@ -78,6 +94,8 @@ const api = {
     maximizeToggle: () => invoke<{ maximized: boolean }>(IPC.window.maximizeToggle),
     close: () => invoke<{ ok: true }>(IPC.window.close),
     isMaximized: () => invoke<{ maximized: boolean }>(IPC.window.isMaximized),
+    /** Show the dashboard on a route (e.g. '/settings/models') — from any window. */
+    openDashboard: (path: string) => invoke<{ ok: true }>(IPC.window.openDashboard, { path }),
   },
   profiles: {
     list: () => invoke(IPC.profiles.list),
@@ -251,8 +269,10 @@ const api = {
     audioChunk: (sessionId: string, audio: ArrayBuffer, mime: string) =>
       invoke(IPC.session.audioChunk, { sessionId, audio, mime }),
     // One-way streaming audio (no response) for low-latency Realtime STT.
-    sendRealtimeAudio: (sessionId: string, pcm: ArrayBuffer) =>
-      ipcRenderer.send(IPC.session.realtimeAudio, { sessionId, pcm }),
+    // `source` tags the frame with the stream it came from (the call's system
+    // audio or the user's microphone) — each has its own transcriber in main.
+    sendRealtimeAudio: (sessionId: string, pcm: ArrayBuffer, source: AudioSource = 'system') =>
+      ipcRenderer.send(IPC.session.realtimeAudio, { sessionId, pcm, source }),
     ask: (sessionId: string, questionText: string) =>
       invoke(IPC.session.ask, { sessionId, questionText }),
     /** Sessions for ONE profile — Sessions and Insights are views of the
@@ -409,6 +429,14 @@ const api = {
     confirmResponse: (id: string, ok: boolean) =>
       invoke<{ ok: true }>(IPC.ui.confirmResponse, { id, ok }),
   },
+  /** Local speech-to-text models: catalog state, downloads, removal. Progress
+   *  streams on events.onSttDownloadProgress. */
+  stt: {
+    listModels: () => invoke<SttModelStatus[]>(IPC.stt.listModels),
+    download: (modelId: string) => invoke<{ started: true }>(IPC.stt.download, { modelId }),
+    cancelDownload: (modelId: string) => invoke<{ cancelled: boolean }>(IPC.stt.cancelDownload, { modelId }),
+    deleteModel: (modelId: string) => invoke<{ deleted: boolean }>(IPC.stt.deleteModel, { modelId }),
+  },
   update: {
     getStatus: () => invoke<UpdateStatus>(IPC.update.getStatus),
     check: () => invoke<{ ok: true }>(IPC.update.check),
@@ -457,6 +485,7 @@ const api = {
     onDataChanged: (cb: (p: unknown) => void) => on(EVENTS.dataChanged, cb),
     onSelectionReset: (cb: (p: { image: string }) => void) => on(EVENTS.selectionReset, cb),
     onUpdateStatus: (cb: (p: UpdateStatus) => void) => on(EVENTS.updateStatus, cb),
+    onSttDownloadProgress: (cb: (p: SttDownloadProgress) => void) => on(EVENTS.sttDownloadProgress, cb),
     onOverlayClickthrough: (cb: () => void) => on(EVENTS.overlayClickthrough, cb),
     onClientInfo: (cb: (p: ClientInfo | null) => void) => on(EVENTS.clientInfo, cb),
     onAnswerPrefs: (cb: (p: AnswerPrefs) => void) => on(EVENTS.answerPrefs, cb),

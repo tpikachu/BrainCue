@@ -91,30 +91,45 @@ describe('cooldowns and duplicate suppression', () => {
   });
 });
 
-describe('open-question tracking', () => {
-  it('a question is HELD, then matures after two unanswering turns', async () => {
-    const p = new AmbientTriggerPolicy('balanced', scripted(null));
-    const held = await p.evaluate('What is our budget for the Q3 campaign?', T0);
-    expect(held).toMatchObject({ act: false, reason: 'question-held' });
-
-    expect((await p.evaluate('Let us move on to the roadmap discussion.', T0 + MIN)).act).toBe(false);
-    const matured = await p.evaluate('The roadmap has three phases planned.', T0 + 2 * MIN);
-    expect(matured).toMatchObject({
+describe('questions asked in the room', () => {
+  it('a question is acted on immediately — a card at quiet, an answer at balanced/active', async () => {
+    const quiet = new AmbientTriggerPolicy('quiet', never);
+    expect(await quiet.evaluate('What is our budget for the Q3 campaign?', T0)).toMatchObject({
       act: true,
       kind: 'open_question',
       title: 'What is our budget for the Q3 campaign?',
+      answer: false,
       usedClassifier: false,
     });
+    for (const level of ['balanced', 'active'] as const) {
+      const p = new AmbientTriggerPolicy(level, never);
+      expect(await p.evaluate('What is our budget for the Q3 campaign?', T0)).toMatchObject({
+        act: true,
+        kind: 'open_question',
+        answer: true,
+      });
+    }
   });
 
-  it('an answered question never becomes a card', async () => {
-    const p = new AmbientTriggerPolicy('balanced', scripted(null));
-    await p.evaluate('What is our budget for the Q3 campaign?', T0);
-    await p.evaluate('The budget is fifty thousand dollars.', T0 + MIN); // shares "budget"
-    const later = await p.evaluate('The roadmap has three phases planned.', T0 + 2 * MIN);
-    const after = await p.evaluate('Marketing wants two more weeks of lead time.', T0 + 3 * MIN);
-    expect(later.kind).not.toBe('open_question');
-    expect(after.kind).not.toBe('open_question');
+  it('summoned-only still ignores questions (direct asks are the only path)', async () => {
+    const p = new AmbientTriggerPolicy('summoned', never);
+    expect((await p.evaluate('What is our budget for the Q3 campaign?', T0)).act).toBe(false);
+  });
+
+  it('questions skip the cooldowns in both directions, but not the duplicate filter', async () => {
+    const p = new AmbientTriggerPolicy('quiet', never);
+    expect((await p.evaluate('I will send the launch checklist by Friday.', T0)).act).toBe(true);
+    // 5 s later an action item would be in the 90 s cooldown; a question is not.
+    expect((await p.evaluate('What is our budget for the Q3 campaign?', T0 + 5_000)).act).toBe(true);
+    expect((await p.evaluate('Who owns the Q3 budget line?', T0 + 10_000)).act).toBe(true);
+    // ...and the questions did not restart the global cooldown for other kinds:
+    // 91 s after the action item a decision clears it.
+    expect((await p.evaluate('We have decided to go with the phased rollout.', T0 + 91_000)).act).toBe(true);
+    // The same question twice is one card.
+    expect(await p.evaluate('What is our budget for the Q3 campaign?', T0 + 20 * MIN)).toMatchObject({
+      act: false,
+      reason: 'duplicate',
+    });
   });
 });
 

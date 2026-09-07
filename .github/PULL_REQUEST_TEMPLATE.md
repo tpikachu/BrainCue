@@ -1,13 +1,12 @@
 <!--
-Thanks for contributing to BrainCue. PRs here are evaluated automatically
-(see eval/ and docs/13-GITTENSOR.md) and then human-reviewed. A linked issue
-is REQUIRED for score-bearing work — pick one labeled `bounty:*` or open an
-issue first and wait for a maintainer label.
+Thanks for contributing to BrainCue. Link the issue this PR addresses if there
+is one (see CONTRIBUTING.md — features and enhancements should start from an
+accepted issue).
 -->
 
 ## Linked issue
 
-Closes #
+Closes #  <!-- optional for small fixes; expected for features -->
 
 ## What this does
 

@@ -5,7 +5,7 @@ The renderer never imports the SDK and never sees the key.
 
 ## Provider capability layer (v2, `src/main/providers/`)
 
-OpenAI is now the **reference provider** behind capability interfaces
+OpenAI is the **reference provider** behind capability interfaces
 (PRD §6.7): `chat` / `embedding` / `realtimeStt` / `batchStt` / `speech` /
 `vision`, resolved per capability by `providers/registry.ts`. Interfaces carry
 **transport only** — prompt building, format ceilings, and domain events stay
@@ -13,24 +13,91 @@ in the service modules below, so a second provider is a transport swap, not a
 rewrite. OpenAI-specific quirks (reasoning-effort param + reasoning-token
 headroom) live in `providers/openai/`, which wraps these modules unchanged.
 
+### Multi-provider v1 (v2.2, milestone 5.1): `chat` + `vision` routed PER TASK
+
+Since v2.2 the `chat` and `vision` capabilities can be served by **Anthropic,
+Google Gemini, Groq and OpenRouter** as well as OpenAI, chosen **per task** —
+the coding solver can run on `claude-fable-5-1` while the live cue stays on
+`gpt-4.1-mini`. The catalog (`CLOUD_PROVIDERS`, `MODEL_CATALOG`) lives in
+`src/shared/providers.ts`; everything below is main-process only.
+
+- **Qualified ids.** A per-task override in `AppSettings.models[task]` may be a
+  qualified id — `anthropic/claude-opus-5`, `openrouter/openai/gpt-5` — and a
+  bare id still means OpenAI, so every setting written before v2.2 resolves
+  exactly as before. `models.ts` exposes `resolveModel(task)` →
+  `{ provider, model }` (via `parseModelId`, which strips only a KNOWN provider
+  prefix so OpenRouter's own `vendor/model` ids survive), while `model(task)`
+  keeps returning the **bare** vendor id so OpenAI call sites are unchanged.
+- **Routing.** The registry selects `routed` for `chat` and `vision`
+  (`providers/routed.ts`): each call reads the task's provider and dispatches
+  to that provider's registered adapter (`<provider>:chat`). Vision has no
+  task of its own — the screenshot solver **is** the `coding` task, so it
+  follows the coding model. `providerFor('chat')` stays the only entry point;
+  the coding paths (`coding.ts` text solver, `capture/codingMode.ts`
+  screenshots) now go through the seam too. Routing reads the task route
+  through `providers/taskRoute.ts`, a dependency-free slot `models.ts` fills
+  at load — when `models.ts` is stubbed (unit tests) everything routes to
+  OpenAI.
+- **Transports.** Three cover every provider: `openai` (Responses API),
+  `anthropic` (native Messages API, `providers/anthropic/`) and
+  `openai-compatible` (`providers/openaiCompatible/` — the `openai` SDK with
+  the vendor's `baseURL` on the **Chat Completions** API, since Google, Groq
+  and OpenRouter do not implement Responses; one factory covers all three,
+  OpenRouter additionally sends `HTTP-Referer`/`X-Title`). Every adapter
+  yields the same `ChatStreamEvent`s (deltas, then `usage` last) and vision
+  adapters share `visionSolvePrompt` from `codingPrompt.ts`.
+- **Anthropic thinking / effort policy** (from the current API reference —
+  not training-era patterns): `claude-fable-5-1` has thinking always on, so
+  the `thinking` parameter is **omitted** and depth is set with
+  `output_config.effort`; it also opts into server-side fallbacks
+  (`fallbacks: 'default'` + beta `server-side-fallback-2026-07-01`, on the
+  `client.beta.messages` surface) so a safety refusal re-runs on a fallback
+  model in the same call. `claude-opus-5` / `claude-sonnet-5` run adaptive
+  thinking by default (omitted too) with `output_config.effort`.
+  `claude-haiku-4-5` supports neither → neither is sent. Never
+  `budget_tokens`, `temperature`, `top_p`. Effort: live paths (`answer`,
+  `classify`, `mock`, `parsing`) → `low`; `coding` / `tailor` → the user's
+  reasoning-effort override (`minimal|low`→`low`, `medium`, `high`) else
+  `high`. `max_tokens` = the caller's ceiling (default 4096) + 1024 headroom
+  on reasoning models. `stop_reason: 'refusal'` → "The model declined this
+  request."
+- **Keys per provider** — `services/security/providerKeys.ts`, same rules as
+  the OpenAI key ([07](07-API-KEY-SECURITY.md)); adapters resolve theirs
+  lazily through `providers/keys.ts`, and a task routed to a provider with no
+  key fails with "<Provider> needs an API key — add one in Settings →
+  Language Models." (surfaces in the Cue Card via the sessionError path).
+  `providers/testKey.ts` does the cheap `GET /models` check per provider.
+- **Errors.** `providers/normalizeError.ts` (`normalizeProviderError`) is what
+  the engine's error path calls: Anthropic SDK errors get 401/429/status
+  messages, OpenAI-compatible adapters re-throw vendor-named plain Errors,
+  everything else falls through to `normalizeOpenAIError`.
+- **Capability gaps as UI states.** A provider that lacks a capability a task
+  needs (Groq for vision) throws `CapabilityUnavailableError` with a hint
+  naming the provider and the fix ("Groq can't read screenshots. Pick a
+  vision-capable model for the coding solver…") — never a bare SDK error.
+- Embedding, realtime STT, batch STT and speech still select OpenAI; the
+  Settings UI + Cue Card model picker land with the renderer work.
+
 - Engine-facing call sites go through the registry: `answer.ts`,
   `questions.ts`, `followup.ts` (chat), `rag/retriever.ts` + `indexProfile.ts`
   (embedding), `engine/sourceAdapter.ts` (realtimeStt), `engine.ingestAudio`
   (batchStt) — plus the newer consumers: the meeting/companion salience
   classifiers (`engine/trigger/salience.ts`, `companionSalience.ts` — chat
   `json`), the memory extractor + approved-only recall (`services/memory/` —
-  chat + embedding), and the voice layer (`services/voice/quickAnswer.ts`
-  chat streaming, `voiceService` speech). The remaining modules
-  (parsing/brief/stories/tailor/interviewer/feedback/coding/vision call sites)
-  still call the SDK directly and migrate opportunistically.
+  chat + embedding), the voice layer (`services/voice/quickAnswer.ts`
+  chat streaming, `voiceService` speech), and since v2.2 both coding solvers
+  (`coding.ts` → chat, `capture/codingMode.ts` → vision). The remaining
+  modules (parsing/brief/stories/tailor/interviewer/feedback call sites)
+  still call the OpenAI SDK directly and migrate opportunistically — a
+  non-OpenAI override on those tasks is not honored until they do.
 - A capability the selected provider lacks throws `CapabilityUnavailableError`
   with a user-safe message (surfaces in the session-error banner).
 - **Embedding identity**: `embeddings` rows store `provider` + `model` + `dim`;
   the write path refuses to mix identities (`rag/embeddingIdentity.ts`) —
   switching embedding provider/model requires a re-index (UI for that lands
   later).
-- Per-capability provider selection defaults to OpenAI everywhere; the
-  Settings → Providers UI arrives with the second provider.
+- Per-capability selection: `chat`/`vision` → `routed` (per task, above);
+  everything else → OpenAI.
 
 ## Model configuration (`models.ts`)
 
@@ -179,6 +246,20 @@ renders APPROVED memories recalled for the question into a clearly-delimited
 prompt block; both `streamAnswer` and the voice quick-answer use it. Only
 user-approved memories ever reach a prompt (see `services/memory/recall.ts`).
 
+**In-session history** (2026-09-06) — `buildHistoryBlock(history)` renders what
+THIS live session has already heard and answered (`SessionHistory`: `heard`
+turns and `asked` question/answer pairs, oldest first) into an
+`EARLIER IN THIS CONVERSATION` block placed right before `QUESTION:`, with an
+instruction to resolve references against it and never cite or restate it. The
+engine owns the buffer (`EngineSession.history`: 10 items, turns clipped to 300
+chars, answers to 700; a regenerate updates its entry; the question's own turn
+is excluded from its snapshot). Before this every cue was a stateless
+two-message call, so "what about the second option?" was unanswerable in a
+meeting — the Responses API is still called without `previous_response_id`; the
+history is prompt text. A short follow-up (≤ 8 words) also carries the previous
+question into the retrieval query. Absent/empty history leaves the prompt
+byte-identical.
+
 ### Voice quick answers — `services/voice/quickAnswer.ts` (cross-reference)
 The summon path ("Talk to BrainCue") streams a short spoken-style answer via
 the `chat` capability, grounded the same way (RAG + approved memories). It
@@ -194,6 +275,51 @@ chunked path and mock-answer audio).
 ### realtime.ts — `RealtimeTranscriber`
 Realtime API session for delta-level STT latency; PCM is streamed one-way via
 `session:realtime-audio`. Event parsing lives in `realtimeEvents.ts`.
+
+**Two streams, two transcribers (2026-09-07).** A live session hears BOTH the
+call (system loopback) and the user's microphone; there is no "listen to"
+choice any more. `engine.begin` opens one transcriber per captured stream
+through `createRealtimeSource` (`providerFor('realtimeStt')`), from the
+activity's capture plan (`shared/activities.ts` `capturePlan`):
+
+| Stream | Speaker tag | Trigger? |
+|---|---|---|
+| `system` (the call) | the mode's `remoteSpeaker` — `them` (meeting), `interviewer` (interview) | **yes** — question detection / ambient policy run on these turns only |
+| `mic` (the user) | the mode's `localSpeaker` — `you` (meeting), `candidate` (interview) | no — persisted, broadcast, remembered (`You said: …` in the answer prompt's history block), never answered |
+
+**Echo guard** (`engine/echoGuard.ts`). On laptop speakers the microphone
+hears the call, so every remote turn would arrive a second time as the user's
+own words (Chromium's echo cancellation only cancels audio the renderer plays
+itself, not Zoom/Meet in another window). Own turns are therefore *held* for
+1.5 s before they are committed; if the call said the same words within the
+last 6 s (≥ 80 % word overlap for turns of three words or more, exact match for
+shorter ones) the own turn is dropped, in either arrival order. The
+microphone is never the trigger path, so the hold adds no latency to
+questions; `teardown` flushes anything still held. Drops are logged as a word
+count only. Verified live 2026-09-07 with the same audio fed to both streams
+170 ms apart on both engines: every mic copy dropped, every call turn kept.
+| solo activities (`listensTo: 'mic'`) | one `mic` transcriber tagged `remoteSpeaker` (`you`) | yes — the user IS the trigger source |
+
+Each `session:realtime-audio` frame carries its `source`, and
+`engine.feedRealtimeAudio` routes it to that stream's transcriber. Interim
+deltas are broadcast for the trigger stream only (the UI keeps one in-flight
+line); the mic stream surfaces as finals. A session started without an activity
+(the rehearsal facades, v1 rows on resume) opens the remote transcriber only,
+as v1 did.
+
+**Cost.** With the cloud engine this is two Realtime sockets per session, so
+transcription cost roughly **doubles** (the mic socket is billed for its audio
+whether or not the user speaks). The local engine (below) decodes both streams
+on one recognizer at no extra cost beyond CPU.
+
+This is the `openai` implementation of the `realtimeStt` capability. Since the
+local engine landed, `realtimeStt` may instead resolve to `local` — the
+sherpa-onnx worker in `services/stt/` — when the user picks it in Settings and
+the model is installed (`services/stt/index.ts` `applySttSelection()`). Both
+take the same base64 PCM16 24 kHz and emit the same deltas/finals, so the
+engine does not know which one is speaking. `sttReady()` answers "can a live
+session transcribe right now?" for either: a key for cloud, an installed
+model for local. See [22 · Local speech-to-text](22-LOCAL-STT.md).
 
 ### coding.ts — `solveFromOcr(text, language)`, vision.ts — `solveFromImages(dataUrls[], language)`
 Given a coding problem as text (clipboard/selection) or as one-or-more screenshots,
@@ -237,3 +363,21 @@ transient failure can't skip a turn.
   in-flight generation.
 - **Privacy**: context sent to OpenAI is exactly the retrieved chunks + question
   + profile summary — shown verbatim in the "Data sent" panel.
+
+### When nothing in the Space matches (fabrication guard, per framing)
+
+The system prompt's FABRICATION GUARD is framing-specific. The **interview**
+text is v1, byte for byte ("not in their background… transferable skills").
+The **conversation** text (meetings, companion) forbids a plausible figure,
+date, status or decision outright, asks for a leading "⚠" and one clause
+saying it is not in the notes, then only what *is* grounded — what the notes
+do say, who would know, or the one question to ask back. Two more things
+change under conversation framing when `contextChunks` is empty: the
+`CONTEXT:` block itself reads "(NOTHING in this Space matches the question… no
+figure, no status, no decision, no owner…)" — the cue sits where the model
+looks for facts, which is what finally made the rule hold — and the `meta`
+`riskWarning` is "Nothing in this Space covers this — the answer is not
+grounded." (interview keeps "No matching profile experience found."). Verified
+live 2026-09-07: "what is our Q3 budget" on an empty Space went from "$500K…"
+to "⚠ Budget for Q3 marketing isn't in my notes. — Ask Finance or Marketing
+leads…".

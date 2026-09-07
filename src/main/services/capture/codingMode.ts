@@ -8,8 +8,8 @@ import {
   emitContributionOpen,
 } from '../../ipc/contributionBridge';
 import { solveFromOcr } from '../openai/coding';
-import { solveFromImages } from '../openai/vision';
-import { normalizeOpenAIError } from '../openai/client';
+import { providerFor } from '../../providers/registry';
+import { normalizeProviderError } from '../../providers/normalizeError';
 import type { AnswerEvent } from '../openai/answer';
 import { showOverlay } from '../../windows/overlayWindow';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
@@ -23,6 +23,16 @@ const codingLanguage = (): string =>
 /** The four-beat delivery follows the live Cue Card's Answer Format when a session
  *  is running; outside a session the coding default is the spoken explanation. */
 const codingFormat = (): AnswerFormat => sessionManager.activeAnswerFormat() ?? 'explanation';
+
+/** The screenshot solver, through the vision seam — it follows the `coding`
+ *  task's model, so the provider is whatever the user picked for the solver. */
+const solveFromImages = (images: string[], signal: AbortSignal): AsyncGenerator<AnswerEvent> =>
+  providerFor('vision').streamSolve({
+    imageDataUrls: images,
+    language: codingLanguage(),
+    format: codingFormat(),
+    signal,
+  });
 
 // Accumulated problem screenshots for the current solve. A long problem scrolls
 // past one viewport, so the user captures several (scroll → capture → repeat) and
@@ -63,7 +73,7 @@ export function solveCaptures(): Promise<void> {
       ? `Coding problem (${images.length} screenshots)`
       : 'Coding problem (from screenshot)';
   return streamToOverlay(
-    (signal) => solveFromImages(images, codingLanguage(), codingFormat(), signal),
+    (signal) => solveFromImages(images, signal),
     label,
   );
 }
@@ -97,7 +107,7 @@ async function streamToOverlay(
   } catch (e) {
     // Superseded by a newer solve — drop silently; the new stream owns the Cue Card.
     if (!abort.signal.aborted) {
-      broadcast(EVENTS.sessionError, { message: normalizeOpenAIError(e) }, ['overlay', 'main']);
+      broadcast(EVENTS.sessionError, { message: normalizeProviderError(e) }, ['overlay', 'main']);
     }
   } finally {
     if (activeSolve === abort) activeSolve = null;
@@ -114,11 +124,11 @@ export function runCodingSolve(text: string): Promise<void> {
   );
 }
 
-/** Stream a coding solution from a single screenshot/region image (OpenAI vision). */
+/** Stream a coding solution from a single screenshot/region image (vision seam). */
 export function runCodingSolveFromImage(dataUrl: string): Promise<void> {
   lastSolve = { images: [dataUrl] };
   return streamToOverlay(
-    (signal) => solveFromImages([dataUrl], codingLanguage(), codingFormat(), signal),
+    (signal) => solveFromImages([dataUrl], signal),
     'Coding problem (from screenshot)',
   );
 }
@@ -144,7 +154,7 @@ export function resolveLast(): Promise<void> {
     (signal) =>
       'text' in last
         ? solveFromOcr(last.text, codingLanguage(), codingFormat(), signal)
-        : solveFromImages(last.images, codingLanguage(), codingFormat(), signal),
+        : solveFromImages(last.images, signal),
     'Coding problem (re-solve)',
   );
 }

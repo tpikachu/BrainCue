@@ -209,6 +209,7 @@ export const companionMode: ModeDefinition = {
   id: 'companion',
   sources: ['mic', 'ask'],
   remoteSpeaker: 'you', // the companion listens to the USER
+  localSpeaker: 'you', // mic-only activities: there is no second stream to tag
   // The Q&A trigger never fires in ambient modes (finalized turns route
   // through `ambient`); direct asks go through the summoned policy.
   trigger: { evaluate: async () => ({ act: false, kind: null, reason: 'ambient-mode' }) },

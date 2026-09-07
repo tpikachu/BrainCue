@@ -48,12 +48,12 @@ each answers a question the previous one raises.
 | [07 · API key security](07-API-KEY-SECURITY.md) | Where the key lives, and why it never reaches the renderer. |
 | [08 · Folder structure](08-FOLDER-STRUCTURE.md) | Where code goes and why. |
 | [21 · Media](21-MEDIA.md) | The demo film, the GIFs and the screenshots: the storyboard, the style rules, how they are captured from the real app, and the checklist before any of it ships. |
+| [22 · Local speech-to-text](22-LOCAL-STT.md) | On-device streaming transcription: why Nemotron on sherpa-onnx, the model catalog and its on-disk layout, resumable downloads, the out-of-process recognizer and its endpoint rules, known limits. |
 
 ## Process & history
 
 | Doc | What it covers |
 | --- | --- |
-| [13 · GitTensor plan](13-GITTENSOR.md) | Bittensor SN74 listing plan and the automated PR evaluation pipeline (scoring, anti-gaming, roadmap). |
 | [Session log](sessions/README.md) | The running development diary — one file per day. |
 | [09 · MVP plan](09-MVP-PLAN.md) | Historical: the record of the shipped v1 build. |
 | [Changelog](../changelog/) | What shipped in each release (also drives the in-app "What's New"). |

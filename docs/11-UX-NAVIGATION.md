@@ -267,3 +267,116 @@ window) and the save prompt (which only exists after a session) use.
 `Tour.test.ts` is the rot guard: every `target` must match a `data-tour` anchor
 the renderer actually renders, and every `route` must be one `App.tsx`
 registers. It also fails if the targets drift back to being mostly `nav-*`.
+
+## Settings has sections (2026-09-07)
+
+Settings outgrew one scrolling page: an OpenAI key card, a "providers coming
+soon" signpost, privacy, shortcuts, models, companion, updates, advanced and
+the danger zone stacked in the order they were written. With local speech
+models and five cloud providers arriving at once, that page would have been
+the longest in the app and the least findable. It is now `/settings/:section`
+with a left rail inside the page (the sidebar entry stays one item — the rail
+is the page's own navigation), a search box that filters the rail by title and
+keywords, and one panel per section:
+
+| Group | Section | Route | What lives there |
+| --- | --- | --- | --- |
+| App | Preferences | `/settings/preferences` | Getting started (tour replay, Help), coding-solver language, Companion |
+| App | Hotkeys | `/settings/hotkeys` | The global-shortcut editor |
+| AI models | Speech-to-Text | `/settings/speech` | Engine chooser (Cloud Providers / Local), the OpenAI transcriber list, the NVIDIA on-device models with download / progress / Use / delete, a `ready` / `not ready` badge mirroring `sttReady` |
+| AI models | Language Models | `/settings/models` | Provider tiles (dot = key stored) with the selected provider's key field, Test and Clear; the per-task model table with every provider's catalog grouped in one dropdown; the Balanced / Low cost / Best preset |
+| System | Privacy & Data | `/settings/privacy` | Privacy Mode, hide-from-taskbar, the pointer to Memory, the Danger zone |
+| System | System | `/settings/system` | Software updates, Advanced (DB Explorer switch) |
+
+The catalog is one file, `pages/settings/sections.ts`: it drives the rail,
+the search, the route guard and the panel map, and `sections.test.ts` fails
+if a section has no panel or a panel no section. `/settings` and an unknown
+section redirect to the first entry, so the tray item, Help's "Open Settings"
+and every older deep-link still land. The "add it in Settings" links on the
+session pages go straight to `/settings/models`, where the OpenAI key now is.
+
+Two things did not move: the tour's anchors. `data-tour="settings-key"` is on
+the Providers card (the OpenAI key is one of its tiles) and
+`data-tour="settings-privacy"` is on the Privacy Mode card, and the two tour
+steps now route to `/settings/models` and `/settings/privacy`. `Tour.test.ts`
+matches step routes against registered paths segment-wise, so
+`/settings/:section` accepts `/settings/models`.
+
+**The download strip.** A local speech model is ~630 MB, longer than any one
+page visit. `DownloadStrip` sits under the title bar next to `UpdateBanner`,
+seeded from `stt:list-models` on mount and driven by
+`EVENTS.sttDownloadProgress`: model name, current file, a real bar, received
+/ total, Cancel. It is empty when nothing is downloading, shows "Model ready"
+for a few seconds on completion, and keeps an error row with Retry until it
+is dismissed. Its state is a pure reducer (`downloadStripState.ts`) so the
+component is wiring.
+
+**The Cue Card's model chip.** `AnswerControls` gained a "Model ▾" (or
+"Solver ▾" in a coding interview) chip listing the catalog grouped by
+provider, each with a one-line description; providers without a key show a
+disabled "🔑 Add key" row whose tooltip says where to add one — the overlay
+has no IPC to open the dashboard on a route, and none was invented. Picking
+writes `models[answer|coding]` (qualified id) and regenerates the current
+question, so it is a per-question control in effect. The selection rules are
+`lib/modelChoice.ts`, shared with the Settings table and unit-tested.
+
+## First run (2026-09-07)
+
+Before this, a fresh install did two things at once: a non-dismissable
+"Welcome" dialog asked for a name, and the guided tour auto-started the moment
+settings loaded — underneath that dialog, where it could not be read or
+clicked. Both were right on their own; the bug was that nothing ordered them.
+There is now one first-run flow, and the tour is what it offers at the end.
+
+**The flow** (`dashboard/onboarding/Onboarding.tsx`) replaces the sidebar and
+the pages until it is finished; the title bar and the download strip above it
+stay live. A step rail on the left, one question per screen, Back / Later /
+Continue at the bottom. It is not dismissable — there is no dashboard behind
+it worth showing — but the exit is never more than two clicks away:
+
+| Step | Asks | Required? | Built from |
+| --- | --- | --- | --- |
+| 1 · Your name | The one profile BrainCue works for; "Try sample data" is here too, because the only page offering it is behind this very gate | Yes — advances once a profile exists | `NewProfileForm`, the same component the sidebar's "New profile…" modal wraps |
+| 2 · Transcription | "How should BrainCue hear the room?" — Cloud (OpenAI Realtime, needs the OpenAI key, which can be pasted inline) or Local (on-device NVIDIA models, fully private, one ~630 MB download that keeps going in the strip while you continue) | No — "Later" | `EngineRow` and `LocalModelList` from Settings → Speech-to-Text |
+| 3 · AI configuration | Provider tiles and the key field, with the honest split: the OpenAI key is required (retrieval, embeddings and the default models run there), the other four are optional extras chosen per task later; the Balanced / Low cost / Best preset inline | No — "Later" | `ProviderTiles`, `ProviderKeyBlock`, `PresetPicker` from Settings → Language Models |
+| Done | What is configured and what is not — "Transcription: Local — model downloading 42%", "AI: OpenAI key ✓, Anthropic ✓" — then **Take the tour** or **Skip tour** | — | `setupRows` (`setupChecklistState.ts`), shared with Home |
+
+Every control on steps 2 and 3 IS the Settings control, factored out rather
+than copied, so a download started here shows identically in Settings and a
+key saved in Settings shows identically here.
+
+**Skip and reminder.** "Later" simply advances. Finishing sets
+`onboardingDone`; "Skip tour" also sets `tourDone`. Whatever was left for
+later shows on Home as a **Finish setup** card (`SetupChecklist.tsx`) with a
+row per gap — status dot, what is configured, and a button into the Settings
+section that fixes it — plus a "Resume setup" link that reopens the flow at
+Transcription. The card disappears the moment `sttReady && apiKeyPresent`.
+The same two facts gate Start: `startBlocker` and the Interview page's
+per-row Start say which one is missing ("OpenAI key missing" before
+"Transcription is not set up", because with the cloud engine the key is the
+one fix that clears both). Practice pages, which only need the chat model,
+still gate on the key alone.
+
+**When it opens** (`onboardingFlow.ts`, `onboardingEntry`, unit-tested):
+
+- No profiles → the full flow from step 1. That is a fresh install, and also
+  what the Danger-zone wipe leaves behind (it deletes profiles but keeps
+  preferences, `onboardingDone` included) — an app with nobody in it asks
+  again whatever the flag says.
+- Profiles exist and `onboardingDone` → never.
+- Profiles exist and `onboardingDone` is false (an install upgrading to this
+  version): if `sttReady && apiKeyPresent` it is marked done silently — they
+  are already set up and get no questions; otherwise it opens at step 2,
+  skipping the name they already have.
+
+The rule is only consulted while the overlay is closed, so creating a profile
+on step 1 does not re-evaluate and jump the flow to step 2 by a different
+route.
+
+**Why the tour waits.** `App.tsx` starts the tour only when
+`onboardingDone && !tourDone`, a profile exists, and the overlay is closed
+(`shouldAutoStartTour`, tested). It never renders while the overlay is open.
+The tour's "Your key, your models" step now describes Settings → Language
+Models with several providers and points at the Speech-to-Text section for
+transcription; its anchor and route are unchanged, so `Tour.test.ts` still
+holds.

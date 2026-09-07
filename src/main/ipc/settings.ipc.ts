@@ -1,3 +1,8 @@
+import { providerKeys } from '../services/security/providerKeys';
+import { applySttSelection, readSttPrefs, sttReady, writeSttPrefs } from '../services/stt';
+import { DEFAULT_STT_PREFS, localSttModel } from '@shared/stt';
+import { testProviderKey } from '../providers/testKey';
+import { listProviderModels } from '../providers/listModels';
 import { z } from 'zod';
 import { app } from 'electron';
 import { IPC } from '@shared/ipc';
@@ -62,6 +67,10 @@ function readSettings(): AppSettings {
     activeProfileId: activeProfileId(),
     companionPrefs: readCompanionPrefs(),
     tourDone: settingsRepo.get(SETTINGS_KEYS.tourDone) === '1',
+    onboardingDone: settingsRepo.get(SETTINGS_KEYS.onboardingDone) === '1',
+    providerKeys: providerKeys.presence(),
+    stt: readSttPrefs(),
+    sttReady: sttReady(),
     shortcuts: getShortcuts(),
     shortcutDefaults: { ...SHORTCUT_DEFAULTS },
   };
@@ -80,7 +89,9 @@ const settingsPatch = z.object({
     .optional(),
   audio: z
     .object({
-      source: z.enum(['system', 'mic']),
+      // Legacy: a session now hears the call AND the microphone, so nothing
+      // writes this; still accepted from older renderers / stored JSON.
+      source: z.enum(['system', 'mic']).optional(),
       micDeviceId: z.string().nullable(),
     })
     .optional(),
@@ -112,8 +123,17 @@ const settingsPatch = z.object({
     })
     .optional(),
   tourDone: z.boolean().optional(),
+  onboardingDone: z.boolean().optional(),
+  stt: z
+    .object({
+      engine: z.enum(['cloud', 'local']),
+      localModelId: z.string().min(1).max(80),
+    })
+    .optional(),
   hideTaskbarIcon: z.boolean().optional(),
 });
+
+const providerId = z.enum(['openai', 'anthropic', 'google', 'groq', 'openrouter']);
 
 export function registerSettingsIpc(): void {
   handle(IPC.app.getInfo, NoInput, () => ({
@@ -156,8 +176,34 @@ export function registerSettingsIpc(): void {
       settingsRepo.set(SETTINGS_KEYS.devDbExplorer, patch.devDbExplorer ? '1' : '0');
     if (patch.tourDone !== undefined)
       settingsRepo.set(SETTINGS_KEYS.tourDone, patch.tourDone ? '1' : '0');
+    if (patch.onboardingDone !== undefined)
+      settingsRepo.set(SETTINGS_KEYS.onboardingDone, patch.onboardingDone ? '1' : '0');
+    if (patch.stt) {
+      // Unknown model ids fall back to the default inside readSttPrefs, so a
+      // stale renderer can never persist an engine with nothing to run.
+      writeSttPrefs({ ...patch.stt, localModelId: localSttModel(patch.stt.localModelId) ? patch.stt.localModelId : DEFAULT_STT_PREFS.localModelId });
+      applySttSelection();
+    }
     return readSettings();
   });
+
+  // Per-provider keys: same isolation as the OpenAI key (main only, encrypted,
+  // booleans over the wire). `openai` here IS the OpenAI key.
+  handle(
+    IPC.settings.setProviderKey,
+    z.object({ provider: providerId, key: z.string().min(1) }),
+    ({ provider, key }) => {
+      providerKeys.set(provider, key);
+      return { providerKeys: providerKeys.presence() };
+    },
+  );
+  handle(IPC.settings.clearProviderKey, z.object({ provider: providerId }), ({ provider }) => {
+    providerKeys.clear(provider);
+    return { providerKeys: providerKeys.presence() };
+  });
+  handle(IPC.settings.testProviderKey, z.object({ provider: providerId }), ({ provider }) =>
+    testProviderKey(provider),
+  );
 
   handle(IPC.settings.setApiKey, z.object({ key: z.string().min(1) }), ({ key }) => {
     apiKeyStore.set(key);
@@ -172,6 +218,9 @@ export function registerSettingsIpc(): void {
   handle(IPC.settings.testApiKey, NoInput, () => testApiKey());
 
   handle(IPC.settings.listModels, NoInput, () => listModels());
+  handle(IPC.settings.listProviderModels, z.object({ provider: providerId }), ({ provider }) =>
+    listProviderModels(provider),
+  );
 
   // Re-binds the global shortcuts live (no restart needed).
   handle(

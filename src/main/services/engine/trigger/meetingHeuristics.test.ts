@@ -66,6 +66,26 @@ describe('confident verdicts', () => {
     expect(v.type).toBe('question');
   });
 
+  it('unpunctuated questions still read as questions (streaming STT drops the "?")', () => {
+    // Exactly what the local engine produced in the 2026-09-07 live test.
+    for (const t of [
+      'Michael What is our budget for the third quarter marketing campaign',
+      'Michael, what is our budget for the third quarter marketing campaign',
+      'So what is the timeline for the launch',
+      'Okay so how many seats did they ask for',
+      'Do you have the numbers from last week',
+      'Is the vendor contract signed yet',
+    ]) {
+      const v = evaluateTurnHeuristics(t);
+      expect(v, t).toMatchObject({ type: 'question', confidence: 0.72 });
+    }
+  });
+
+  it('a wh-word starting a statement is not a question', () => {
+    expect(evaluateTurnHeuristics('What we need is more time on the rollout.').type).toBe('ambiguous');
+    expect(evaluateTurnHeuristics('How we ship this is up to the platform team.').type).toBe('ambiguous');
+  });
+
   it('plain statements are ambiguous — the classifier decides', () => {
     expect(evaluateTurnHeuristics('The roadmap has three phases planned.').type).toBe('ambiguous');
   });

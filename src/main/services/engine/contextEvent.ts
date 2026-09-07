@@ -1,3 +1,5 @@
+import type { Speaker } from '@shared/types';
+
 /**
  * Normalized engine inputs. Every source feeds the engine through one of
  * these; the mode's trigger policy decides what (if anything) to do.
@@ -9,7 +11,10 @@
  * folds them in.
  */
 export type ContextEvent =
-  | { kind: 'transcript_final'; sessionId: string; text: string }
+  /** `speaker` defaults to the mode's remote speaker (the trigger stream);
+   *  the user's own mic turns carry the mode's local speaker and are recorded
+   *  without ever running the trigger. */
+  | { kind: 'transcript_final'; sessionId: string; text: string; speaker?: Speaker }
   | { kind: 'transcript_delta'; sessionId: string; text: string }
   | { kind: 'direct_ask'; sessionId: string; text: string }
   | { kind: 'screen_capture'; sessionId: string; imageDataUrl: string }

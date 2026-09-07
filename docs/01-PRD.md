@@ -89,7 +89,11 @@ A mode declares when the agent contributes:
 | **summoned** | the user explicitly asks (hotkey / push-to-talk / Ask box) | every mode |
 
 Requirements: per-mode **sensitivity** control, interjection cooldowns, and a
-hard mute (pause AI) that always wins. Quiet is the default posture.
+hard mute (pause AI) that always wins. Balanced is the default posture for
+meetings (since 2026-09-07 — quiet shipped first and users reported "question
+detection is not working"): a question asked in the room streams a grounded
+answer; at quiet it becomes an open-question card instead. Questions bypass the
+card cooldowns at every level; everything else still obeys them.
 
 ### 6.4 Grounding
 Retrieval over profile + the session's context pack + approved memories,
@@ -149,10 +153,14 @@ candidate's last answer (reuses `interviewer.ts`), and a coverage tracker
 evaluation draft (reuses `feedback.ts`). Same overlay, opposite chair.
 
 ### 7.3 Meeting Copilot — 🧪 SHIPPED (Labs)
-Quiet by default. Proactive contribution cards: relevant context from the
-pack ("this was decided in the attached doc"), open-question tracker ("Sarah's
-question about billing never got answered"), and action items as they're
-spoken. End of session: meeting summary report (decisions, actions, open
+Balanced by default. A question asked in the room is answered right away, in
+the Cue Card, grounded the same way a summon is; at quiet presence it becomes
+an open-question card that quotes it. Proactive contribution cards: relevant
+context from the pack ("this was decided in the attached doc") and action items
+/ decisions as they're spoken. (The v2.0 "hold the question, surface it if two
+turns pass without an answer" tracker was removed on 2026-09-07: in real
+meetings almost any next turn shared a word with the question, so nothing ever
+surfaced.) End of session: meeting summary report (decisions, actions, open
 threads). Sensitivity dial from "only when summoned" to "eager".
 *As built:* deterministic heuristics filter small talk before the salience
 classifier ever runs; the Presence dial (summoned/quiet/balanced/active) maps

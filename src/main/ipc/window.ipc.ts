@@ -1,11 +1,23 @@
+import { z } from 'zod';
 import { IPC, EVENTS } from '@shared/ipc';
 import { handle, NoInput } from './helpers';
-import { getMainWindow } from '../windows/mainWindow';
+import { getMainWindow, navigateMainWindow } from '../windows/mainWindow';
+
+/** A dashboard route only — no query strings, nothing that could be a URL. */
+const dashboardRoute = z.object({ path: z.string().regex(/^\/[a-z0-9/_-]{0,80}$/i) });
 
 /** Window controls for the dashboard's custom (frameless) titlebar. The window
  *  uses titleBarStyle: 'hidden', so min/maximize/close are driven from the
  *  renderer. Closing reuses the window's own `close` handler (hide-to-tray). */
 export function registerWindowIpc(): void {
+  // The Cue Card has no router of its own; "Add key" in its model picker
+  // brings the dashboard up on Settings → Language Models the way the tray
+  // menu already does.
+  handle(IPC.window.openDashboard, dashboardRoute, ({ path }) => {
+    navigateMainWindow(path);
+    return { ok: true as const };
+  });
+
   handle(IPC.window.minimize, NoInput, () => {
     getMainWindow()?.minimize();
     return { ok: true as const };

@@ -5,6 +5,7 @@ import { electronApp, is, optimizer } from '@electron-toolkit/utils';
 import { initDb } from './db';
 import { registerIpc } from './ipc';
 import { sparringManager } from './services/mock/sparringManager';
+import { applySttSelection } from './services/stt';
 import { createMainWindow, showMainWindow } from './windows/mainWindow';
 import { createOverlayWindow, showOverlay } from './windows/overlayWindow';
 import { createSelectionWindow } from './windows/selectionWindow';
@@ -162,6 +163,9 @@ app.whenReady().then(() => {
     // its session row 'live' — finalize such strays before any UI reads counts.
     sparringManager.healStrays();
     registerIpc();
+    // Point the realtimeStt capability at the chosen engine (cloud or the
+    // on-device model) before the first session can open.
+    applySttSelection();
     createMainWindow();
     // Create the overlay (Cue Card) up front and show it by default: its renderer
     // is loaded and subscribed to IPC events before any answer streams to it, so

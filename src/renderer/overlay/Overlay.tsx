@@ -4,6 +4,7 @@ import { FLAGS } from '@shared/flags';
 import type { ClientInfo } from '@shared/ipc';
 import type {
   AnswerFormat,
+  AppSettings,
   CompanionStatusEvent,
   ContributionDeltaEvent,
   ContributionDoneEvent,
@@ -12,7 +13,9 @@ import type {
   ContributionResetEvent,
   InterviewType,
 } from '@shared/types';
+import type { CloudProviderId } from '@shared/providers';
 import { HeadphonesIcon } from '../components/icons';
+import { withModel, type PickerTask } from '../lib/modelChoice';
 import { splitPronunciation } from './pronunciation';
 import type { CardModel } from './cards/model';
 import { ContributionCard } from './cards/ContributionCard';
@@ -77,6 +80,17 @@ export default function Overlay() {
   const [answerInterviewer, setAnswerInterviewer] = useState(false);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Persisted settings, for the model chip (which model answers, which
+  // providers have keys). Re-read whenever a session goes live and when the
+  // engine pushes answer prefs, so a change made in the dashboard meanwhile is
+  // picked up — there is no settings-changed push event.
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const loadSettings = () =>
+    api.settings
+      .get()
+      .then((s) => setSettings(s as AppSettings))
+      .catch(() => {});
 
   // Voice/summon runtime: dialogue state mirror, push-to-talk
   // capture + VAD, and speech playback. Inert while the flag is off.
@@ -202,6 +216,7 @@ export default function Overlay() {
         setInterviewType(p.interviewType);
         setAnswerFormat(p.format);
         setPronunciation(p.pronunciation);
+        void loadSettings();
       }),
       api.events.onAudioLevel((p) => {
         setLevel(p.level);
@@ -213,6 +228,7 @@ export default function Overlay() {
       setPrivacy(p.enabled);
       setPrivacyUnsupported(!p.supported);
     });
+    void loadSettings();
     return () => {
       buf.cancel();
       cleanup.current.forEach((u) => u());
@@ -267,6 +283,21 @@ export default function Overlay() {
     const next = !pronunciation;
     setPronunciation(next);
     await api.session.setAnswerPrefs({ pronunciation: next });
+    if (question) await api.session.regenerate();
+  };
+  // The model chip: persist the pick for this task (read-modify-write against
+  // FRESH settings — the dashboard may have written other tasks meanwhile),
+  // then re-answer the current question with it.
+  const pickModel = async (task: PickerTask, provider: CloudProviderId, id: string) => {
+    try {
+      const fresh = (await api.settings.get()) as AppSettings;
+      const models = withModel(fresh.models, task, provider, id);
+      await api.settings.set({ models });
+      setSettings({ ...fresh, models });
+    } catch (e) {
+      setSessionError((e as Error).message);
+      return;
+    }
     if (question) await api.session.regenerate();
   };
   // Regenerate ONE card (its per-card ↻ button). Live-session questions re-run
@@ -405,7 +436,9 @@ export default function Overlay() {
           pronunciation={pronunciation}
           answerInterviewer={answerInterviewer}
           historyEnabled={historyEnabled}
+          settings={settings}
           onChangeType={(t) => void changeInterviewType(t)}
+          onPickModel={(task, provider, id) => void pickModel(task, provider, id)}
           onChangeFormat={(f) => void changeFormat(f)}
           onTogglePronunciation={() => void togglePronunciation()}
           onToggleAnswerInterviewer={() => setAnswerInterviewer((v) => !v)}

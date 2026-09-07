@@ -8,11 +8,15 @@ vi.mock('../openai/coding', () => ({
   // eslint-disable-next-line require-yield
   solveFromOcr: vi.fn(async function* () {}),
 }));
-vi.mock('../openai/vision', () => ({
-  solveFromImages: vi.fn(() => (async function* () {})()),
+// The screenshot path goes through the vision seam (providerFor('vision')), which
+// follows the coding task's provider — stub the registry with a fake VisionProvider.
+const streamSolve = vi.hoisted(() => vi.fn(() => (async function* () {})()));
+vi.mock('../../providers/registry', () => ({
+  providerFor: () => ({ streamSolve }),
 }));
-// codingMode imports normalizeOpenAIError from the client, which transitively loads
-// electron (app.isPackaged) — stub it so the import chain stays node-safe.
+// codingMode normalizes errors via providers/normalizeError, which falls back to the
+// OpenAI client's normalizer; the client transitively loads electron (app.isPackaged)
+// — stub it so the import chain stays node-safe.
 vi.mock('../openai/client', () => ({ normalizeOpenAIError: (e: unknown) => String(e) }));
 // codingMode reads the coding language from settings.repo (→ db → better-sqlite3),
 // which can't load under the node test env — stub it (get → null ⇒ 'javascript' default).
@@ -28,7 +32,6 @@ vi.mock('../session/sessionManager', () => ({
 
 import { addCapture, clearCaptures, solveCaptures } from './codingMode';
 import { broadcast } from '../../ipc/broadcast';
-import { solveFromImages } from '../openai/vision';
 import { EVENTS } from '@shared/ipc';
 
 const lastBufferImages = (): string[] => {
@@ -66,20 +69,20 @@ describe('multi-image capture buffer', () => {
 
   it('solveCaptures is a no-op on an empty buffer', async () => {
     await solveCaptures();
-    expect(solveFromImages).not.toHaveBeenCalled();
+    expect(streamSolve).not.toHaveBeenCalled();
   });
 
-  it('solveCaptures sends ALL buffered images in one call, then clears', async () => {
+  it('solveCaptures sends ALL buffered images in one vision-seam call, then clears', async () => {
     addCapture('img-1');
     addCapture('img-2');
     await solveCaptures();
-    expect(solveFromImages).toHaveBeenCalledTimes(1);
-    expect(solveFromImages).toHaveBeenCalledWith(
-      ['img-1', 'img-2'],
-      'javascript',
-      'explanation',
-      expect.any(AbortSignal),
-    );
+    expect(streamSolve).toHaveBeenCalledTimes(1);
+    expect(streamSolve).toHaveBeenCalledWith({
+      imageDataUrls: ['img-1', 'img-2'],
+      language: 'javascript',
+      format: 'explanation',
+      signal: expect.any(AbortSignal),
+    });
     expect(lastBufferImages()).toEqual([]); // buffer cleared after solving
   });
 });

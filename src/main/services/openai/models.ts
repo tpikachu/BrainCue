@@ -1,4 +1,6 @@
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
+import { parseModelId, type CloudProviderId } from '@shared/providers';
+import { installTaskRouteResolver } from '../../providers/taskRoute';
 
 export type PresetName = 'balanced' | 'low_cost' | 'best';
 
@@ -71,11 +73,38 @@ export function presetModels(): Record<ModelKey, string> {
   return PRESETS[modelPreset()];
 }
 
-/** User per-task override → the active preset's model. Ids are config, not contracts. */
-export function model(key: ModelKey): string {
+/** The stored id for a task: the user's per-task override (which may be a
+ *  QUALIFIED id such as `anthropic/claude-opus-5` — see shared/providers.ts)
+ *  or, absent one, the active preset's OpenAI model. */
+function storedModel(key: ModelKey): string {
   const overrides = settingsRepo.getJson<Record<string, string>>(SETTINGS_KEYS.models, {});
   return overrides[key] || presetModels()[key];
 }
+
+/**
+ * Per-task provider + bare model id. A bare stored id is OpenAI (every
+ * setting written before multi-provider still resolves the same way); a
+ * known provider prefix routes elsewhere. OpenRouter's own ids contain a
+ * slash (`openrouter/openai/gpt-5` → provider openrouter, model
+ * `openai/gpt-5`) — `parseModelId` only strips KNOWN provider prefixes.
+ * The routed chat/vision providers dispatch on this; every adapter reads its
+ * model id from it.
+ */
+export function resolveModel(key: ModelKey): { provider: CloudProviderId; model: string } {
+  return parseModelId(storedModel(key));
+}
+
+/** User per-task override → the active preset's model — always the BARE
+ *  vendor id (never `provider/…`), so OpenAI callers are unchanged. A task
+ *  routed to another provider never reaches an OpenAI call site: routing
+ *  happens first (providers/routed.ts). Ids are config, not contracts. */
+export function model(key: ModelKey): string {
+  return resolveModel(key).model;
+}
+
+// Routing dispatches on this module's resolution but must not import it
+// (see providers/taskRoute.ts) — install it once, at load.
+installTaskRouteResolver(resolveModel);
 
 /** Reasoning effort for GPT-5 / o-series models. Higher = better quality but more
  *  hidden reasoning tokens + longer total completion (time-to-first-token stays
@@ -92,11 +121,19 @@ export const defaultEfforts: Partial<Record<ModelKey, ReasoningEffort>> = {
 
 /** Effective effort for a task (user override → built-in default → none). */
 export function reasoningEffort(key: ModelKey): ReasoningEffort | null {
+  return (reasoningEffortOverride(key) as ReasoningEffort | null) || defaultEfforts[key] || null;
+}
+
+/** ONLY the user's stored effort for a task (no built-in default), as stored.
+ *  Non-OpenAI adapters map this onto their own effort scale and fall back to
+ *  their own per-task defaults — the built-in defaults above are OpenAI
+ *  tuning (`gpt-5-mini` at low), not a cross-vendor policy. */
+export function reasoningEffortOverride(key: ModelKey): string | null {
   const overrides = settingsRepo.getJson<Record<string, string>>(
     SETTINGS_KEYS.reasoningEfforts,
     {},
   );
-  return (overrides[key] as ReasoningEffort) || defaultEfforts[key] || null;
+  return overrides[key] || null;
 }
 
 /** GPT-5 family + o-series accept reasoning.effort; gpt-4.1 / gpt-4o reject it —

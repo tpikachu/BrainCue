@@ -10,13 +10,23 @@ export const IPC = {
   dialog: {
     openFile: 'dialog:open-file',
   },
+  stt: {
+    listModels: 'stt:list-models', // — → SttModelStatus[] (catalog + install state + live download)
+    download: 'stt:download', // { modelId } → { started: true } (progress via EVENTS.sttDownloadProgress)
+    cancelDownload: 'stt:cancel-download', // { modelId }
+    deleteModel: 'stt:delete-model', // { modelId }
+  },
   settings: {
     get: 'settings:get',
     set: 'settings:set',
     setApiKey: 'settings:set-api-key',
     clearApiKey: 'settings:clear-api-key',
     testApiKey: 'settings:test-api-key',
-    listModels: 'settings:list-models',
+    setProviderKey: 'settings:set-provider-key', // { provider, key } — any cloud provider (openai included)
+    clearProviderKey: 'settings:clear-provider-key', // { provider }
+    testProviderKey: 'settings:test-provider-key', // { provider } → { ok, model?, error? }
+    listModels: 'settings:list-models', // — → string[] (OpenAI account ids, unfiltered)
+    listProviderModels: 'settings:list-provider-models', // { provider } → string[] chat-capable ids the key can see
     setShortcuts: 'settings:set-shortcuts',
     resetShortcuts: 'settings:reset-shortcuts',
     suspendShortcuts: 'settings:suspend-shortcuts',
@@ -33,6 +43,7 @@ export const IPC = {
     maximizeToggle: 'window:maximize-toggle',
     close: 'window:close',
     isMaximized: 'window:is-maximized',
+    openDashboard: 'window:open-dashboard', // { path } — show the dashboard on a route (Cue Card → Settings)
   },
   profiles: {
     list: 'profiles:list',
@@ -225,6 +236,7 @@ export const EVENTS = {
   dataChanged: 'data:changed',
   selectionReset: 'selection:reset',
   updateStatus: 'update:status',
+  sttDownloadProgress: 'stt:download-progress', // one SttDownloadProgress per tick (throttled) for the progress strip
   overlayClickthrough: 'overlay:clickthrough', // global shortcut -> overlay toggles click-through
   clientInfo: 'session:client-info', // the live session's client (job) notes, for the Cue Card
   answerPrefs: 'session:answer-prefs', // current format/length/pronunciation, for the Cue Card toggles
@@ -298,6 +310,30 @@ export interface AnswerPrefs {
 }
 
 export type IpcEventChannel = (typeof EVENTS)[keyof typeof EVENTS];
+
+/** One local STT model download, as pushed on EVENTS.sttDownloadProgress and
+ *  as embedded in SttModelStatus. `done`/`error`/`cancelled` are terminal. */
+export interface SttDownloadProgress {
+  modelId: string;
+  state: 'downloading' | 'verifying' | 'done' | 'error' | 'cancelled';
+  receivedBytes: number;
+  totalBytes: number;
+  /** 0–100, from the pinned catalog sizes. */
+  percent: number;
+  /** Which file is in flight (for the strip's caption). */
+  file?: string;
+  error?: string;
+}
+
+/** Catalog entry + what is on disk, from `stt:list-models`. */
+export interface SttModelStatus {
+  modelId: string;
+  installed: boolean;
+  /** Bytes present on disk (complete or partial). */
+  bytesOnDisk: number;
+  /** The in-flight download, if any. */
+  download: SttDownloadProgress | null;
+}
 
 /** Auto-update lifecycle state pushed to the renderer (EVENTS.updateStatus). */
 export interface UpdateStatus {

@@ -14,6 +14,10 @@ export interface PresenceConfig {
   cooldownMs: number;
   /** Minimum gap between two cards of the SAME kind. */
   perKindCooldownMs: number;
+  /** A question asked in the room streams a grounded ANSWER (true) or becomes
+   *  an open-question card that only quotes it (false). Questions bypass the
+   *  cooldowns at every level; this decides what they turn into. */
+  answerQuestions: boolean;
 }
 
 /** Contradiction/risk cards need high confidence at EVERY level — a wrong
@@ -26,6 +30,7 @@ export const PRESENCE_LEVELS: Record<Presence, PresenceConfig> = {
     minConfidence: { context: 1, open_question: 1, action_item: 1, decision: 1, warning: 1 },
     cooldownMs: Infinity,
     perKindCooldownMs: Infinity,
+    answerQuestions: false,
   },
   quiet: {
     ambientEnabled: true,
@@ -38,6 +43,7 @@ export const PRESENCE_LEVELS: Record<Presence, PresenceConfig> = {
     },
     cooldownMs: 90_000,
     perKindCooldownMs: 180_000,
+    answerQuestions: false, // cards only — the user raises presence to get answers
   },
   balanced: {
     ambientEnabled: true,
@@ -50,6 +56,7 @@ export const PRESENCE_LEVELS: Record<Presence, PresenceConfig> = {
     },
     cooldownMs: 45_000,
     perKindCooldownMs: 90_000,
+    answerQuestions: true,
   },
   active: {
     ambientEnabled: true,
@@ -62,5 +69,6 @@ export const PRESENCE_LEVELS: Record<Presence, PresenceConfig> = {
     },
     cooldownMs: 20_000,
     perKindCooldownMs: 45_000,
+    answerQuestions: true,
   },
 };

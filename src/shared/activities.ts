@@ -1,5 +1,5 @@
 import { FLAGS } from './flags';
-import type { ContextPackKind, SessionMode } from './types';
+import type { AudioSource, ContextPackKind, SessionMode } from './types';
 
 /**
  * What you are about to do — the ONE thing the user picks.
@@ -49,8 +49,22 @@ export interface ActivityConfig {
   // --- what happens when a session starts ---
   /** The engine mode this runs. Derived from the activity; never picked. */
   mode: SessionMode;
-  /** Whose audio, by default. Still overridable at start (an in-person meeting
-   *  is a microphone) — this is the sensible default, not a lock. */
+  /**
+   * Which audio streams a session opens, and which one its questions come from
+   * (`capturePlan` below is the mapping):
+   *
+   *  - `'system'` — a call with other people in it. BOTH streams are captured:
+   *    the call's system audio AND the user's microphone. Every turn is
+   *    transcribed and kept, but only the call (system audio) can trigger a
+   *    cue — the user is the one speaking on the mic, and their own words are
+   *    never a question to answer. Nothing to choose at start.
+   *  - `'mic'` — nobody else is on a call (solo, game): the microphone is the
+   *    only stream, and it IS the trigger source.
+   *
+   * Historically this was a start-time "Listen to" default the user could
+   * flip. That choice is gone: asking someone on a call whether to hear the
+   * call or themselves never made sense, so the session hears both.
+   */
   listensTo: 'system' | 'mic';
   /** Whether the profile needs a parsed résumé to start. TRUE for exactly one
    *  activity, which is the point: you should not have to upload a CV to sit in
@@ -92,7 +106,7 @@ export const ACTIVITIES: Record<ContextPackKind, ActivityConfig> = {
   meeting: {
     label: 'Meeting or call',
     hint: 'A standup, a client call, a weekly sync — anything with other people in it.',
-    does: 'Sits in quietly. Surfaces context, open questions, action items, and decisions.',
+    does: 'Answers questions asked in the room. Surfaces context, action items, and decisions.',
     mode: 'meeting',
     listensTo: 'system',
     needsResume: false,
@@ -112,7 +126,7 @@ export const ACTIVITIES: Record<ContextPackKind, ActivityConfig> = {
   project: {
     label: 'Project discussion',
     hint: 'A conversation about a piece of work you talk about often.',
-    does: 'Sits in quietly. Surfaces what was decided before, open threads, and new action items.',
+    does: 'Answers questions asked in the room. Surfaces what was decided before, open threads, and new action items.',
     mode: 'meeting',
     listensTo: 'system',
     needsResume: false,
@@ -152,7 +166,7 @@ export const ACTIVITIES: Record<ContextPackKind, ActivityConfig> = {
   subject: {
     label: 'Study or tutoring',
     hint: 'Material you are learning or being taught.',
-    does: 'Sits in quietly and pulls up the parts of your material that bear on what was just said.',
+    does: 'Answers questions as they come up and pulls up the parts of your material that bear on what was just said.',
     mode: 'meeting',
     listensTo: 'system',
     needsResume: false,
@@ -172,7 +186,7 @@ export const ACTIVITIES: Record<ContextPackKind, ActivityConfig> = {
   personal: {
     label: 'Personal',
     hint: 'Something in your own life — a landlord, a doctor, a bank.',
-    does: 'Sits in quietly. Keeps the background straight and catches what you agreed to.',
+    does: 'Answers questions asked in the room. Keeps the background straight and catches what you agreed to.',
     mode: 'meeting',
     listensTo: 'system',
     needsResume: false,
@@ -232,7 +246,7 @@ export const ACTIVITIES: Record<ContextPackKind, ActivityConfig> = {
   custom: {
     label: 'Something else',
     hint: 'Anything that does not fit the others.',
-    does: 'Sits in quietly and contributes only when it is confident.',
+    does: 'Answers questions asked in the room and contributes only when it is confident.',
     mode: 'meeting',
     listensTo: 'system',
     needsResume: false,
@@ -250,6 +264,26 @@ export const ACTIVITIES: Record<ContextPackKind, ActivityConfig> = {
     notesPlaceholder: 'Anything else worth having on hand',
   },
 };
+
+/**
+ * What a session actually captures for a `listensTo` value, and which stream
+ * the trigger (question detection / ambient policy) reads. Shared by the
+ * renderer (which streams to open) and the engine (which transcribers to
+ * start, tagged with which speaker) so the two can never disagree.
+ */
+export interface CapturePlan {
+  /** Streams to open, in priority order (the first is the "primary" one the
+   *  waveform shows). */
+  streams: readonly AudioSource[];
+  /** The stream whose finalized turns run the trigger policy; the other one is
+   *  transcribed and remembered but never answered. */
+  triggerSource: AudioSource;
+}
+
+export const capturePlan = (listensTo: ActivityConfig['listensTo']): CapturePlan =>
+  listensTo === 'mic'
+    ? { streams: ['mic'], triggerSource: 'mic' }
+    : { streams: ['system', 'mic'], triggerSource: 'system' };
 
 /** Menu order: the conversations someone has every day come first. Interview is
  *  still fully shipped — it just no longer defines the product. */

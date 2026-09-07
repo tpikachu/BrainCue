@@ -37,11 +37,12 @@ validates input with zod via the `handle()` helper. Errors are returned as
 | Channel | Request | Response |
 |---|---|---|
 | `settings:get` | — | `AppSettings` (no raw key — only `apiKeyPresent`; incl. `tourDone`, `sessionArchiveEnabled`) |
-| `settings:set` | `Partial<AppSettings>` (`models`, `overlay`, `dataConsentAck`, `tourDone`) | `AppSettings` |
+| `settings:set` | `Partial<AppSettings>` (`models`, `overlay`, `dataConsentAck`, `tourDone`, `onboardingDone`, `stt`) | `AppSettings` (`stt: { engine: 'cloud' \| 'local', localModelId }` persists the engine choice and re-runs `applySttSelection()` — `local` takes effect only once the model is installed, see [22](22-LOCAL-STT.md); `onboardingDone` marks first-run setup finished/skipped) |
 | `settings:set-api-key` | `{ key }` | `{ apiKeyPresent: true }` |
 | `settings:clear-api-key` | — | `{ apiKeyPresent: false }` |
 | `settings:test-api-key` | — | `{ ok, model?, error? }` |
 | `settings:list-models` | — | `string[]` |
+| `settings:list-provider-models` | `{ provider }` | `string[]` — chat-capable ids the stored key can see (`GET /models`, non-chat ids and dated snapshot twins filtered; `providers/listModels.ts`). The Language Models panel calls it for every configured provider on mount |
 | `settings:set-shortcuts` | `{ shortcuts }` | `{ shortcuts }` (persist + live re-register global shortcuts) |
 | `settings:reset-shortcuts` | — | `{ shortcuts }` (back to defaults) |
 | `settings:suspend-shortcuts` / `settings:resume-shortcuts` | — | `{ suspended }` / `{ resumed }` (while recording a binding in the UI) |
@@ -57,9 +58,19 @@ validates input with zod via the `handle()` helper. Errors are returned as
 | `window:maximize-toggle` | — | `{ maximized }` |
 | `window:close` | — | `{ ok: true }` (hides dashboard to tray) |
 | `window:is-maximized` | — | `{ maximized }` |
+| `window:open-dashboard` | `{ path }` (a dashboard route, e.g. `/settings/models`) | `{ ok: true }` — shows/focuses the dashboard and pushes `app:navigate`; used by the Cue Card's model picker "Add key" rows |
 | `update:get-status` | — | `UpdateStatus` (auto-update state + current version) |
 | `update:check` | — | `{ ok: true }` (trigger a check; packaged builds only) |
 | `update:install` | — | `{ ok: true }` (quit + install a downloaded update) |
+
+### stt (local speech-to-text models — [22](22-LOCAL-STT.md))
+
+| Channel | Request | Response |
+|---|---|---|
+| `stt:list-models` | — | `SttModelStatus[]` (the catalog in `shared/stt.ts` + `installed`, `bytesOnDisk` incl. `.part` remnants, and the in-flight `download` if any) |
+| `stt:download` | `{ modelId }` | `{ started: true }` (returns at once; resumes a partial download; a second call for a running download is a no-op. Progress streams on `stt:download-progress`; on `done` the provider selection is re-applied) |
+| `stt:cancel-download` | `{ modelId }` | `{ cancelled }` (`false` when nothing was running; the `.part` files stay for a resume) |
+| `stt:delete-model` | `{ modelId }` | `{ deleted: true }` (removes the model directory; refuses while a download is active; falls back to the cloud engine if `local` was selected) |
 
 ### profiles
 | Channel | Request | Response |
@@ -139,7 +150,7 @@ résumé, persisted, and indexed as `story` chunks so they ground live answers.
 | `session:toggle-pause-active` | — | `{ paused, active }` (global shortcut target — toggles the live session) |
 | `session:stop-active` | — | `{ stopped }` (Cue Card target — stops the live session without a sessionId; the `stopped` sessionState broadcast tears down the dashboard store + mic too) |
 | `session:audio-chunk` | `{ sessionId, audio:ArrayBuffer, mime }` | `{ accepted }` |
-| `session:realtime-audio` | `{ sessionId, pcm:ArrayBuffer }` | *(one-way `send`, no response — low-latency Realtime STT)* |
+| `session:realtime-audio` | `{ sessionId, pcm:ArrayBuffer, source?: 'system' \| 'mic' }` | *(one-way `send`, no response — low-latency Realtime STT)*. `source` = which captured stream the frame belongs to (the call's system audio or the user's microphone); each has its own transcriber in main. Absent = `system`. |
 | `session:list` | — | `SessionListItem[]` |
 | `session:get` | `{ id }` | `SessionDetail` (transcript + questions + answers + report) |
 | `session:delete` | `{ id }` | `{ deleted: true }` |
@@ -224,7 +235,7 @@ Channel constants live in `EVENTS` (`src/shared/ipc.ts`); payload types are in
 | Channel | Payload | Target |
 |---|---|---|
 | `session:state` | `{ status, paused }` | dashboard + overlay |
-| `session:transcript-delta` | `{ text, isFinal, speaker }` | dashboard + overlay |
+| `session:transcript-delta` | `{ text, isFinal, speaker }` — `speaker` is the mode's remote speaker for the call (`them` / `interviewer`; `you` in solo activities) and its local speaker for the user's own microphone turns (`you` / `candidate`). Interim (`isFinal:false`) deltas are sent for the trigger stream only. | dashboard + overlay |
 | `session:question-detected` | `DetectedQuestion` | dashboard + overlay |
 | `session:answer-delta` | `{ questionId, token }` | overlay (+ dashboard) |
 | `session:answer-meta` | `{ questionId, talkingPoints, resumeMatch, star, clarifyingQuestion, riskWarning, followupQuestion }` | overlay |
@@ -313,6 +324,7 @@ correct/forget the memory in place.
 | `data:changed` | `{ reason }` | dashboard (refresh status panel after a data wipe) |
 | `selection:reset` | `{ image }` | region selector (push a fresh frame + reset state) |
 | `update:status` | `UpdateStatus` | dashboard (auto-update banner + Settings) |
+| `stt:download-progress` | `SttDownloadProgress` (`{ modelId, state, receivedBytes, totalBytes, percent, file?, error? }`) | dashboard (local STT model download strip; throttled to ~4/s plus every state change; `done` / `error` / `cancelled` are terminal) |
 
 ## Result envelope
 ```ts

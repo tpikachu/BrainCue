@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc';
+import type { AudioSource } from '@shared/types';
 import { handle, zId, zSpaceKind } from './helpers';
 import { zAnswerFormat, zInterviewType, zPresence } from './schemas';
 import { sessionManager } from '../services/session/sessionManager';
@@ -117,11 +118,18 @@ export function registerSessionIpc(): void {
   );
 
   // High-frequency streaming PCM audio: fire-and-forget (no Result envelope).
-  ipcMain.on(IPC.session.realtimeAudio, (_e, payload: { sessionId: string; pcm: ArrayBuffer }) => {
-    if (payload?.sessionId && payload.pcm) {
-      sessionManager.feedRealtimeAudio(payload.sessionId, payload.pcm);
-    }
-  });
+  // `source` says which captured stream a frame belongs to — the call's system
+  // audio or the user's microphone — so it reaches that stream's transcriber.
+  // Absent (a v1 renderer) means the remote side.
+  ipcMain.on(
+    IPC.session.realtimeAudio,
+    (_e, payload: { sessionId: string; pcm: ArrayBuffer; source?: string }) => {
+      if (payload?.sessionId && payload.pcm) {
+        const source: AudioSource = payload.source === 'mic' ? 'mic' : 'system';
+        sessionManager.feedRealtimeAudio(payload.sessionId, payload.pcm, source);
+      }
+    },
+  );
 
   handle(
     IPC.session.ask,
