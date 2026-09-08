@@ -120,6 +120,13 @@ async function* run(
 }
 
 export const anthropicChat: ChatProvider = {
+  async warm() {
+    try {
+      await (await anthropicClient()).models.list({ limit: 1 });
+    } catch {
+      /* best effort */
+    }
+  },
   stream(req) {
     return run(req.task, req.system, req.user, req.maxOutputTokens, req.signal);
   },

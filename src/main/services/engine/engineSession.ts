@@ -16,7 +16,9 @@ import { log } from '../security/logger';
 import { recallMemories } from '../memory/recall';
 import { ground } from './grounding';
 import { enginePersistence as persist } from './persistence/enginePersistence';
-import { EchoGuard } from './echoGuard';
+import { EchoGuard, sameWords, turnWords } from './echoGuard';
+import { evaluateTurnHeuristics } from './trigger/meetingHeuristics';
+import type { RetrievedChunk } from '@shared/types';
 import { summonedPolicy } from './trigger/summonedPolicy';
 import type { AudioSource, Speaker } from '@shared/types';
 import type { RealtimeSttSession } from '../../providers/types';
@@ -86,6 +88,10 @@ export class EngineSession {
   readonly levels: Record<AudioSource, number> = { system: 0, mic: 0 };
   /** Drops the microphone's copy of what the call just said (laptop
    *  speakers → the mic hears the call). See echoGuard.ts. */
+  /** Grounding started on the INTERIM transcript, before the turn's final
+   *  (see prefetchGrounding). Consumed by the next generateContribution whose
+   *  question says the same words; otherwise discarded. */
+  private prefetch: { words: string[]; promise: Promise<RetrievedChunk[]> } | null = null;
   private readonly echo = new EchoGuard({
     // Word count only — transcript text never goes to the log.
     onDrop: (words) => log.info(`echo guard: dropped the microphone's copy of a call turn (${words} words)`),
@@ -139,6 +145,7 @@ export class EngineSession {
   /** Abort in-flight work and release every transcriber. Idempotent. */
   teardown(): void {
     this.answerAbort?.abort();
+    this.prefetch = null;
     this.echo.flush(); // held own turns are the user's last words — keep them
     for (const source of Object.keys(this.transcribers) as AudioSource[]) {
       this.transcribers[source]?.stop();
@@ -231,6 +238,38 @@ export class EngineSession {
       if (!this.stopped && !this.answerAbort) this.answering = false;
       log.error('onTranscriptFinal failed', e);
     }
+  }
+
+  /** Start retrieval while the speaker is still finishing the question.
+   *
+   *  The answer path used to be: final transcript → embed the question →
+   *  search → first token, with the embedding round trip (≈1–1.5 s) paid
+   *  AFTER the endpoint had already waited for silence. The interim text
+   *  reads as a question long before the final lands, so the embedding and
+   *  search run then, and generateContribution finds the context ready. One
+   *  prefetch per turn, refreshed when the turn has grown by half again, so a
+   *  long question does not pay for every delta. Never throws; a failed
+   *  prefetch simply falls back to grounding on the final. */
+  prefetchGrounding(interim: string): void {
+    if (this.stopped || this.paused) return;
+    const words = turnWords(interim);
+    if (words.length < 4) return;
+    if (this.prefetch && words.length < this.prefetch.words.length * 1.5) return;
+    if (evaluateTurnHeuristics(interim).type !== 'question') return;
+    const session = persist.sessionRow(this.sessionId);
+    if (!session) return;
+    this.prefetch = {
+      words,
+      promise: ground(session.profileId, this.retrievalQuery(interim), session.packId, this.mode.id).catch(() => []),
+    };
+  }
+
+  /** The prefetched context when it was for THIS question, else null. */
+  private takePrefetch(questionText: string): Promise<RetrievedChunk[]> | null {
+    const p = this.prefetch;
+    this.prefetch = null;
+    if (!p) return null;
+    return sameWords(p.words, turnWords(questionText)) ? p.promise : null;
   }
 
   /** Persist a turn, broadcast it to the transcript and remember it in the
@@ -369,10 +408,17 @@ export class EngineSession {
       // Retrieval (an embeddings call) is INSIDE the try so a failure here is
       // surfaced + un-wedges the card too — not just generate failures.
       const history = this.historyBefore(questionText);
-      context = await ground(profile.id, this.retrievalQuery(questionText), session.packId, this.mode.id);
+      const t0 = Date.now();
+      const prefetched = this.takePrefetch(questionText);
+      context = prefetched
+        ? await prefetched
+        : await ground(profile.id, this.retrievalQuery(questionText), session.packId, this.mode.id);
+      const tGround = Date.now();
       // Approved memory joins the grounding (consent-gated; [] when off —
       // recall never throws). Cited separately from documents as [M1]….
       memories = await recallMemories(profile.id, questionText, session.packId);
+      const tRecall = Date.now();
+      let firstToken = 0;
       // Transparency: tell the UI exactly what was sent to the provider —
       // memories included, so "data sent" always shows every memory used.
       emitContributionContext(questionId, {
@@ -391,6 +437,13 @@ export class EngineSession {
         signal: abort.signal,
       })) {
         if (ev.type === 'delta') {
+          if (!firstToken) {
+            firstToken = Date.now();
+            // Where the wait before the first token goes (no transcript text).
+            log.info(
+              `answer latency: ground ${tGround - t0} ms${prefetched ? ' (prefetched on interim)' : ''}, recall ${tRecall - tGround} ms, first token ${firstToken - tRecall} ms`,
+            );
+          }
           answer += ev.token;
           emitContributionDelta(questionId, ev.token);
         } else if (ev.type === 'usage') {

@@ -150,6 +150,9 @@ class Engine {
       for (const source of plan.streams) {
         const isTrigger = source === plan.triggerSource;
         const speaker: Speaker = isTrigger ? modeDef.remoteSpeaker : modeDef.localSpeaker;
+        // The turn so far, from incremental deltas; the session prefetches
+        // grounding on it while the speaker is still finishing the question.
+        let interim = '';
         session.transcribers[source] = createRealtimeSource(
           {
             onDelta: (text) => {
@@ -159,9 +162,16 @@ class Engine {
               // Interim text is shown for the trigger stream only: the UI keeps
               // ONE in-flight line, and two streams' partials interleaved into
               // it would be unreadable. The user's own words arrive as finals.
-              if (isTrigger) broadcast(EVENTS.transcriptDelta, { text, isFinal: false, speaker });
+              if (isTrigger) {
+                interim += text;
+                session.prefetchGrounding(interim);
+                broadcast(EVENTS.transcriptDelta, { text, isFinal: false, speaker });
+              }
             },
-            onFinal: (text) => void this.processFinalTranscript(opts.sessionId, text, speaker),
+            onFinal: (text) => {
+              interim = '';
+              void this.processFinalTranscript(opts.sessionId, text, speaker);
+            },
             onError: (message) => broadcast(EVENTS.sessionError, { message }),
             // Socket lifecycle → a subtle "reconnecting audio…" pill in the Cue Card
             // (an unexpected drop mid-session now recovers itself; see realtime.ts).
@@ -172,6 +182,13 @@ class Engine {
       }
     }
 
+    // Open the answer model's connection now, not on the first question:
+    // the first answer of a process paid ~3 s more to its first token.
+    try {
+      void providerFor('chat').warm?.('answer');
+    } catch {
+      /* no chat provider configured yet — the first answer says so */
+    }
     broadcast(EVENTS.sessionState, { status: 'live', paused: false });
     // Seed the Cue Card's answer-control toggles with this round's prefs.
     broadcast(

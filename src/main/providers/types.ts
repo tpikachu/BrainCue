@@ -44,6 +44,11 @@ export interface ChatProvider {
   /** One-shot JSON-mode call (classify-tier tasks). Parse errors propagate —
    *  callers own their fallback semantics. */
   json<T>(req: ChatJsonRequest): Promise<T>;
+  /** Open the vendor connection ahead of the first real request. The first
+   *  answer of a process paid ~3 s more to the first token than the second
+   *  (TLS + vendor-side setup); a session start is the moment to pay that
+   *  quietly. Best effort — never throws, never blocks. */
+  warm?(task: ChatStreamRequest['task']): Promise<void>;
 }
 
 /** Identifies an embedding SPACE. Vectors from different identities are not

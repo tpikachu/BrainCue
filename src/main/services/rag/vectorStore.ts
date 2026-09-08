@@ -27,6 +27,9 @@ export interface VectorStore {
   /** The single best-matching `story` chunk for the query (or null), regardless of
    *  the top-k. Reuses the caller's query vector so it adds no extra embedding call. */
   topStory(args: { profileId: string; query: Float32Array }): RetrievedChunk | null;
+  /** Does this profile have ANY embedded chunk? Lets the retriever skip the
+   *  embedding round trip (≈1–1.5 s on the answer path) for an empty Space. */
+  hasAny(profileId: string): boolean;
 }
 
 export const sqliteVectorStore: VectorStore = {
@@ -46,6 +49,18 @@ export const sqliteVectorStore: VectorStore = {
         set: { provider, model, dim: vector.length, vector: vectorToBuffer(vector) },
       })
       .run();
+  },
+
+  hasAny(profileId) {
+    return (
+      db()
+        .select({ id: schema.chunks.id })
+        .from(schema.chunks)
+        .innerJoin(schema.embeddings, eq(schema.embeddings.chunkId, schema.chunks.id))
+        .where(eq(schema.chunks.profileId, profileId))
+        .limit(1)
+        .all().length > 0
+    );
   },
 
   search({ profileId, query, k, jobId, allowTailored = false }) {
