@@ -148,8 +148,10 @@ window, not window/layout work.
 > lives in the Spaces tab; Tailor is switched off — [20](20-QUARANTINE.md)),
 > the sidebar is
 > Home/Library/Sessions/Insights/Settings, and the Tour was rewritten. The
-> shared start flow shipped as `StartSessionModal` (activity → Space → source →
-> transparency summary → explicit start); flags live in `src/shared/flags.ts`.
+> shared start flow shipped as `StartSessionModal` (activity → Space →
+> explicit start; the per-start "captured / sent / never sent" summary was
+> dropped 2026-10-06 as stating the obvious — Help and Privacy & Data keep the
+> full account); flags live in `src/shared/flags.ts`.
 > Step 3 (full SessionView extraction from InterviewPage) is deferred — the
 > interview workspace stays intact partly because the privacy hard test pins
 > its profile-select → "Interviews" flow; revisit when Meeting lands.
