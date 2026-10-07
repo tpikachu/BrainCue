@@ -102,6 +102,13 @@ export function openaiCompatibleProvider(info: CloudProviderInfo): {
       );
     },
 
+    async warm() {
+      try {
+        await (await compatClient(info)).models.list();
+      } catch {
+        /* best effort */
+      }
+    },
     async json<T>(req: ChatJsonRequest): Promise<T> {
       const client = await compatClient(info);
       const { model } = resolveModel(req.task);

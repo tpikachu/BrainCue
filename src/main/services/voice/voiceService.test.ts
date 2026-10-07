@@ -1,4 +1,11 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// The voice layer is behind FLAGS.voice (off in the product since 2026-10-06);
+// these tests exercise the service itself, so force the flag on.
+vi.mock('@shared/flags', async (orig) => {
+  const m = (await orig()) as { FLAGS: Record<string, unknown> };
+  return { FLAGS: { ...m.FLAGS, voice: true } };
+});
 import { EVENTS } from '@shared/ipc';
 import type { VoiceAudioEvent, VoiceStateEvent } from '@shared/types';
 

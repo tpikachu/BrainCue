@@ -35,6 +35,13 @@ import type {
 const REASONING_HEADROOM = 1024;
 
 export const openaiChat: ChatProvider = {
+  async warm(task) {
+    try {
+      await openai().models.retrieve(model(task)); // trivial GET, no tokens
+    } catch {
+      /* best effort */
+    }
+  },
   async *stream(req): AsyncGenerator<ChatStreamEvent> {
     const m = model(req.task);
     const reasoning = isReasoningModel(m);

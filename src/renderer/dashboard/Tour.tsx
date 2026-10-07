@@ -50,7 +50,7 @@ export const TOUR_STEPS: TourStep[] = [
   {
     chapter: 'Welcome',
     title: 'The AI that’s in the room with you',
-    body: 'BrainCue listens to the conversation you are actually in — a standup, a client call, an interview, or just your working day — and contributes through a floating Cue Card that is invisible to screen sharing, or through its own voice. Everything runs on this machine, on your own API key. This takes about ninety seconds and covers the whole loop.',
+    body: 'BrainCue listens to the conversation you are actually in — a standup, a client call, an interview, or just your working day — and contributes through a floating Cue Card that is invisible to screen sharing. Everything runs on this machine, on your own API key. This takes about ninety seconds and covers the whole loop.',
   },
   {
     chapter: 'Welcome',

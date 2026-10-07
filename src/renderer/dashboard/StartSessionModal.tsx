@@ -15,7 +15,6 @@ import {
   PRACTICE_LINKS,
   PRESENCE_OPTIONS,
   START_ACTIVITIES,
-  captureSummary,
   spacesFor,
   startBlocker,
 } from './startFlow';
@@ -108,11 +107,6 @@ export function StartSessionModal(props: {
     activity,
     spaceId,
   });
-  const summary = useMemo(
-    () => captureSummary({ listensTo: config.listensTo, spaceTitle, activity }),
-    [config.listensTo, spaceTitle, activity],
-  );
-
   const start = async () => {
     if (blocker) return;
     setStarting(true);
@@ -185,8 +179,8 @@ export function StartSessionModal(props: {
     >
       <div className="space-y-5 text-sm">
         {/* 1 · What is this? The only question about what BrainCue will be.
-            A dropdown, not a card grid: eight tiles pushed the Space, the audio
-            source, and the privacy summary below the fold, and the choice is
+            A dropdown, not a card grid: eight tiles pushed the Space and the
+            start button below the fold, and the choice is
             one word — it does not need a card each. What the choice MEANS is
             printed underneath, so nothing the cards said is lost. */}
         <Field label="What’s this call?">
@@ -335,28 +329,6 @@ export function StartSessionModal(props: {
             </Field>
           </div>
         )}
-
-        {/* 4 · Exactly what is captured and sent — before anything starts. */}
-        <div className="rounded-xl border border-white/5 bg-neutral-950/60 p-3.5 text-xs leading-relaxed">
-          <p className="mb-1 font-medium text-neutral-300">Captured on this machine</p>
-          <ul className="mb-2 list-disc space-y-0.5 pl-4 text-neutral-400">
-            {summary.captured.map((l) => (
-              <li key={l}>{l}</li>
-            ))}
-          </ul>
-          <p className="mb-1 font-medium text-neutral-300">Sent to OpenAI (your key)</p>
-          <ul className="mb-2 list-disc space-y-0.5 pl-4 text-neutral-400">
-            {summary.sent.map((l) => (
-              <li key={l}>{l}</li>
-            ))}
-          </ul>
-          <p className="mb-1 font-medium text-neutral-300">Never sent</p>
-          <ul className="list-disc space-y-0.5 pl-4 text-neutral-400">
-            {summary.neverSent.map((l) => (
-              <li key={l}>{l}</li>
-            ))}
-          </ul>
-        </div>
 
         {(blocker || error) && (
           <p className="text-xs text-amber-400" role="alert">

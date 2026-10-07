@@ -56,6 +56,9 @@ export async function retrieve(
   jobId: string | null = null,
   opts: { storyCue?: boolean; tailoredResume?: boolean } = {},
 ): Promise<RetrievedChunk[]> {
+  // Nothing indexed for this profile → nothing to rank. Skipping the embedding
+  // call here took 1.5 s off the first token for a Space without documents.
+  if (!sqliteVectorStore.hasAny(profileId)) return [];
   const vector = await providerFor('embedding').embedOne(query);
   // Over-fetch so capping archives promotes real alternatives rather than
   // simply returning fewer chunks.

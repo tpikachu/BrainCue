@@ -40,7 +40,11 @@ export function Modal({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-6 backdrop-blur-sm"
+      // Starts BELOW the custom title bar (`--titlebar-h`, set by Titlebar).
+      // Electron hands the bar's `-webkit-app-region: drag` rectangle to the
+      // OS by position, whatever is painted over it — a dialog scrolled up
+      // under those pixels had an unclickable Close button.
+      className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h,0px)] z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-6 backdrop-blur-sm"
       onMouseDown={onClose}
     >
       <div
@@ -220,6 +224,22 @@ export function Dropdown({
   const [open, setOpen] = useState(false);
   const [openUp, setOpenUp] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  // Set by a real press on the button. A click without it is the enclosing
+  // <label> (dashboard Field) re-dispatching the user's click on the label
+  // text onto its first control — i.e. this button. That synthetic click used
+  // to re-open a list the outside mousedown had just closed.
+  const pressed = useRef(false);
+
+  const toggle = () => {
+    if (!open && rootRef.current) {
+      // Open upward when the list would run past the window bottom and
+      // there is more room above (the Cue Card is small).
+      const r = rootRef.current.getBoundingClientRect();
+      const room = 240;
+      setOpenUp(r.bottom + room > window.innerHeight && r.top > window.innerHeight - r.bottom);
+    }
+    setOpen((v) => !v);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -258,21 +278,23 @@ export function Dropdown({
         aria-haspopup="listbox"
         aria-expanded={open}
         className={buttonClassName}
+        onMouseDown={() => {
+          pressed.current = true;
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault(); // no synthesized click to follow
+            toggle();
+          }
+        }}
         onClick={(e) => {
-          // When this Dropdown stands in for a <select> inside a <label> (e.g.
-          // dashboard Field), the label would re-dispatch a synthetic click onto
-          // this button and toggle it a second time (open→closed). Cancel both so
-          // one physical click = one toggle.
           e.preventDefault();
           e.stopPropagation();
-          if (!open && rootRef.current) {
-            // Open upward when the list would run past the window bottom and
-            // there is more room above (the Cue Card is small).
-            const r = rootRef.current.getBoundingClientRect();
-            const room = 240;
-            setOpenUp(r.bottom + room > window.innerHeight && r.top > window.innerHeight - r.bottom);
-          }
-          setOpen((v) => !v);
+          // Only a click that began with a press on THIS button counts; the
+          // label's forwarded click (no press here) is ignored.
+          if (!pressed.current) return;
+          pressed.current = false;
+          toggle();
         }}
       >
         <span className="truncate">{buttonLabel ?? selected?.label ?? value}</span>

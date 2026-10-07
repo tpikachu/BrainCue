@@ -381,3 +381,50 @@ grounded." (interview keeps "No matching profile experience found."). Verified
 live 2026-09-07: "what is our Q3 budget" on an empty Space went from "$500K…"
 to "⚠ Budget for Q3 marketing isn't in my notes. — Ask Finance or Marketing
 leads…".
+
+### Answer-path latency (measured 2026-09-07)
+
+Where the time goes from the moment the speaker stops to the first token on
+the Cue Card, meeting question, `gpt-4.1-mini`, Space without documents:
+
+| Stage | Before | After |
+| --- | --- | --- |
+| speaker stops → final transcript | 1.0 s local / 1.5 s cloud | unchanged |
+| final → question detected → contribution opened | same tick | same tick |
+| grounding (embed + search) | 1.5 s | **0 ms** |
+| memory recall | 0 ms (off) | 0 ms |
+| first token from the model | 1.8 s (first answer of a process: 4.0 s) | 0.9–2.5 s (cold-start penalty gone) |
+
+Three changes, all in the engine/retrieval layer, none in the transcriber:
+
+- **Prefetch on the interim.** `engine.ts` accumulates the trigger stream's
+  incremental deltas into the turn so far and calls
+  `EngineSession.prefetchGrounding(interim)` on each; once the text reads as
+  a question (`evaluateTurnHeuristics`, ≥ 4 words) the session starts
+  `ground()` right then (one prefetch per turn, refreshed when the turn grows
+  by half again). `generateContribution` takes the prefetch when the final
+  says the same words (`sameWords`, the echo guard's comparator) and grounds
+  afresh otherwise. The endpoint's silence wait (1–1.5 s) now overlaps the
+  embedding round trip instead of preceding it.
+- **No embedding for an empty Space.** `retrieve()` asks
+  `sqliteVectorStore.hasAny(profileId)` first; nothing indexed → `[]` with no
+  provider call.
+- **Connection warm-up.** `ChatProvider.warm?(task)` (OpenAI: `GET
+  /models/{answer model}`; Anthropic / OpenAI-compatible: `models.list`),
+  called through the routed provider from `engine.begin`. The first answer of
+  a process had been paying ~3 s more to its first token than the second.
+
+`engineSession` logs one line per answer — `answer latency: ground N ms
+(prefetched on interim), recall N ms, first token N ms` — with no transcript
+text, so a slow cue can be attributed from the log.
+
+What remains is the vendor: a controlled experiment (same prompt, 4 runs
+each) gave medians of 1.9–2.8 s to first token for `gpt-4.1-mini` and
+3.0–3.2 s for `gpt-4.1-nano`, on both the Responses and Chat Completions
+APIs — the smaller model is not faster, and the API choice does not matter. A
+warm `GET /v1/models/…` from the same machine takes 600–730 ms, so roughly a
+third of that is network distance to OpenAI. Switching the transcriber
+(cloud ↔ local) changes none of this. Two levers stay open: a nearer or faster
+answer provider for the live cue (Groq, Haiku) now that the picker offers
+them, and speculative generation on the interim (start the answer before the
+final, restart if the final differs) — a larger change, not taken here.

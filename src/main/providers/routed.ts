@@ -52,6 +52,13 @@ export function createRouted(lookup: Lookup): {
     json<T>(req: ChatJsonRequest): Promise<T> {
       return pick(req.task, 'chat').json<T>(req);
     },
+    async warm(task) {
+      try {
+        await pick(task, 'chat').warm?.(task);
+      } catch {
+        /* a routing gap surfaces on the real request, with its hint */
+      }
+    },
   };
 
   const routedVision: VisionProvider = {

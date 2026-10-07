@@ -74,9 +74,15 @@ function recognizerConfig(m: LoadMessage): unknown {
     // includes up to one chunk of not-yet-decoded speech. With rule2 at 0.6 s
     // a live test cut "the roadmap update" to "the road" and dropped the
     // closing question mark: the endpoint fired mid-utterance and `reset`
-    // discarded the audio still in the stream. ≥ 2 chunks after text, ≥ 4
-    // before any text.
-    rule1MinTrailingSilence: 2.4,
+    // discarded the audio still in the stream. ≥ 2 chunks after text.
+    //
+    // Rule 1 is effectively OFF. It fires after N seconds of silence with no
+    // text and `reset`s the stream — and in a quiet call that reset lands on
+    // the first word of whoever speaks next, clipping it ("Fine, let's…" →
+    // "Let's…", "Morning. Have you…" → "Have you…"; 2026-10-06 experiment,
+    // 2/10 turns clipped at 2.4 s, 0/10 with the rule off). A silence-only
+    // segment never produces a final anyway, so the rule buys nothing here.
+    rule1MinTrailingSilence: 60,
     rule2MinTrailingSilence: 1.4,
     rule3MinUtteranceLength: 20,
   };

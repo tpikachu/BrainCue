@@ -27,6 +27,14 @@ export function Titlebar() {
     void api.window.isMaximized().then((s) => setMaximized(s.maximized));
     return api.events.onWindowMaximized((p) => setMaximized(p.maximized));
   }, []);
+  // Tell fixed overlays (Modal) where the drag region ends: the OS owns these
+  // 36 px for window dragging whatever is painted over them.
+  useEffect(() => {
+    document.documentElement.style.setProperty('--titlebar-h', '36px');
+    return () => {
+      document.documentElement.style.removeProperty('--titlebar-h');
+    };
+  }, []);
 
   return (
     <div className="app-drag flex h-9 shrink-0 items-center justify-between border-b border-white/5 bg-neutral-950/80 pl-3 pr-0 backdrop-blur">
