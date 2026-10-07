@@ -159,14 +159,17 @@ class Engine {
               // Ambient policies gate on "someone is (still) speaking" — feed
               // them interim activity so a decision mid-classify can defer.
               session.ambientPolicy?.noteInterim?.(Date.now());
-              // Interim text is shown for the trigger stream only: the UI keeps
-              // ONE in-flight line, and two streams' partials interleaved into
-              // it would be unreadable. The user's own words arrive as finals.
+              // Grounding is prefetched on the CALL's interim only (its turns
+              // are the questions). Interim text itself goes out for both
+              // streams, tagged, so the user sees their own words appear as
+              // they speak — without it a quick "say something into the mic"
+              // test showed nothing for ~7 s (endpoint wait + echo hold) and
+              // read as "transcription is dead".
               if (isTrigger) {
                 interim += text;
                 session.prefetchGrounding(interim);
-                broadcast(EVENTS.transcriptDelta, { text, isFinal: false, speaker });
               }
+              broadcast(EVENTS.transcriptDelta, { text, isFinal: false, speaker });
             },
             onFinal: (text) => {
               interim = '';

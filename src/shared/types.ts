@@ -710,9 +710,13 @@ export interface TranscriptDeltaEvent {
   /** The remote side carries the mode's `remoteSpeaker` ('them' / 'interviewer';
    *  'you' for solo activities, where the user IS the trigger source); the
    *  user's own microphone turns carry the mode's `localSpeaker` ('you' /
-   *  'candidate'). Interim (non-final) deltas are broadcast for the trigger
-   *  stream only. */
+   *  'candidate'). Interim (non-final) deltas are broadcast for BOTH streams,
+   *  each tagged, so the UI keeps one in-flight line per speaker. */
   speaker: Speaker;
+  /** Non-final only: drop this speaker's in-flight line without adding a
+   *  transcript line — the user's own turn was judged an echo of the call
+   *  (engine/echoGuard.ts) and will never become a final. */
+  clear?: boolean;
 }
 export interface AnswerDeltaEvent {
   questionId: string;

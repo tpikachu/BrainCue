@@ -302,8 +302,12 @@ count only. Verified live 2026-09-07 with the same audio fed to both streams
 
 Each `session:realtime-audio` frame carries its `source`, and
 `engine.feedRealtimeAudio` routes it to that stream's transcriber. Interim
-deltas are broadcast for the trigger stream only (the UI keeps one in-flight
-line); the mic stream surfaces as finals. A session started without an activity
+deltas are broadcast for both streams, tagged with their speaker, and each
+window keeps one in-flight line per speaker (`them: …` and `you: …`); when the
+echo guard drops an own turn it sends a `clear` delta so the user's in-flight
+line does not linger. (Until 2026-10-07 the mic stream had no interim at all
+and its finals were held 1.5 s — a quick "talk into the mic" test showed
+nothing for ~7 s and read as a dead transcriber.) A session started without an activity
 (the rehearsal facades, v1 rows on resume) opens the remote transcriber only,
 as v1 did.
 

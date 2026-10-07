@@ -235,7 +235,7 @@ Channel constants live in `EVENTS` (`src/shared/ipc.ts`); payload types are in
 | Channel | Payload | Target |
 |---|---|---|
 | `session:state` | `{ status, paused }` | dashboard + overlay |
-| `session:transcript-delta` | `{ text, isFinal, speaker }` — `speaker` is the mode's remote speaker for the call (`them` / `interviewer`; `you` in solo activities) and its local speaker for the user's own microphone turns (`you` / `candidate`). Interim (`isFinal:false`) deltas are sent for the trigger stream only. | dashboard + overlay |
+| `session:transcript-delta` | `{ text, isFinal, speaker }` — `speaker` is the mode's remote speaker for the call (`them` / `interviewer`; `you` in solo activities) and its local speaker for the user's own microphone turns (`you` / `candidate`). Interim (`isFinal:false`) deltas are sent for BOTH streams, tagged, so each window keeps one in-flight line per speaker; `{ text:'', isFinal:false, speaker, clear:true }` tells the UI to drop that speaker's in-flight line (the own turn was an echo of the call and will not become a final). | dashboard + overlay |
 | `session:question-detected` | `DetectedQuestion` | dashboard + overlay |
 | `session:answer-delta` | `{ questionId, token }` | overlay (+ dashboard) |
 | `session:answer-meta` | `{ questionId, talkingPoints, resumeMatch, star, clarifyingQuestion, riskWarning, followupQuestion }` | overlay |

@@ -154,9 +154,13 @@ describe('a call opens two transcribers, each tagged with a speaker', () => {
     const [system, mic] = opened();
     system.cb.onDelta('what is');
     mic.cb.onDelta('I think');
-    // Interim text is shown for the trigger stream only — the UI keeps ONE
-    // in-flight line, and two streams' partials interleaved would be unreadable.
-    expect(deltas()).toEqual([{ text: 'what is', speaker: 'them', isFinal: false }]);
+    // Interim text goes out for BOTH streams, each tagged with its speaker, so
+    // the UI can keep one in-flight line per speaker (the user sees their own
+    // words appear as they speak).
+    expect(deltas()).toEqual([
+      { text: 'what is', speaker: 'them', isFinal: false },
+      { text: 'I think', speaker: 'you', isFinal: false },
+    ]);
   });
 
   it('the Cue Card level meter follows whichever stream is louder', () => {

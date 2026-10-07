@@ -93,8 +93,13 @@ export class EngineSession {
    *  question says the same words; otherwise discarded. */
   private prefetch: { words: string[]; promise: Promise<RetrievedChunk[]> } | null = null;
   private readonly echo = new EchoGuard({
-    // Word count only — transcript text never goes to the log.
-    onDrop: (words) => log.info(`echo guard: dropped the microphone's copy of a call turn (${words} words)`),
+    onDrop: (words) => {
+      // Word count only — transcript text never goes to the log.
+      log.info(`echo guard: dropped the microphone's copy of a call turn (${words} words)`);
+      // The UI showed this turn as the user's in-flight line; it will never
+      // become a final, so tell both windows to drop that line.
+      broadcast(EVENTS.transcriptDelta, { text: '', isFinal: false, speaker: this.mode.localSpeaker, clear: true });
+    },
   });
   /** Ambient trigger state (Meeting/Companion) — per-session cooldowns/
    *  dedupe/pending questions. Null for Q&A modes (interview). */

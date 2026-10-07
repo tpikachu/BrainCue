@@ -16,14 +16,13 @@ export const MAX_LINES = 300;
  *  pin-to-newest scrolling. Lets the dashboard be minimized during the session. */
 export function TranscriptPanel({
   lines,
-  interim,
-  interimSpeaker = 'interviewer',
+  interims,
 }: {
   lines: Line[];
-  interim: string;
-  /** Label for the in-flight partial (mode-dependent: 'interviewer' / 'them'). */
-  interimSpeaker?: string;
+  /** In-flight partial per speaker ('them' / 'you', 'interviewer' / 'candidate'). */
+  interims: Record<string, string>;
 }) {
+  const interimEntries = Object.entries(interims).filter(([, t]) => t);
   const [height, setHeight] = useState(150);
   const [atBottom, setAtBottom] = useState(true);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -33,7 +32,7 @@ export function TranscriptPanel({
     if (atBottom && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [lines, interim, atBottom]);
+  }, [lines, interims, atBottom]);
   const onScroll = () => {
     const el = scrollRef.current;
     if (el) setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 30);
@@ -74,7 +73,7 @@ export function TranscriptPanel({
           onScroll={onScroll}
           className="flex-1 space-y-1 overflow-y-auto px-2 pb-2 text-[11px] leading-snug"
         >
-          {lines.length === 0 && !interim ? (
+          {lines.length === 0 && interimEntries.length === 0 ? (
             <p className="text-neutral-600">Listening… the conversation will appear here.</p>
           ) : (
             <>
@@ -90,12 +89,12 @@ export function TranscriptPanel({
                   <span className="text-neutral-300">{l.text}</span>
                 </p>
               ))}
-              {interim && (
-                <p className="italic text-neutral-500">
-                  {interimSpeaker}: {interim}
+              {interimEntries.map(([speaker, text]) => (
+                <p key={speaker} className="italic text-neutral-500">
+                  {speaker}: {text}
                   <span className="ml-0.5 animate-pulse">▋</span>
                 </p>
-              )}
+              ))}
             </>
           )}
         </div>

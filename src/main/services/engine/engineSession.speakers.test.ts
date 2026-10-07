@@ -100,7 +100,8 @@ function session(): EngineSession {
 const finals = () =>
   h.events
     .filter((e) => e.ch === EVENTS.transcriptDelta)
-    .map((e) => e.payload as { text: string; speaker: string; isFinal: boolean });
+    .map((e) => e.payload as { text: string; speaker: string; isFinal: boolean })
+    .filter((p) => p.isFinal);
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -192,6 +193,18 @@ describe('onTranscriptFinal — whose turn it is', () => {
       'candidate: Right, I saw that this morning.',
     ]);
     expect(finals().map((f) => f.speaker)).toEqual(['interviewer', 'candidate']);
+  });
+
+  it("a dropped echo tells the UI to clear the user's in-flight line (no final will follow)", async () => {
+    const s = session();
+    trigger.mockResolvedValue({ act: false, kind: null, reason: 'not-a-question' } as never);
+    await s.onTranscriptFinal('Marketing put it back.', 'interviewer');
+    await s.onTranscriptFinal('Marketing put it back', 'candidate');
+    const clears = h.events
+      .filter((e) => e.ch === EVENTS.transcriptDelta)
+      .map((e) => e.payload as { clear?: boolean })
+      .filter((p) => p.clear);
+    expect(clears).toEqual([{ text: '', isFinal: false, speaker: 'candidate', clear: true }]);
   });
 
   it('the echo is dropped even when the microphone finals first', async () => {

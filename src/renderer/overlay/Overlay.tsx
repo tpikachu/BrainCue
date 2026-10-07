@@ -112,8 +112,9 @@ export default function Overlay() {
 
   // Live transcript (the conversation feed), so the dashboard can be minimized.
   const [transcript, setTranscript] = useState<Line[]>([]);
-  const [interim, setInterim] = useState('');
-  const [interimSpeaker, setInterimSpeaker] = useState('interviewer'); // 'them' in meetings
+  // One in-flight line per speaker: the call's partial and the user's own
+  // partial arrive interleaved and must never be appended into one string.
+  const [interims, setInterims] = useState<Record<string, string>>({});
   const lineId = useRef(0);
   const prevLive = useRef(false);
 
@@ -153,15 +154,20 @@ export default function Overlay() {
         feed().reset(p.contributionId);
       }),
       api.events.onTranscriptDelta((p) => {
-        const d = p as { text: string; speaker: string; isFinal: boolean };
-        if (d.speaker) setInterimSpeaker(d.speaker);
-        if (d.isFinal) {
+        const d = p as { text: string; speaker: string; isFinal: boolean; clear?: boolean };
+        const drop = (m: Record<string, string>) => {
+          const { [d.speaker]: _gone, ...rest } = m;
+          return rest;
+        };
+        if (d.clear) {
+          setInterims(drop); // an own turn judged an echo of the call — no final follows
+        } else if (d.isFinal) {
           setTranscript((t) =>
             [...t, { id: lineId.current++, speaker: d.speaker, text: d.text }].slice(-MAX_LINES * 2),
           );
-          setInterim('');
+          setInterims(drop);
         } else {
-          setInterim((s) => s + d.text);
+          setInterims((m) => ({ ...m, [d.speaker]: (m[d.speaker] ?? '') + d.text }));
         }
       }),
       api.events.onCaptureBuffer((p) => setCaptures(p.images)),
@@ -183,7 +189,7 @@ export default function Overlay() {
           buf.cancel();
           lineId.current = 0;
           setTranscript([]);
-          setInterim('');
+          setInterims({});
           feed().clear();
           setSessionError(null);
           setReconnecting(false);
@@ -191,7 +197,7 @@ export default function Overlay() {
         // Session stopped: drop the dangling interim partial + streaming cursor so
         // the Cue Card doesn't look like it's still listening.
         if (!nowLive) {
-          setInterim('');
+          setInterims({});
           feed().stopStreaming();
           setLevel(0);
           setSpeaking(false);
@@ -449,8 +455,8 @@ export default function Overlay() {
 
       {live && mode === 'expanded' && <AudioMeter level={level} speaking={speaking} />}
 
-      {(live || transcript.length > 0 || interim) && (
-        <TranscriptPanel lines={transcript} interim={interim} interimSpeaker={interimSpeaker} />
+      {(live || transcript.length > 0 || Object.keys(interims).length > 0) && (
+        <TranscriptPanel lines={transcript} interims={interims} />
       )}
 
       {/* Contribution cards — the newest streams; older ones are kept (collapsed)
