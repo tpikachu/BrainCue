@@ -125,7 +125,7 @@ Recognizer config (all models in the catalog share it):
 { featConfig: { sampleRate: 16000, featureDim: 128 },
   modelConfig: { transducer: { encoder, decoder, joiner }, tokens, numThreads: 2, provider: 'cpu', debug: 0 },
   decodingMethod: 'greedy_search', enableEndpoint: true,
-  rule1MinTrailingSilence: 2.4, rule2MinTrailingSilence: 1.4, rule3MinUtteranceLength: 20 }
+  rule1MinTrailingSilence: 60, rule2MinTrailingSilence: 1.4, rule3MinUtteranceLength: 20 }
 ```
 
 Per audio message: `acceptWaveform` → `while (isReady) decode` → `getResult().text`;
@@ -134,11 +134,21 @@ delta** (the cloud transcriber's contract — the dashboard store and the Cue
 Card append deltas into one in-flight line, so a full-text delta would read
 "MorningMorning. Have you had…"; greedy decoding never retracts a token, so
 the result always extends the previous one); if `isEndpoint`, `final` with the
-whole text and `reset(stream)`. The **endpoint rules** are sherpa-onnx's: rule 1 fires after
-2.4 s of silence when nothing has been recognised yet (a breath, not a turn),
-rule 2 after 1.4 s of silence once there is text (this is the one that ends a
+whole text and `reset(stream)`. The **endpoint rules** are sherpa-onnx's: rule 2
+fires after 1.4 s of silence once there is text (this is the one that ends a
 normal utterance), rule 3 caps an utterance at 20 s so a monologue still
-produces finals the pipeline can act on.
+produces finals the pipeline can act on, and rule 1 (silence with no text yet)
+is set to 60 s, i.e. **off**.
+
+Why rule 1 is off: it `reset`s the stream after N seconds of silence with no
+text, and in a quiet call that reset lands on the first word of whoever speaks
+next and clips it. The 2026-10-06 experiment (ten TTS turns fed straight into
+sherpa-onnx with 2.5–6 s gaps) lost the opening word of 2/10 turns at 2.4 s
+("Fine, let's decide next week" → "Let's decide next week", "Morning. Have
+you had…" → "Have you had…") and 0/10 with the rule off; a user's transcript
+showed the same pattern. A silence-only segment never produces a final, so the
+rule had nothing to offer here. Turns closer together than rule 2's 1.4 s
+still merge into one final; that is the trade for not cutting sentences.
 
 Why not the cloud transcriber's 600 ms? Both catalog models decode in 560 ms
 chunks, and tokens for a chunk only appear once the whole chunk is decoded, so
