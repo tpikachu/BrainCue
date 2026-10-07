@@ -51,7 +51,7 @@ vi.mock('./persistence/enginePersistence', () => ({
     replaceAnswer: vi.fn(),
     insertContribution: () => 'c1',
     setFollowup: vi.fn(),
-    questionText: () => null,
+    question: () => null,
   },
 }));
 
@@ -92,7 +92,7 @@ function session(): EngineSession {
     profileId: 'p1',
     packId: null,
     mode,
-    settings: { interviewType: 'general', answerFormat: 'key_points', pronunciation: false, presence: 'balanced' },
+    settings: { interviewType: 'general', answerFormat: 'general', pronunciation: false, presence: 'balanced' },
     ephemeral: false,
   });
 }

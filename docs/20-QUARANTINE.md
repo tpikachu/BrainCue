@@ -57,12 +57,14 @@ retrieval force-included a strongly matching story in **every** interview, while
 the surface to see, edit, or delete those stories was hidden. Users were
 grounded on material they had no way to reach.
 
-**What replaced it:** STAR survives as an **answer format**
-(`AnswerFormat = 'star'`), selectable live in the Cue Card. That is the part
-that was actually valuable in a behavioural interview — the scaffold the panel
-is scoring against, *Situation · Task · Action · Result* — without a bank of
-pre-generated stories to curate. It is distinct from `story_teller`, which
-optimises for how a story lands rather than for what an interviewer marks.
+**What replaced it:** for a while STAR survived as an **answer format**
+(`AnswerFormat = 'star'`), selectable live in the Cue Card. Since 2026-10-07 the
+Cue Card has only two styles (General | Technical) and the story shape —
+situation → what I did → result — is applied **automatically** when the
+classifier tags a question `behavioral` (`questionType` in `streamAnswer`). A
+stored `'star'` pref maps to `general`. The valuable part is kept — the beats a
+behavioural panel scores against — without a control to pick or a bank of
+pre-generated stories to curate.
 
 ## 4. The two retrieval rules that make the above true
 

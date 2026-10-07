@@ -24,7 +24,7 @@ export function registerSessionIpc(): void {
       profileId: z.string().min(1),
       interviewType,
       jobId: z.string().nullable().default(null),
-      answerFormat: answerFormat.default('key_points'),
+      answerFormat: answerFormat.default('general'),
       // What the user said this call IS (shared/activities.ts). The engine mode
       // is derived from it — the renderer no longer picks one, because that was
       // the same question asked twice. Absent for rehearsals, which have no
@@ -73,7 +73,7 @@ export function registerSessionIpc(): void {
     IPC.session.resume,
     z.object({
       sessionId: z.string().min(1),
-      answerFormat: answerFormat.default('key_points'),
+      answerFormat: answerFormat.default('general'),
     }),
     ({ sessionId, answerFormat: f }) => sessionManager.resume(sessionId, f),
   );

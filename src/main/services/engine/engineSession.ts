@@ -32,6 +32,8 @@ import type { AmbientPolicy, ModeDefinition, RuntimeSettings } from './modeDefin
 interface LastQuestion {
   questionId: string;
   text: string;
+  /** Classifier type ('behavioral', 'technical', …) — regenerate re-sends it. */
+  type: string;
 }
 
 /** In-session history budget. Sized for the prompt, not the archive: enough
@@ -380,9 +382,9 @@ export class EngineSession {
     });
     // Remember this question so the Cue Card can re-generate it (length/format/
     // pronunciation toggles) by reusing THIS question row — no duplicate line.
-    this.lastQuestion = { questionId, text: questionText };
+    this.lastQuestion = { questionId, text: questionText, type: q.type };
 
-    return this.generateContribution(questionId, questionText);
+    return this.generateContribution(questionId, questionText, q.type);
   }
 
   /** Stream (or re-stream) the grounded contribution for an already-registered
@@ -391,6 +393,7 @@ export class EngineSession {
   async generateContribution(
     questionId: string,
     questionText: string,
+    questionType?: string,
   ): Promise<{ questionId: string }> {
     const session = persist.sessionRow(this.sessionId);
     if (!session) throw new Error('Session not found');
@@ -439,6 +442,7 @@ export class EngineSession {
         profile,
         settings: this.settings,
         history,
+        questionType,
         signal: abort.signal,
       })) {
         if (ev.type === 'delta') {
@@ -538,16 +542,19 @@ export class EngineSession {
   async regenerate(questionId?: string): Promise<{ regenerated: boolean }> {
     let qid: string;
     let text: string;
+    let type: string | undefined;
     if (questionId) {
-      // A specific card: pull its text from its question row (any question in
-      // this session).
-      const rowText = persist.questionText(questionId);
-      if (rowText === null) return { regenerated: false }; // e.g. an ad-hoc coding-solve card (not persisted)
+      // A specific card: pull its text (+ classified type) from its question
+      // row (any question in this session).
+      const row = persist.question(questionId);
+      if (row === null) return { regenerated: false }; // e.g. an ad-hoc coding-solve card (not persisted)
       qid = questionId;
-      text = rowText;
+      text = row.text;
+      type = row.type;
     } else if (this.lastQuestion) {
       qid = this.lastQuestion.questionId;
       text = this.lastQuestion.text;
+      type = this.lastQuestion.type;
     } else {
       return { regenerated: false };
     }
@@ -556,7 +563,7 @@ export class EngineSession {
     this.answerAbort?.abort();
     // Clear that question's answer in the Cue Card (without touching the transcript).
     emitContributionReset(qid);
-    await this.generateContribution(qid, text);
+    await this.generateContribution(qid, text, type);
     return { regenerated: true };
   }
 

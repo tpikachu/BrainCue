@@ -73,7 +73,7 @@ export default function Overlay() {
   const [showClient, setShowClient] = useState(false);
   // Live answer controls (mirrored to the active session via setAnswerPrefs).
   const [interviewType, setInterviewType] = useState<InterviewType>('general');
-  const [answerFormat, setAnswerFormat] = useState<AnswerFormat>('key_points');
+  const [answerFormat, setAnswerFormat] = useState<AnswerFormat>('general');
   const [pronunciation, setPronunciation] = useState(true);
   // Coding sessions default to listen-only (don't auto-answer the interviewer, so a
   // generated coding answer isn't replaced). This toggle (coding-only) flips it on.
@@ -273,16 +273,19 @@ export default function Overlay() {
   };
 
   // --- live answer controls ---
-  // Changing type/format/pronunciation updates the active session and
-  // re-generates the current question so the new form appears immediately.
-  const changeInterviewType = async (t: InterviewType) => {
-    setInterviewType(t);
-    await api.session.setAnswerPrefs({ interviewType: t });
-    if (question) await api.session.regenerate();
-  };
+  // Changing style/pronunciation updates the active session and re-generates
+  // the current question so the new form appears immediately. The style chip
+  // (General | Technical) also sets the interview type behind the scenes — the
+  // old TYPE dropdown is gone — but a coding session must stay coding (its
+  // listen-only toggle and solver model hang off that type).
   const changeFormat = async (f: AnswerFormat) => {
     setAnswerFormat(f);
-    await api.session.setAnswerPrefs({ format: f });
+    const prefs: { format: AnswerFormat; interviewType?: InterviewType } = { format: f };
+    if (interviewType !== 'coding') {
+      prefs.interviewType = f === 'technical' ? 'technical' : 'general';
+      setInterviewType(prefs.interviewType);
+    }
+    await api.session.setAnswerPrefs(prefs);
     if (question) await api.session.regenerate();
   };
   const togglePronunciation = async () => {
@@ -443,7 +446,6 @@ export default function Overlay() {
           answerInterviewer={answerInterviewer}
           historyEnabled={historyEnabled}
           settings={settings}
-          onChangeType={(t) => void changeInterviewType(t)}
           onPickModel={(task, provider, id) => void pickModel(task, provider, id)}
           onChangeFormat={(f) => void changeFormat(f)}
           onTogglePronunciation={() => void togglePronunciation()}

@@ -18,6 +18,7 @@ import { enginePersistence } from './persistence/enginePersistence';
 import { createRealtimeSource, pcmLevel } from './sourceAdapter';
 import { activity as activityConfig, capturePlan, modeFor } from '@shared/activities';
 import type { CapturePlan } from '@shared/activities';
+import { normalizeAnswerFormat } from '@shared/types';
 import type {
   AnswerFormat,
   AudioSource,
@@ -228,7 +229,7 @@ class Engine {
     profileId: string,
     interviewType: InterviewType,
     packId: string | null = null,
-    answerFormat: AnswerFormat = 'key_points',
+    answerFormat: AnswerFormat = 'general',
     opts: {
       activity?: ContextPackKind | null;
       mode?: SessionMode;
@@ -277,7 +278,7 @@ class Engine {
    *  reuses a single session row instead of piling up new ones. The interview
    *  TYPE is restored from the session (it's switched live in the Cue Card, not
    *  chosen on resume); the answer format defaults and is adjusted live too. */
-  resume(sessionId: string, answerFormat: AnswerFormat = 'key_points'): Session {
+  resume(sessionId: string, answerFormat: AnswerFormat = 'general'): Session {
     const row = db().select().from(schema.sessions).where(eq(schema.sessions.id, sessionId)).get();
     if (!row) throw new Error('Session not found');
     const profile = profilesRepo.get(row.profileId);
@@ -507,7 +508,7 @@ class Engine {
     if (!s) {
       return {
         interviewType: prefs.interviewType ?? 'general',
-        format: prefs.format ?? 'key_points',
+        format: normalizeAnswerFormat(prefs.format ?? 'general'),
         pronunciation: prefs.pronunciation ?? false,
       };
     }
@@ -516,7 +517,8 @@ class Engine {
       // Persist the latest type on the session row so the list/Reports reflect it.
       enginePersistence.updateInterviewType(s.sessionId, prefs.interviewType);
     }
-    if (prefs.format !== undefined) s.settings.answerFormat = prefs.format;
+    // A stored/legacy value (key_points, star, …) is coerced to the two live styles.
+    if (prefs.format !== undefined) s.settings.answerFormat = normalizeAnswerFormat(prefs.format);
     if (prefs.pronunciation !== undefined) s.settings.pronunciation = prefs.pronunciation;
     return {
       interviewType: s.settings.interviewType,

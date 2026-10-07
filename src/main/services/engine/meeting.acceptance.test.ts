@@ -172,7 +172,7 @@ function startMeeting(presence: 'quiet' | 'balanced' = 'balanced') {
     .values({ id: profileId, name: 'Test User', targetRole: 'PM', parsedResume: '{"skills":[]}' })
     .run();
   vi.setSystemTime(T0);
-  const session = engine.start(profileId, 'general', null, 'key_points', {
+  const session = engine.start(profileId, 'general', null, 'general', {
     mode: 'meeting',
     presence,
   });
@@ -307,7 +307,7 @@ describe('meeting acceptance — the deterministic fixture', () => {
       .values({ id: profileId, name: 'Deciding User', targetRole: 'PM', parsedResume: '{}' })
       .run();
     vi.setSystemTime(T0);
-    const s = engine.start(profileId, 'general', null, 'key_points', { mode: 'meeting' });
+    const s = engine.start(profileId, 'general', null, 'general', { mode: 'meeting' });
     await engine.processFinalTranscript(s.id, 'We decided to move the launch to September.');
     await engine.processFinalTranscript(s.id, 'Alice will send the revised plan by Friday.');
     await engine.processFinalTranscript(s.id, 'Agreed, September it is.');
@@ -354,7 +354,7 @@ describe('meeting acceptance — the deterministic fixture', () => {
       .values({ id: profileId, name: 'Quiet User', targetRole: 'PM', parsedResume: '{}' })
       .run();
     vi.setSystemTime(T0);
-    const s = engine.start(profileId, 'general', null, 'key_points', {
+    const s = engine.start(profileId, 'general', null, 'general', {
       mode: 'meeting',
       presence: 'summoned',
     });

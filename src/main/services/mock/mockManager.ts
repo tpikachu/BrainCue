@@ -92,7 +92,7 @@ export const mockManager = {
       profileId,
       jobId,
       interviewType,
-      answerFormat: 'key_points',
+      answerFormat: 'general',
       language: profile.language,
       isMock: true,
     });

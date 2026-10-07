@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  */
 const h = vi.hoisted(() => ({
   groundCalls: [] as string[],
-  generateInputs: [] as { contextChunks: unknown[] }[],
+  generateInputs: [] as { contextChunks: unknown[]; questionType?: string }[],
 }));
 
 vi.mock('../../ipc/broadcast', () => ({ broadcast: vi.fn() }));
@@ -42,7 +42,7 @@ vi.mock('./persistence/enginePersistence', () => ({
     replaceAnswer: vi.fn(),
     insertContribution: () => 'c1',
     setFollowup: vi.fn(),
-    questionText: () => null,
+    question: () => null,
   },
 }));
 
@@ -62,7 +62,7 @@ const mode: ModeDefinition = {
   defaultPresence: 'balanced',
   reportStrategy: 'interview_coaching',
   async *generate(input) {
-    h.generateInputs.push({ contextChunks: input.contextChunks });
+    h.generateInputs.push({ contextChunks: input.contextChunks, questionType: input.questionType });
     yield { type: 'delta', token: 'A cue.' };
   },
 };
@@ -73,7 +73,7 @@ const session = () =>
     profileId: 'p1',
     packId: null,
     mode,
-    settings: { interviewType: 'general', answerFormat: 'key_points', pronunciation: false, presence: 'balanced' },
+    settings: { interviewType: 'general', answerFormat: 'general', pronunciation: false, presence: 'balanced' },
     ephemeral: false,
   });
 
@@ -124,5 +124,19 @@ describe('prefetchGrounding', () => {
     const s = session();
     s.prefetchGrounding('We shipped the new onboarding flow last Tuesday and it went fine');
     expect(h.groundCalls).toEqual([]);
+  });
+});
+
+/** The classifier's question type reaches the mode's generate (so a behavioral
+ *  question gets the story shape automatically), and a regenerate of the last
+ *  question re-sends it instead of forgetting it. */
+describe('questionType threading', () => {
+  it('passes the trigger decision type to generate, and again on regenerate', async () => {
+    const s = session();
+    await s.onTranscriptFinal('Tell me about a time you disagreed with your manager.');
+    expect(h.generateInputs[0].questionType).toBe('behavioral');
+    await s.regenerate();
+    expect(h.generateInputs).toHaveLength(2);
+    expect(h.generateInputs[1].questionType).toBe('behavioral');
   });
 });

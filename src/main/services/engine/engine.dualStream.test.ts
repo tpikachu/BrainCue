@@ -124,7 +124,7 @@ beforeEach(() => {
 
 describe('a call opens two transcribers, each tagged with a speaker', () => {
   it('interview: the call is the interviewer, the microphone is the candidate', async () => {
-    const s = engine.start(makeProfile(), 'general', null, 'key_points', { activity: 'job' });
+    const s = engine.start(makeProfile(), 'general', null, 'general', { activity: 'job' });
     expect(opened()).toHaveLength(2);
     const [system, mic] = opened();
 
@@ -149,7 +149,7 @@ describe('a call opens two transcribers, each tagged with a speaker', () => {
   });
 
   it('meeting: the call is `them`, the microphone is `you`', () => {
-    engine.start(makeProfile(), 'general', null, 'key_points', { activity: 'meeting' });
+    engine.start(makeProfile(), 'general', null, 'general', { activity: 'meeting' });
     expect(opened()).toHaveLength(2);
     const [system, mic] = opened();
     system.cb.onDelta('what is');
@@ -164,7 +164,7 @@ describe('a call opens two transcribers, each tagged with a speaker', () => {
   });
 
   it('the Cue Card level meter follows whichever stream is louder', () => {
-    const s = engine.start(makeProfile(), 'general', null, 'key_points', { activity: 'meeting' });
+    const s = engine.start(makeProfile(), 'general', null, 'general', { activity: 'meeting' });
     const level = () =>
       (h.events.filter((e) => e.ch === EVENTS.audioLevel).at(-1)?.payload as { level: number }).level;
     engine.feedRealtimeAudio(s.id, pcm(300), 'system');
@@ -186,7 +186,7 @@ describe('a call opens two transcribers, each tagged with a speaker', () => {
 
 describe('sessions that hear one stream', () => {
   it('solo: the microphone alone, and it IS the trigger source (speaker `you`)', () => {
-    const s = engine.start(makeProfile(), 'general', null, 'key_points', { activity: 'solo' });
+    const s = engine.start(makeProfile(), 'general', null, 'general', { activity: 'solo' });
     expect(opened()).toHaveLength(1);
     const [mic] = opened();
     engine.feedRealtimeAudio(s.id, pcm(1000), 'mic');
@@ -207,7 +207,7 @@ describe('sessions that hear one stream', () => {
   });
 
   it('stopping the session stops every transcriber', () => {
-    const s = engine.start(makeProfile(), 'general', null, 'key_points', { activity: 'project' });
+    const s = engine.start(makeProfile(), 'general', null, 'general', { activity: 'project' });
     const [system, mic] = opened();
     engine.stop(s.id);
     expect(system.stop).toHaveBeenCalledTimes(1);

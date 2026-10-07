@@ -117,8 +117,9 @@ export function StartSessionModal(props: {
         jobId: spaceId || null,
         // No interviewType: it is chosen live in the Cue Card for interviews and
         // means nothing anywhere else. The session row keeps its 'general' default.
-        // Companion replies are spoken persona prose, not glanceable cues.
-        answerFormat: mode === 'companion' ? 'explanation' : 'key_points',
+        // One answer style for every mode; the Cue Card's General | Technical
+        // chip switches it live. (Companion speaks its own persona prose.)
+        answerFormat: 'general',
         // What it hears is the activity's call (shared/activities.ts): a call
         // is the call AND your microphone, a solo session is your microphone.
         listensTo: config.listensTo,

@@ -122,8 +122,8 @@ recalled. Details in [docs/16-CONTINUITY.md](docs/16-CONTINUITY.md).
       <br /><sub><b>Grounded in your story</b><br />your material · with its sources</sub>
     </td>
     <td width="33%" align="center" valign="top">
-      <img src="docs/media/format-switch.gif" width="240" alt="Re-tell any answer as key points, an explanation, or a STAR story — switched live." />
-      <br /><sub><b>Re-tell it your way</b><br />key points · explanation · STAR story</sub>
+      <img src="docs/media/format-switch.gif" width="240" alt="Re-tell any answer as General or Technical — switched live from one chip." />
+      <br /><sub><b>Re-tell it your way</b><br />General · Technical — behavioral questions take the story shape on their own</sub>
     </td>
     <td width="33%" align="center" valign="top">
       <img src="docs/media/coding-solve.gif" width="240" alt="A captured coding problem is solved in the Cue Card with an optimal solution and complexity analysis." />

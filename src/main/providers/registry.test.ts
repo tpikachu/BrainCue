@@ -78,7 +78,7 @@ describe('the generation seam runs against a fake provider', () => {
       question: 'Why us?',
       contextChunks: [{ id: 'c1', sourceType: 'resume', content: 'x', score: 0.9 }],
       profile: { targetRole: 'SWE', targetCompany: 'Acme' } as never,
-      format: 'key_points',
+      format: 'general',
       pronunciation: false,
       interviewType: 'behavioral',
     })) {
@@ -96,6 +96,6 @@ describe('the generation seam runs against a fake provider', () => {
     expect(seen!.task).toBe('answer');
     expect(seen!.system).toContain('You ARE the candidate');
     expect(seen!.user).toContain('QUESTION: Why us?');
-    expect(seen!.maxOutputTokens).toBe(220); // key_points ceiling, no pronunciation headroom
+    expect(seen!.maxOutputTokens).toBe(360); // general ceiling, no pronunciation headroom
   });
 });

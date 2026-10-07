@@ -42,13 +42,16 @@ export const enginePersistence = {
     return id;
   },
 
-  questionText(questionId: string): string | null {
+  /** The question row's text + classified type (null when not persisted, e.g.
+   *  an ad-hoc coding-solve card). A regenerate needs both so a behavioral
+   *  question keeps its story shape on the second take. */
+  question(questionId: string): { text: string; type: string } | null {
     const row = db()
       .select()
       .from(schema.detectedQuestions)
       .where(eq(schema.detectedQuestions.id, questionId))
       .get();
-    return row?.text ?? null;
+    return row ? { text: row.text, type: row.type } : null;
   },
 
   /** Replace any prior answer for this question so a regenerate overwrites

@@ -147,7 +147,7 @@ export default function TailorPage() {
         profileId: app.profileId,
         jobId: app.jobId,
         interviewType: 'general',
-        answerFormat: 'key_points',
+        answerFormat: 'general',
         // An interview is a call: heard on both sides, questions from the call.
         activity: 'job',
         listensTo: 'system',

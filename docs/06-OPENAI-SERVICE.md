@@ -204,7 +204,7 @@ Small/fast model. Returns `{ text, type, confidence, strategy }`. Also used as a
 cheap "is this actually a question?" gate before answer generation.
 
 ### answer.ts — `streamAnswer(input) => AsyncIterable<AnswerEvent>`
-Input: `{ question, contextChunks, profile, format, pronunciation, interviewType, signal? }`.
+Input: `{ question, contextChunks, profile, format, pronunciation, interviewType, questionType?, signal? }`.
 Builds a **grounding** prompt:
 - System: persona + rules ("ground answers in provided context; never invent
   experience; if no relevant experience, give a transferable-skills answer and
@@ -218,7 +218,7 @@ Builds a **grounding** prompt:
   for anything the context can't support the model must not invent it — it leads with
   `⚠`, says it's not in the candidate's background, and pivots to a cited transferable
   framing.
-- User: question + retrieved context + profile summary + the chosen answer format.
+- User: question + retrieved context + profile summary + the chosen answer style.
 - **Pronunciation guide** (v1.2, ON by default, live-toggleable): the answer stays clean
   (no inline respellings); instead, if any words are genuinely hard, the model appends a
   `[[PRONUNCIATION]]` section with one pipe-delimited line per word
@@ -228,12 +228,26 @@ Builds a **grounding** prompt:
   headroom so the guide never eats the answer.
 - **Persona:** the system prompt frames the model as the candidate themselves — "You ARE the
   candidate … answering ON THEIR BEHALF, in first person" — never third-person.
-- `format` — the single answer control (v1.2): `key_points` (terse bullets) | `explanation`
-  (a natural, flowing first-person explanation) | `detailed` (thorough, with one example) |
-  `story_teller` (a short, vivid first-person story — "you are ME telling MY OWN story").
-  It also sets a hard `max_output_tokens` ceiling (220 / 340 / 800 / 420) so "key points" can never
-  drift long regardless of the prompt. (The old format/tone × length split — `star`/`technical`/
-  `conversational` — was removed.)
+- `format` — the single answer control (v2.2): **two styles**, one chip on the Cue Card.
+  - `general`: ONE bold lead sentence that actually answers, then 3–4 short bullets
+    (reasons / next steps). ~120 words. Hard ceiling `max_output_tokens` = **360**.
+  - `technical`: the same bold lead, then 4–6 bullets that may carry specifics (names,
+    numbers, a line of code), then ONE short paragraph on approach and trade-offs.
+    ~200 words. Hard ceiling **600**.
+  Pronunciation adds +160 headroom to either. The closing "Write the answer now" line is
+  per style. No extra model call is involved anywhere in this.
+- `questionType` (optional) — the classifier's type for THIS question, threaded from the
+  engine (`EngineSession.answerQuestion` → `generateContribution` → `mode.generate` →
+  `streamAnswer`; a regenerate re-reads it from the question row). Under the `interview`
+  framing, `questionType === 'behavioral'` appends one sentence to the FORMAT instruction:
+  order the bullets situation → what I did → result, first person singular, the most specific
+  outcome the context supports and never an invented one, no labels. So behavioral answers
+  get the story shape **automatically** — nothing for the user to pick. Ignored under the
+  `conversation` framing.
+- Legacy formats (`key_points`, `explanation`, `detailed`, `story_teller`, `star`) were
+  retired on 2026-10-07 (too complex, together with the interview-type dropdown). Stored or
+  old values are mapped by `normalizeAnswerFormat` (`@shared/types`): everything → `general`
+  except `detailed` → `technical`.
 Streams tokens (`{type:'delta', token}`), then a `usage` event, then a structured
 `meta` event `{ talkingPoints[], resumeMatch, star?, clarifyingQuestion?, riskWarning?,
 followupQuestion }`. **Status:** the prose answer + token usage are live; the meta pass

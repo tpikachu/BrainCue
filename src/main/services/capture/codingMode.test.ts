@@ -25,7 +25,7 @@ vi.mock('../../db/repositories/settings.repo', () => ({
   settingsRepo: { get: () => null },
 }));
 // codingMode reads the live Answer Format from sessionManager (→ db/windows/openai) —
-// stub it (null ⇒ the coding default, 'explanation').
+// stub it (null ⇒ the coding default, 'general').
 vi.mock('../session/sessionManager', () => ({
   sessionManager: { activeAnswerFormat: () => null },
 }));
@@ -80,7 +80,7 @@ describe('multi-image capture buffer', () => {
     expect(streamSolve).toHaveBeenCalledWith({
       imageDataUrls: ['img-1', 'img-2'],
       language: 'javascript',
-      format: 'explanation',
+      format: 'general',
       signal: expect.any(AbortSignal),
     });
     expect(lastBufferImages()).toEqual([]); // buffer cleared after solving

@@ -36,6 +36,9 @@ export interface GenerateInput {
   /** What this session already heard and answered, oldest first — so a
    *  follow-up question is answered as a follow-up. Undefined on question 1. */
   history?: SessionHistory;
+  /** The classifier's type for this question (e.g. 'behavioral'). Interview
+   *  uses it to give behavioral answers the story shape automatically. */
+  questionType?: string;
   signal: AbortSignal;
 }
 

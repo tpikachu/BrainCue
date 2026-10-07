@@ -127,7 +127,7 @@ describe('routed chat — dispatch follows the task model', () => {
 });
 
 describe('routed vision — follows the coding task', () => {
-  const input = { imageDataUrls: ['data:image/png;base64,AAAA'], language: 'python', format: 'explanation' as const };
+  const input = { imageDataUrls: ['data:image/png;base64,AAAA'], language: 'python', format: 'general' as const };
 
   it('dispatches to the coding model’s provider', async () => {
     const seen: unknown[] = [];

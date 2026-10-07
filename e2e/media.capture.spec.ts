@@ -526,7 +526,7 @@ test('@capture the demo film', async ({ dashboard }) => {
   await optional(dashboard, 'grounded, cited answer', async () => {
     liveId = await dashboard.evaluate(
       async ([pid, jid]) => {
-        const s = await (window as any).api.session.start(pid, 'behavioral', jid, 'key_points', 'job');
+        const s = await (window as any).api.session.start(pid, 'behavioral', jid, 'general', 'job');
         return s.id as string;
       },
       [profileId, googleId] as const,
@@ -575,7 +575,7 @@ test('@capture the demo film', async ({ dashboard }) => {
   await optional(dashboard, 'STAR format', async () => {
     if (!liveId) throw new Error('no live session');
     await dashboard.evaluate(async () => {
-      await (window as any).api.session.setAnswerPrefs({ format: 'star' });
+      await (window as any).api.session.setAnswerPrefs({ format: 'technical' });
     });
     // Same rule as the ask above: `regenerate` resolves when the re-told answer
     // has finished streaming, so it is started and filmed, not awaited.
@@ -598,7 +598,7 @@ test('@capture the demo film', async ({ dashboard }) => {
 
   await optional(dashboard, 'coding help', async () => {
     await dashboard.evaluate(async () => {
-      await (window as any).api.session.setAnswerPrefs({ format: 'key_points' });
+      await (window as any).api.session.setAnswerPrefs({ format: 'general' });
       await (window as any).api.capture.solve(
         'Given an array of integers nums and an integer target, return the indices of the two ' +
           'numbers that add up to target. You may assume exactly one solution exists.',
@@ -841,7 +841,7 @@ test('@capture the demo film', async ({ dashboard }) => {
     const sid = await dashboard.evaluate(
       async ([pid, jid]) => {
         const a = (window as any).api;
-        const s = await a.session.start(pid, undefined, jid, 'key_points', 'meeting');
+        const s = await a.session.start(pid, undefined, jid, 'general', 'meeting');
         return s.id as string;
       },
       [profileId, standupId] as const,

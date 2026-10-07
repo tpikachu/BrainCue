@@ -1,22 +1,24 @@
 import type { AnswerFormat, AppSettings, InterviewType } from '@shared/types';
 import type { CloudProviderId } from '@shared/providers';
-import { Dropdown } from '../../components/ui';
 import { TrashIcon } from '../../components/icons';
 import { pickerTask } from '../../lib/modelChoice';
-import { ctrlSelect, noDrag } from '../lib/style';
+import { noDrag } from '../lib/style';
 import { Btn } from './Btn';
 import { ModelChip } from './ModelChip';
 
-const INTERVIEW_TYPES: { value: InterviewType; label: string }[] = [
-  { value: 'general', label: 'General' },
-  { value: 'behavioral', label: 'Behavioral' },
-  { value: 'technical', label: 'Technical' },
-  { value: 'coding', label: 'Coding' },
-  { value: 'system_design', label: 'System design' },
+/** The one answer control (v2.2): two styles. Everything the old interview-type
+ *  dropdown and five-format control did is now automatic — behavioral
+ *  questions get the story shape from the classifier, coding is reached via
+ *  the capture hotkey. */
+const STYLES: readonly [AnswerFormat, string, string][] = [
+  ['general', 'General', 'Lead sentence + a few bullets'],
+  ['technical', 'Technical', 'Specifics, a line of code if useful, approach and trade-offs'],
 ];
 
-/** Answer controls (labeled): interview type, model, format, listen-only (coding),
- *  history, pronunciation, clear. All dynamic — change them anytime mid-interview. */
+/** Answer controls (labeled): model, style (General | Technical), listen-only
+ *  (coding), history, pronunciation, clear. All dynamic — change them anytime
+ *  mid-interview. `interviewType` is still received for the model chip's task
+ *  (coding sessions pick the solver model) — it is no longer a user control. */
 export function AnswerControls(props: {
   interviewType: InterviewType;
   answerFormat: AnswerFormat;
@@ -25,7 +27,6 @@ export function AnswerControls(props: {
   historyEnabled: boolean;
   /** Persisted settings (for the model chip); null until loaded. */
   settings: AppSettings | null;
-  onChangeType: (t: InterviewType) => void;
   onPickModel: (task: 'answer' | 'coding', provider: CloudProviderId, id: string) => void;
   onChangeFormat: (f: AnswerFormat) => void;
   onTogglePronunciation: () => void;
@@ -39,17 +40,6 @@ export function AnswerControls(props: {
       className="mb-2 flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1"
       style={noDrag}
     >
-      <span className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-neutral-500">
-        Type
-        {/* Dropdown (not a native <select>): the native option popup is a
-            separate OS window that screen shares CAN see even in Privacy Mode. */}
-        <Dropdown
-          value={props.interviewType}
-          options={INTERVIEW_TYPES}
-          onChange={(v) => props.onChangeType(v as InterviewType)}
-          buttonClassName={`flex items-center gap-1 ${ctrlSelect}`}
-        />
-      </span>
       {/* Which model answers THIS session's questions: the solver in a coding
           interview, the live cue otherwise. Picking re-answers the current one. */}
       <ModelChip
@@ -57,32 +47,21 @@ export function AnswerControls(props: {
         task={pickerTask(props.interviewType)}
         onPick={(provider, id) => props.onPickModel(pickerTask(props.interviewType), provider, id)}
       />
-      <span className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-neutral-500">
-        Format
-        <span className="flex overflow-hidden rounded-md ring-1 ring-neutral-700">
-          {(
-            [
-              ['key_points', 'Key points', 'Short, glanceable key points'],
-              ['explanation', 'Explanation', 'A natural, spoken explanation'],
-              ['detailed', 'Detailed', 'Thorough, with a concrete example'],
-              ['story_teller', 'Story', 'A short, vivid first-person story'],
-              ['star', 'STAR', 'Situation · Task · Action · Result — for behavioural questions'],
-            ] as const
-          ).map(([value, label, title]) => (
-            <button
-              key={value}
-              onClick={() => props.onChangeFormat(value)}
-              title={title}
-              className={`px-2 py-1 text-[11px] font-medium normal-case transition-colors ${
-                props.answerFormat === value
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-neutral-800 text-neutral-400 hover:text-neutral-200'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </span>
+      <span className="flex overflow-hidden rounded-md ring-1 ring-neutral-700">
+        {STYLES.map(([value, label, title]) => (
+          <button
+            key={value}
+            onClick={() => props.onChangeFormat(value)}
+            title={title}
+            className={`px-2 py-1 text-[11px] font-medium normal-case transition-colors ${
+              props.answerFormat === value
+                ? 'bg-blue-600 text-white'
+                : 'bg-neutral-800 text-neutral-400 hover:text-neutral-200'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </span>
       {props.interviewType === 'coding' && (
         <button

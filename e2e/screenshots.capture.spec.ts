@@ -297,7 +297,7 @@ test('@capture marketing screenshots', async ({ dashboard }) => {
           pid,
           'behavioral',
           jid,
-          'key_points',
+          'general',
           'job',
         );
         return s.id as string;
