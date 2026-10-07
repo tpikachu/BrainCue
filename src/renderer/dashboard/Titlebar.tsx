@@ -31,7 +31,9 @@ export function Titlebar() {
   // 36 px for window dragging whatever is painted over them.
   useEffect(() => {
     document.documentElement.style.setProperty('--titlebar-h', '36px');
-    return () => document.documentElement.style.removeProperty('--titlebar-h');
+    return () => {
+      document.documentElement.style.removeProperty('--titlebar-h');
+    };
   }, []);
 
   return (
