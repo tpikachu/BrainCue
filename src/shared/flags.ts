@@ -27,8 +27,14 @@ export const FLAGS = {
   memory: true,
   /** "Talk to BrainCue" — the voice/summon layer: global push-to-talk, spoken
    *  replies with barge-in, no-session quick ask. Voice is an output surface
-   *  over the contribution pipeline, not a mode. */
-  voice: true,
+   *  over the contribution pipeline, not a mode.
+   *
+   *  OFF since 2026-10-06 (user decision): in a call the user speaks, and a
+   *  generated voice playing on the same machine only risks leaking into the
+   *  microphone. Hides the Cue Card voice bar, the Home card, the Voice
+   *  output model row and the push-to-talk shortcut; the service stays
+   *  intact behind the flag. */
+  voice: false,
   /**
    * Job-search tooling: Tailor Resume and the applications table.
    *

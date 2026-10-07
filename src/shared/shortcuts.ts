@@ -20,6 +20,8 @@ export interface ShortcutDef {
   default: string; // Electron accelerator
 }
 
+import { FLAGS } from './flags';
+
 export const SHORTCUT_DEFS: ShortcutDef[] = [
   {
     id: 'overlay:toggle',
@@ -58,13 +60,19 @@ export const SHORTCUT_DEFS: ShortcutDef[] = [
     description: 'Let the mouse pass through the Cue Card.',
     default: 'CommandOrControl+Shift+\\',
   },
-  {
-    id: 'voice:summon',
-    label: 'Talk to BrainCue',
-    description:
-      'Push-to-talk from anywhere: press to start listening, press again to send. Interrupts BrainCue if it is speaking.',
-    default: 'CommandOrControl+Shift+T',
-  },
+  // The voice layer's shortcut exists only while the layer is shipped: with
+  // FLAGS.voice off it is neither registered nor listed in Hotkeys / Help.
+  ...(FLAGS.voice
+    ? [
+        {
+          id: 'voice:summon' as const,
+          label: 'Talk to BrainCue',
+          description:
+            'Push-to-talk from anywhere: press to start listening, press again to send. Interrupts BrainCue if it is speaking.',
+          default: 'CommandOrControl+Shift+T',
+        },
+      ]
+    : []),
   {
     id: 'app:quit',
     label: 'Exit app',
