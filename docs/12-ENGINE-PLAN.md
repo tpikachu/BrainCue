@@ -106,7 +106,8 @@ entry point.
 
 04-DATABASE: lists dropped `ai_answers` columns, omits `sessions.kind` and the
 `answer_feedback` table, claims a nonexistent `transcript_chunk_id` FK, stale
-enums/settings keys. 05-IPC-MAP: missing `story_teller`, phantom rich
+enums/settings keys. 05-IPC-MAP: (`answerFormat` is now `general | technical`,
+legacy values mapped — the old `story_teller` drift is moot), phantom rich
 `answer-meta` payload, missing `answer-followup`/`transcriber-status`/
 `overlay-clickthrough`, stale domain list. 03-WINDOWS: overlay event table
 lists 6 of ~18 subscriptions. 06-OPENAI-SERVICE: wrong classifier type name

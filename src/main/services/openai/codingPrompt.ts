@@ -13,33 +13,22 @@ import type { AnswerFormat } from '@shared/types';
  * Deliberately résumé/JD-free — a coding problem is unrelated to the candidate's profile.
  */
 
-/** Per-format delivery instruction. `story_teller` and `star` both narrate like
- *  `explanation` — a coding answer is a walkthrough, not a personal story, and
- *  Situation/Task/Action/Result is the wrong shape for "reverse a linked list".
- *  The format control is global, so a candidate who set STAR for the behavioural
- *  round must not get a scaffolded non-answer when a coding question arrives. */
+/** Per-style delivery instruction. `general` is the spoken walkthrough (the old
+ *  "explanation" text); `technical` is the thorough one (the old "detailed"). The
+ *  style control is global (General | Technical on the Cue Card), so either way
+ *  the four beats stay — only their depth and voice change. */
 const CODING_DELIVERY: Record<AnswerFormat, string> = {
-  key_points:
-    'DELIVERY = KEY POINTS. Terse and glanceable: each beat is 1-2 short bullets ' +
-    '(the code block stays complete). No paragraphs outside the code.',
-  explanation:
+  general:
     'DELIVERY = EXPLANATION (spoken walkthrough). Write beats 1, 2, and 4 as natural ' +
     "first-person speech, the way you'd talk in the interview: \"So this problem really " +
     'comes down to …\" (understanding), \"So here\'s my plan — … and the benefit is …\" ' +
     '(plan), and a spoken wrap-up of the efficiency (evaluation). Flowing SHORT sentences ' +
     'the candidate can read aloud on the first try — one idea per sentence, no nested ' +
     'clauses, no robotic bullets outside the code.',
-  detailed:
+  technical:
     'DELIVERY = DETAILED. Each beat is thorough: the understanding names the inputs/' +
     'outputs and constraints, the plan covers the technique + why alternatives lose, ' +
     'the evaluation proves the complexity and mentions edge cases handled.',
-  story_teller:
-    'DELIVERY = EXPLANATION (spoken walkthrough). Write beats 1, 2, and 4 as natural ' +
-    'first-person speech — a coding answer is a walkthrough, not a personal story.',
-  star:
-    'DELIVERY = EXPLANATION (spoken walkthrough). Write beats 1, 2, and 4 as natural ' +
-    'first-person speech. Do NOT impose Situation/Task/Action/Result on a coding ' +
-    'problem — that scaffold is for behavioural answers about your own experience.',
 };
 
 /**
@@ -65,7 +54,7 @@ export function visionSolvePrompt(
   return { system, intro };
 }
 
-export function codingRules(language: string, format: AnswerFormat = 'explanation'): string {
+export function codingRules(language: string, format: AnswerFormat = 'general'): string {
   return `You are an expert competitive programmer and senior software engineer, answering
 AS the candidate in a live coding interview.
 

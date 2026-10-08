@@ -2,16 +2,8 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useLiveSession } from '../store/useLiveSession';
 import { ACTIVITIES } from '@shared/activities';
-import type { InterviewType, Job, SessionMode } from '@shared/types';
+import type { Job, SessionMode } from '@shared/types';
 import { Button, Field, Modal, Select } from '../components/ui';
-
-const INTERVIEW_TYPES: { value: InterviewType; label: string }[] = [
-  { value: 'general', label: 'General' },
-  { value: 'behavioral', label: 'Behavioral' },
-  { value: 'technical', label: 'Technical' },
-  { value: 'coding', label: 'Coding' },
-  { value: 'system_design', label: 'System design' },
-];
 
 /** Fallback only — for rehearsals and v1 rows, which carry no activity. When
  *  there is one, the prompt names the thing that ended ("Game ended") rather
@@ -44,7 +36,6 @@ const endedTitle = (p: { activity?: string | null; mode?: SessionMode } | null):
  */
 export function SavePromptModal() {
   const { pendingSave, clearPendingSave } = useLiveSession();
-  const [saveType, setSaveType] = useState<InterviewType>('general');
   // Where to keep it. Defaults to the Space the session ran in; '' means keep
   // it on the profile and out of every Space.
   const [packId, setPackId] = useState<string>('');
@@ -54,7 +45,6 @@ export function SavePromptModal() {
 
   useEffect(() => {
     if (!pendingSave) return;
-    setSaveType(pendingSave.interviewType);
     setPackId(pendingSave.packId ?? '');
     setResult(null);
     // A call you did not set a Space for often turns out to belong to one, so
@@ -72,7 +62,6 @@ export function SavePromptModal() {
     if (!pendingSave) return;
     setBusy(true);
     try {
-      if (isInterview) await api.session.setInterviewType(pendingSave.sessionId, saveType);
       const { archived, memories } = await api.session.remember(
         pendingSave.sessionId,
         packId || null,
@@ -158,18 +147,6 @@ export function SavePromptModal() {
             </>
           )}
         </p>
-
-        {isInterview && (
-          <Field label="What kind of interview was this?">
-            <Select value={saveType} onChange={(e) => setSaveType(e.target.value as InterviewType)}>
-              {INTERVIEW_TYPES.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        )}
 
         {result && <p className="text-sm text-emerald-300">{result}</p>}
 

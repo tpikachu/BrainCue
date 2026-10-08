@@ -5,8 +5,10 @@
 > field name is kept for compatibility and refers to a context-pack id. The
 > interviewType/answerFormat/voice zod enums are single-sourced in
 > `src/main/ipc/schemas.ts` (they were previously duplicated inline in four
-> `.ipc.ts` files — note `answerFormat` includes `story_teller`, which an older
-> revision of this doc omitted). Channel names are unchanged.
+> `.ipc.ts` files). `answerFormat` is `general | technical` (v2.2); the five
+> legacy values (`key_points`, `explanation`, `story_teller`, `star` → `general`;
+> `detailed` → `technical`) are still accepted by `zAnswerFormat` and mapped via
+> `normalizeAnswerFormat` (`@shared/types`). Channel names are unchanged.
 
 Two directions:
 - **invoke/handle** — renderer → main request/response (`ipcRenderer.invoke` ↔
@@ -143,7 +145,7 @@ résumé, persisted, and indexed as `story` chunks so they ground live answers.
 ### session
 | Channel | Request | Response |
 |---|---|---|
-| `session:start` | `{ profileId, interviewType, jobId, answerFormat, activity? }` | `Session` (`answerFormat` = key_points\|explanation\|detailed — the single answer control; `activity` is the ContextPackKind the user picked and the engine derives the mode from it) |
+| `session:start` | `{ profileId, interviewType, jobId, answerFormat, activity? }` | `Session` (`answerFormat` = general\|technical — the single answer style, default `general`; legacy values are mapped; `activity` is the ContextPackKind the user picked and the engine derives the mode from it) |
 | `session:resume` | `{ sessionId, answerFormat? }` | `Session` (re-activate an existing session row and continue it; interview type is restored from the row — one session per interview, type is dynamic) |
 | `session:stop` | `{ sessionId }` | `Session` |
 | `session:toggle-pause` | `{ sessionId }` | `{ paused }` |
@@ -160,7 +162,7 @@ résumé, persisted, and indexed as `story` chunks so they ground live answers.
 | `session:ask-active` | `{ questionText }` | `{ ok }` (Cue Card "Ask" box — manual ask for the active session, no id) |
 | `session:remember` | `{ id }` | `{ archived, memories }` (KEEP this conversation: writes its retrievable archive and extracts memory candidates. Called by the save prompt, never automatically — stopping a session remembers nothing. Both halves stay gated by the user's settings, so zeros are legitimate; failures come back as counts, not errors) |
 | `session:set-interview-type` | `{ sessionId, interviewType }` | `{ ok }` (set the session-level type — chosen by the user in the save prompt at stop) |
-| `session:set-answer-prefs` | `{ interviewType?, format?, pronunciation? }` | `{ interviewType, format, pronunciation }` (live Cue Card controls; acts on the active session. Switching `interviewType` is dynamic — it persists onto the session row + reframes later answers) |
+| `session:set-answer-prefs` | `{ interviewType?, format?, pronunciation? }` | `{ interviewType, format, pronunciation }` (live Cue Card controls; acts on the active session. `format` = general\|technical (legacy values mapped). The Cue Card's General \| Technical chip sends `format` AND the matching `interviewType` (general/technical) unless the session is `coding`; switching `interviewType` persists onto the session row + reframes later answers) |
 | `session:set-answering` | `{ enabled }` | `{ enabled, answered }` (coding "listen-only" toggle: when disabled, the interviewer is still transcribed but not auto-answered; enabling it also answers the question they just asked) |
 | `session:regenerate` | `{ questionId? }` | `{ regenerated }` (re-answer a SPECIFIC question by id — the Cue Card's per-card ↻ — or, with no id, the last question after a format/pronunciation toggle) |
 | `session:clear-answer` | — | `{ cleared }` (abort the in-flight answer for the active session) |
@@ -235,7 +237,7 @@ Channel constants live in `EVENTS` (`src/shared/ipc.ts`); payload types are in
 | Channel | Payload | Target |
 |---|---|---|
 | `session:state` | `{ status, paused }` | dashboard + overlay |
-| `session:transcript-delta` | `{ text, isFinal, speaker }` — `speaker` is the mode's remote speaker for the call (`them` / `interviewer`; `you` in solo activities) and its local speaker for the user's own microphone turns (`you` / `candidate`). Interim (`isFinal:false`) deltas are sent for the trigger stream only. | dashboard + overlay |
+| `session:transcript-delta` | `{ text, isFinal, speaker }` — `speaker` is the mode's remote speaker for the call (`them` / `interviewer`; `you` in solo activities) and its local speaker for the user's own microphone turns (`you` / `candidate`). Interim (`isFinal:false`) deltas are sent for BOTH streams, tagged, so each window keeps one in-flight line per speaker; `{ text:'', isFinal:false, speaker, clear:true }` tells the UI to drop that speaker's in-flight line (the own turn was an echo of the call and will not become a final). | dashboard + overlay |
 | `session:question-detected` | `DetectedQuestion` | dashboard + overlay |
 | `session:answer-delta` | `{ questionId, token }` | overlay (+ dashboard) |
 | `session:answer-meta` | `{ questionId, talkingPoints, resumeMatch, star, clarifyingQuestion, riskWarning, followupQuestion }` | overlay |

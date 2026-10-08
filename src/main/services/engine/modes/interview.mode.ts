@@ -36,6 +36,8 @@ export const interviewMode: ModeDefinition = {
       format: input.settings.answerFormat,
       pronunciation: input.settings.pronunciation,
       interviewType: input.settings.interviewType,
+      // A behavioral question gets the story shape automatically (no control).
+      questionType: input.questionType,
       signal: input.signal,
     });
   },

@@ -132,7 +132,7 @@ five activities rather than four.
 | `09-cuecard` ▶ | The Cue Card | It hears the question, transcribes it live, and streams a grounded answer into an overlay. | |
 | `10-grounded` ▶ | Grounded | The answer is built from YOUR material — not from what the model assumes about you. | |
 | `11-citations` | Provenance | Every card says where it came from, so you can check it in the two seconds you have. | |
-| `12-star` ▶ | Answer formats | Re-tell the same answer as key points, a short explanation, or a STAR story. | |
+| `12-star` ▶ | Answer styles | Re-tell the same answer as General (lead + bullets) or Technical (specifics, trade-offs). Behavioral questions take the story shape on their own. (Footage predates the 2026-10-07 two-style chip.) | |
 | `13-coding` ▶ | Capture a region | Grab any part of your screen and it solves what is in it — with the complexity. | |
 
 ▶ = streamed, captured as a real frame sequence.
@@ -364,7 +364,7 @@ happens once.
 |---|---|---|
 | `cuecard-stream.gif` | `09-cuecard` | a question heard, an answer streaming into the Cue Card |
 | `grounded-answer.gif` | `10-grounded` | an answer built from the user's own material, with sources |
-| `format-switch.gif` | `12-star` | the same answer re-told as a STAR story |
+| `format-switch.gif` | `12-star` | the same answer re-told in the Technical style (re-captured 2026-10-07 with the General \| Technical chip) |
 | `coding-solve.gif` | `13-coding` | a captured problem solved with its complexity |
 
 Widths are 420–480px on purpose: these are inline loops in a README, GitHub will

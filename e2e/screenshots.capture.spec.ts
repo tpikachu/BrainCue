@@ -241,8 +241,10 @@ test('@capture marketing screenshots', async ({ dashboard }) => {
 
   // ── Settings — models, companion prefs, the key, privacy ──────────────────
   await optional(dashboard, 'settings', async () => {
-    await go('settings');
-    await expect(dashboard.getByRole('heading', { name: /openai models/i })).toBeVisible();
+    // Settings has sections since 2.2; the Language Models section is the one
+    // that shows providers + the per-task model pickers.
+    await hash('#/settings/models');
+    await expect(dashboard.getByRole('heading', { name: /models per task/i })).toBeVisible();
     await dashboard.waitForTimeout(400);
     await dashboard.screenshot({ path: IMG('settings.png') });
   });
@@ -297,7 +299,7 @@ test('@capture marketing screenshots', async ({ dashboard }) => {
           pid,
           'behavioral',
           jid,
-          'key_points',
+          'general',
           'job',
         );
         return s.id as string;

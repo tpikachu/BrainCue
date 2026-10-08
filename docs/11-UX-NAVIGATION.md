@@ -322,6 +322,21 @@ writes `models[answer|coding]` (qualified id) and regenerates the current
 question, so it is a per-question control in effect. The selection rules are
 `lib/modelChoice.ts`, shared with the Settings table and unit-tested.
 
+**The Cue Card's answer controls (2026-10-07).** The TYPE dropdown
+(general / behavioral / technical / coding / system design) and the five-way
+FORMAT control (key points / explanation / detailed / story / STAR) are gone —
+too many decisions to make mid-sentence. `AnswerControls` now shows the model
+chip, ONE two-way style chip — **General | Technical** — the listen-only toggle
+(coding sessions only), history, pronunciation and clear. General = a bold lead
+sentence plus a few bullets (~120 words); Technical = the same lead, more
+specific bullets (a line of code if it helps) and a short paragraph on approach
+and trade-offs (~200 words). Picking a style also sets the session's interview
+type to `general`/`technical` behind the scenes — except in a coding session,
+which stays `coding` (its solver model and listen-only toggle hang off that).
+Behavioral questions get the story shape automatically from the classifier's
+question type; the coding solver is reached via the capture hotkey, its model
+set in Settings → Language Models.
+
 ## First run (2026-09-07)
 
 Before this, a fresh install did two things at once: a non-dismissable

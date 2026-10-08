@@ -122,8 +122,8 @@ recalled. Details in [docs/16-CONTINUITY.md](docs/16-CONTINUITY.md).
       <br /><sub><b>Grounded in your story</b><br />your material · with its sources</sub>
     </td>
     <td width="33%" align="center" valign="top">
-      <img src="docs/media/format-switch.gif" width="240" alt="Re-tell any answer as key points, an explanation, or a STAR story — switched live." />
-      <br /><sub><b>Re-tell it your way</b><br />key points · explanation · STAR story</sub>
+      <img src="docs/media/format-switch.gif" width="240" alt="Re-tell any answer as General or Technical — switched live from one chip." />
+      <br /><sub><b>Re-tell it your way</b><br />General · Technical — behavioral questions take the story shape on their own</sub>
     </td>
     <td width="33%" align="center" valign="top">
       <img src="docs/media/coding-solve.gif" width="240" alt="A captured coding problem is solved in the Cue Card with an optimal solution and complexity analysis." />
@@ -140,16 +140,20 @@ recalled. Details in [docs/16-CONTINUITY.md](docs/16-CONTINUITY.md).
 
 ## Why BrainCue
 
-- 🎙️ **Hears the real conversation** — system-audio loopback puts it inside your
-  actual calls and meetings; a mic covers in-person. It flags the moment worth
-  responding to, in real time.
+- 🎙️ **Hears both sides** — system-audio loopback puts it inside your actual
+  calls; the microphone hears you at the same time. Questions come only from
+  the other side, your own words stay in the transcript, and the call's echo
+  in your mic is dropped.
+- 🖥️ **Transcribes on your machine** — download a speech model once (NVIDIA
+  Nemotron on sherpa-onnx) and live transcription runs on-device: no audio
+  leaves, no key needed for it. Or keep OpenAI's cloud transcription.
 - 💡 **Grounded contributions** — cues are drawn from *your* documents via
   on-device retrieval (local RAG), not generic filler — and it says so when it
   doesn't know, instead of inventing.
 - 🪟 **The Cue Card** — an always-on-top panel **excluded from screen sharing &
   recording**: there for you, invisible to everyone else.
-- 🗣️ **A voice of its own** — push-to-talk from anywhere: ask by voice and hear
-  the answer back, with barge-in when you talk over it.
+- 🤖 **Your choice of model** — answers from OpenAI, Anthropic, Google, Groq or
+  OpenRouter, picked per task; every catalog model shows in every picker.
 - 🧠 **Continuity you control** — each conversation you keep is summarised into
   its Space, so the tenth standup is grounded in the previous nine. Long-term
   memory is separate, off by default, and reviewed item by item: nothing is ever
@@ -188,11 +192,12 @@ and a microphone matter more than raw compute.
 | **GPU** | Any (integrated is fine) | Discrete or modern integrated |
 | **Display** | 1280 × 800 | 1920 × 1080 or larger |
 | **Audio** | Microphone | Mic + system-audio loopback (to hear the other side) |
-| **Network** | Broadband internet | Low-latency broadband (for real-time transcription) |
+| **Network** | Broadband internet | Low-latency broadband (not needed for on-device transcription) |
 
-You also need your **own OpenAI API key** (set in Settings) with access to the
-models in use (Realtime/STT, Responses, embeddings, TTS, Vision). Support for
-additional providers is planned — see the [roadmap](docs/10-ROADMAP.md).
+You also need your **own OpenAI API key** (set in Settings): embeddings and
+résumé parsing still run on it. Answers can run on an **Anthropic, Google, Groq
+or OpenRouter** key instead, and transcription can run **on-device** with a
+downloaded model — see [docs/22-LOCAL-STT.md](docs/22-LOCAL-STT.md).
 
 **Notes**
 - **Privacy Mode** (hiding the app from screen sharing/recording) is most reliable
@@ -207,8 +212,9 @@ additional providers is planned — see the [roadmap](docs/10-ROADMAP.md).
 
 ## Stack
 Electron · React · TypeScript · Vite (electron-vite) · TailwindCSS · Zustand ·
-SQLite (better-sqlite3) · Drizzle ORM · OpenAI Node SDK (Responses, embeddings,
-STT/Realtime, TTS, Vision) · electron-builder.
+SQLite (better-sqlite3) · Drizzle ORM · sherpa-onnx (on-device STT) · OpenAI
+Node SDK + Anthropic SDK + OpenAI-compatible transport (Google, Groq,
+OpenRouter) · electron-builder.
 
 ## Design docs
 
@@ -284,7 +290,7 @@ privacy/security invariants that must not regress.
 
 ## Project status
 
-Actively developed, currently **v2.1.x**. The interview path shipped end-to-end
+Actively developed, currently **v2.2.x**. The interview path shipped end-to-end
 in v1.5 (profiles, live grounded answers, the Cue Card, region/clipboard solve,
 practice with an AI voice, coaching reports) and is still fully supported — it
 just no longer defines the product. v2 made meetings and solo sessions the daily
@@ -293,7 +299,10 @@ context *and* of memory, per-activity summaries, a reviewed long-term memory,
 voice, and one active profile scoping the whole dashboard. v2.1 finished that
 shift: one activity picker instead of a mode picker, a Space as the only place a
 conversation is kept, per-activity summaries, and a Help page plus a guided tour
-that walk through all of it.
+that walk through all of it. v2.2 is the "Trust" train: on-device transcription,
+a choice of AI provider per task, both sides of a call heard, and meetings that
+answer the question just asked. (Spoken replies are built but hidden for now —
+in a call you do the talking.)
 
 Next up is interviewing someone and guided tutoring — see
 [docs/10-ROADMAP.md](docs/10-ROADMAP.md) for what's planned and the

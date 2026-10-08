@@ -8,7 +8,7 @@
 > plan-shaped view of the same history, plus what comes next. The live
 > position of the current train is [BOARD.md](BOARD.md).
 
-## Where we are (2026-07-29 — v2.1.0 shipped)
+## Where we are (2026-10-07 — v2.2.1 shipped, v2.2.2 in flight)
 
 A **phase** is a planned train of milestones, numbered continuously since the
 v2 program began: Phase 1 shipped as v2.0, Phases 2–4 were planned as v2.1
@@ -30,14 +30,18 @@ instead of a milestone number.
 | 1.1–1.4 One engine (schema, engine extraction, provider seam, rebrand) | ✅ v2.0 |
 | 2.1 Meeting Copilot | 🧪 Labs (`meeting.acceptance.test.ts` gate) — graduation criteria scheduled: 5.5 |
 | 2.2 Interviewer Assist | ⬜ later train |
-| 2.3 Multi-provider v1 | ⬜ **scheduled v2.2 (5.1)** — seam ✅ since v2.0; Settings → Providers still says "Coming soon" |
-| 3.1 Voice output | ✅ sentence-streamed TTS + barge-in; Realtime speech-to-speech ⬜ later train |
+| 2.3 Multi-provider v1 | ✅ v2.2.0 (as 5.1) — Anthropic native, Google/Groq/OpenRouter over the OpenAI-compatible transport; per-task routing, per-provider keys in main; every catalog model in every picker |
+| 3.1 Voice output | ✅ built (sentence-streamed TTS + barge-in) — **hidden behind `FLAGS.voice` since v2.2.1**: in a call the user speaks, and a generated voice on the same machine leaks into the mic; Realtime speech-to-speech ⬜ later train |
 | 3.2 Tutor | ⬜ later train — `subject` ships meanwhile as a quiet ambient activity (meeting mode over your material) |
-| 3.3 Summon anywhere | ✅ push-to-talk (Ctrl+Shift+T) + no-session quick ask |
+| 3.3 Summon anywhere | ✅ built — push-to-talk + no-session quick ask, hidden with 3.1 (`FLAGS.voice`) |
 | 4.1 Memory subsystem | ✅ review-first; v2.1 added lexical recall, fact supersession (Replace), and authoring |
 | 4.2 Interjection policy engine | ✅ (`companion.eval.test.ts` gate) |
 | 4.3 Companion | 🧪 Labs — game-buddy vision integration still ⬜ |
-| 4.4 Cost governance v2 | ✅ session budgets + live meter; local-STT spike ⬜ (scheduled as a 5.x spike) |
+| 4.4 Cost governance v2 | ✅ session budgets + live meter; local-STT spike ✅ (5.6b → shipped as 5.7) |
+| 5.7 Local STT — Nemotron on sherpa-onnx, in-app model download | ✅ v2.2.0 — [22-LOCAL-STT.md](./22-LOCAL-STT.md); v2.2.1 stopped it clipping turn openings |
+| 5.8 Settings sections + first-run onboarding (name → transcription → AI) | ✅ v2.2.0 — [11-UX-NAVIGATION.md](./11-UX-NAVIGATION.md) |
+| 5.9 Meetings answer questions asked in the room (Balanced default) | ✅ v2.2.0 — verified live on both STT engines |
+| 5.10 Both sides heard: system audio + mic, questions only from the call, echo guard | ✅ v2.2.0 — [06-OPENAI-SERVICE.md](./06-OPENAI-SERVICE.md) §realtime |
 | — Activities: one list, engine derives the mode (v2.1) | ✅ [18-ACTIVITIES.md](./18-ACTIVITIES.md) |
 | — Continuity: archives, save prompt, per-activity formats (v2.1) | ✅ [16-CONTINUITY.md](./16-CONTINUITY.md) |
 | — One active profile, resolved in main (v2.1) | ✅ [19-ACTIVE-PROFILE.md](./19-ACTIVE-PROFILE.md) |
@@ -78,9 +82,12 @@ Rules of the v2 era, all still in force:
 
 ## Phase 5 — v2.2 "Trust" (the local-first promise, made good)
 
-The fifth phase of the v2 program, shipping as release **v2.2.0** — the first
-phase that is entirely ahead of us (Phases 1–4 are accounted for in the
-status table above). Its live position is tracked on [the board](BOARD.md).
+The fifth phase of the v2 program. **v2.2.0 shipped 2026-09-07** with 5.1 and
+the three user-report milestones that joined it (5.7 local STT, 5.8 Settings +
+onboarding, 5.9/5.10 meetings that hear both sides and answer); **v2.2.1**
+(2026-10-06) was polish from a week of real calls. 5.2–5.5 are still open and
+carry into the next train that picks them up; the current patch train
+(v2.2.2) is tracked on [the board](BOARD.md).
 
 v2.1 made continuity and memory the core of the product. The next release
 hardens the promises that core rests on. The pitch is *local-first, your data,

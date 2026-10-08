@@ -6,6 +6,7 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 | Version | Date | Highlights |
 | --- | --- | --- |
+| [2.2.2](./2.2.2.md) | 2026-10-07 | One General \| Technical answer style, follow-ups stay on the subject, own speech shown live, interview-type question dropped from the save dialog |
 | [2.2.1](./2.2.1.md) | 2026-10-06 | Faster first cue, local engine no longer clips turn openings, voice layer hidden, start modal shorter, dropdown/dialog fixes |
 | [2.2.0](./2.2.0.md) | 2026-09-07 | Local STT (Nemotron), multi-provider models per task, onboarding + Settings sections, meetings answer questions, both sides of the call heard |
 | [0.6.0](./0.6.0.md) | 2026-06-23 | Auto-update, resume last session, friendlier transcript, GA transcription fix |

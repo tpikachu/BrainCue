@@ -18,6 +18,7 @@ import { enginePersistence } from './persistence/enginePersistence';
 import { createRealtimeSource, pcmLevel } from './sourceAdapter';
 import { activity as activityConfig, capturePlan, modeFor } from '@shared/activities';
 import type { CapturePlan } from '@shared/activities';
+import { normalizeAnswerFormat } from '@shared/types';
 import type {
   AnswerFormat,
   AudioSource,
@@ -159,14 +160,17 @@ class Engine {
               // Ambient policies gate on "someone is (still) speaking" — feed
               // them interim activity so a decision mid-classify can defer.
               session.ambientPolicy?.noteInterim?.(Date.now());
-              // Interim text is shown for the trigger stream only: the UI keeps
-              // ONE in-flight line, and two streams' partials interleaved into
-              // it would be unreadable. The user's own words arrive as finals.
+              // Grounding is prefetched on the CALL's interim only (its turns
+              // are the questions). Interim text itself goes out for both
+              // streams, tagged, so the user sees their own words appear as
+              // they speak — without it a quick "say something into the mic"
+              // test showed nothing for ~7 s (endpoint wait + echo hold) and
+              // read as "transcription is dead".
               if (isTrigger) {
                 interim += text;
                 session.prefetchGrounding(interim);
-                broadcast(EVENTS.transcriptDelta, { text, isFinal: false, speaker });
               }
+              broadcast(EVENTS.transcriptDelta, { text, isFinal: false, speaker });
             },
             onFinal: (text) => {
               interim = '';
@@ -225,7 +229,7 @@ class Engine {
     profileId: string,
     interviewType: InterviewType,
     packId: string | null = null,
-    answerFormat: AnswerFormat = 'key_points',
+    answerFormat: AnswerFormat = 'general',
     opts: {
       activity?: ContextPackKind | null;
       mode?: SessionMode;
@@ -274,7 +278,7 @@ class Engine {
    *  reuses a single session row instead of piling up new ones. The interview
    *  TYPE is restored from the session (it's switched live in the Cue Card, not
    *  chosen on resume); the answer format defaults and is adjusted live too. */
-  resume(sessionId: string, answerFormat: AnswerFormat = 'key_points'): Session {
+  resume(sessionId: string, answerFormat: AnswerFormat = 'general'): Session {
     const row = db().select().from(schema.sessions).where(eq(schema.sessions.id, sessionId)).get();
     if (!row) throw new Error('Session not found');
     const profile = profilesRepo.get(row.profileId);
@@ -504,7 +508,7 @@ class Engine {
     if (!s) {
       return {
         interviewType: prefs.interviewType ?? 'general',
-        format: prefs.format ?? 'key_points',
+        format: normalizeAnswerFormat(prefs.format ?? 'general'),
         pronunciation: prefs.pronunciation ?? false,
       };
     }
@@ -513,13 +517,19 @@ class Engine {
       // Persist the latest type on the session row so the list/Reports reflect it.
       enginePersistence.updateInterviewType(s.sessionId, prefs.interviewType);
     }
-    if (prefs.format !== undefined) s.settings.answerFormat = prefs.format;
+    // A stored/legacy value (key_points, star, …) is coerced to the two live styles.
+    if (prefs.format !== undefined) s.settings.answerFormat = normalizeAnswerFormat(prefs.format);
     if (prefs.pronunciation !== undefined) s.settings.pronunciation = prefs.pronunciation;
-    return {
+    const applied = {
       interviewType: s.settings.interviewType,
       format: s.settings.answerFormat,
       pronunciation: s.settings.pronunciation,
     };
+    // Mirror the applied prefs to the Cue Card so its chips follow a change made
+    // from anywhere else (a legacy value coerced to General/Technical, a scripted
+    // caller, a second window) — not only one it made itself.
+    broadcast(EVENTS.answerPrefs, applied, ['overlay']);
+    return applied;
   }
 
   async regenerate(questionId?: string): Promise<{ regenerated: boolean }> {

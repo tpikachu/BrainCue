@@ -29,6 +29,8 @@ interface LiveSessionState {
   paused: boolean;
   transcript: Line[];
   interim: string;
+  /** In-flight partial per speaker (the call's and the user's own). */
+  interims: Record<string, string>;
   speaking: boolean;
   /** Audio-capture failure (nothing could be captured → no session), or a
    *  non-fatal notice that ONE of the two streams is missing (session runs). */
@@ -145,18 +147,29 @@ async function acquire(
 export const useLiveSession = create<LiveSessionState>((set, get) => {
   // Subscribe ONCE (this initializer runs a single time for the app's lifetime).
   api.events.onTranscriptDelta((p) => {
-    const d = p as { text: string; speaker: string; isFinal: boolean };
-    if (d.isFinal) {
+    const d = p as { text: string; speaker: string; isFinal: boolean; clear?: boolean };
+    const without = (m: Record<string, string>) => {
+      const { [d.speaker]: _gone, ...rest } = m;
+      return rest;
+    };
+    if (d.clear) {
+      set((s) => ({ interims: without(s.interims), interim: '' }));
+    } else if (d.isFinal) {
       set((s) => ({
         // Cap the backing array — a multi-hour interview would otherwise accumulate
         // thousands of line objects in memory (the UI only renders the last ~300).
         transcript: [...s.transcript, { id: lineId++, speaker: d.speaker, text: d.text }].slice(
           -MAX_TRANSCRIPT,
         ),
+        interims: without(s.interims),
         interim: '',
       }));
     } else {
-      set((s) => ({ interim: s.interim + d.text }));
+      set((s) => {
+        const interims = { ...s.interims, [d.speaker]: (s.interims[d.speaker] ?? '') + d.text };
+        // `interim` keeps the latest speaker's partial for existing readers.
+        return { interims, interim: interims[d.speaker] };
+      });
     }
   });
   api.events.onQuestionDetected((p) => {
@@ -181,7 +194,7 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
     // down too. stopCapture() is idempotent, so our own stop() calling both is fine.
     if (s.status === 'stopped') {
       stopCapture();
-      set({ session: null, paused: false, interim: '' });
+      set({ session: null, paused: false, interim: '', interims: {} });
     } else {
       set({ paused: s.paused });
     }
@@ -242,7 +255,7 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
     session: null,
     paused: false,
     transcript: [],
-    interim: '',
+    interim: '', interims: {},
     speaking: false,
     micError: null,
     clearMicError: () => set({ micError: null }),
@@ -285,7 +298,7 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
         companionPresence,
       )) as Session;
       lineId = 0;
-      set({ session: s, transcript: [], interim: '', paused: false, micError: null, sessionError: null });
+      set({ session: s, transcript: [], interim: '', interims: {}, paused: false, micError: null, sessionError: null });
       await attachCapture(s.id, capture);
     },
 
@@ -299,7 +312,7 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
       }
       const s = (await api.session.resume(sessionId)) as Session;
       lineId = prior.length;
-      set({ session: s, transcript: prior, interim: '', paused: false, micError: null, sessionError: null });
+      set({ session: s, transcript: prior, interim: '', interims: {}, paused: false, micError: null, sessionError: null });
       await attachCapture(s.id, capture);
     },
 
@@ -308,7 +321,7 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
       if (!s) return;
       stopCapture();
       await api.session.stop(s.id);
-      set({ session: null, interim: '' });
+      set({ session: null, interim: '', interims: {} });
     },
 
     togglePause: () => {

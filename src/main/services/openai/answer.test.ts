@@ -52,7 +52,7 @@ function baseInput(over: Partial<Parameters<typeof streamAnswer>[0]> = {}) {
     question: 'Tell me about a hard bug.',
     contextChunks: [{ id: 'c1', sourceType: 'resume' as const, content: 'Fixed a race condition', score: 0.8 }],
     profile,
-    format: 'key_points' as const,
+    format: 'general' as const,
     pronunciation: false,
     interviewType: 'behavioral' as const,
     ...over,
@@ -74,42 +74,57 @@ beforeEach(() => {
 });
 
 describe('streamAnswer — request body', () => {
-  it('caps key_points at 220 output tokens', async () => {
-    await collect(streamAnswer(baseInput({ format: 'key_points' })));
-    expect(h.lastBody!.max_output_tokens).toBe(220);
-    expect(userPrompt()).toContain('KEY POINTS');
-    expect(userPrompt()).toContain('~60 words');
-  });
-
-  it('caps explanation at 340 output tokens', async () => {
-    await collect(streamAnswer(baseInput({ format: 'explanation' })));
-    expect(h.lastBody!.max_output_tokens).toBe(340);
-    expect(userPrompt()).toContain('EXPLANATION');
-  });
-
-  it('caps detailed at 800 output tokens', async () => {
-    await collect(streamAnswer(baseInput({ format: 'detailed' })));
-    expect(h.lastBody!.max_output_tokens).toBe(800);
-    expect(userPrompt()).toContain('DETAILED');
-  });
-
-  it('caps story_teller at 420 output tokens', async () => {
-    await collect(streamAnswer(baseInput({ format: 'story_teller' })));
-    expect(h.lastBody!.max_output_tokens).toBe(420);
-    expect(userPrompt()).toContain('STORY TELLER');
-  });
-
-  it('caps star at 520 output tokens and demands the four beats', async () => {
-    await collect(streamAnswer(baseInput({ format: 'star' })));
-    // Four labelled beats cost more than one flowing story, and Result — the
-    // point of the answer — is the beat a low ceiling would truncate.
-    expect(h.lastBody!.max_output_tokens).toBe(520);
+  it('GENERAL: bold lead sentence + 3–4 bullets, capped at 360 output tokens', async () => {
+    await collect(streamAnswer(baseInput({ format: 'general' })));
+    expect(h.lastBody!.max_output_tokens).toBe(360);
     const p = userPrompt();
-    expect(p).toContain('FORMAT = STAR');
-    for (const beat of ['SITUATION', 'TASK', 'ACTION', 'RESULT']) expect(p).toContain(beat);
-    // The two beats candidates actually drop, called out by name in the prompt.
-    expect(p).toMatch(/what \*I\* specifically was responsible for/);
-    expect(p).toMatch(/never invent one/); // a fabricated metric is worse than none
+    expect(p).toContain('FORMAT = GENERAL');
+    expect(p).toMatch(/ONE sentence that actually answers the question, in \*\*bold\*\*/);
+    expect(p).toContain('3–4 short bullets');
+    expect(p).toContain('~120 words max');
+    expect(p).toContain('Write the answer now — GENERAL');
+  });
+
+  it('TECHNICAL: same lead, 4–6 specific bullets, then approach + trade-offs, capped at 600', async () => {
+    await collect(streamAnswer(baseInput({ format: 'technical' })));
+    expect(h.lastBody!.max_output_tokens).toBe(600);
+    const p = userPrompt();
+    expect(p).toContain('FORMAT = TECHNICAL');
+    expect(p).toMatch(/in \*\*bold\*\*/);
+    expect(p).toContain('4–6 bullets');
+    expect(p).toMatch(/one line of\s+code/);
+    expect(p).toContain('trade-offs');
+    expect(p).toContain('~200 words max');
+    expect(p).toContain('Write the answer now — TECHNICAL');
+  });
+
+  it('never mentions the retired five formats', async () => {
+    for (const format of ['general', 'technical'] as const) {
+      await collect(streamAnswer(baseInput({ format })));
+      expect(userPrompt()).not.toMatch(/KEY POINTS|STORY TELLER|FORMAT = STAR|FORMAT = DETAILED|FORMAT = EXPLANATION/);
+    }
+  });
+
+  it('a BEHAVIORAL question under the interview framing gets the story shape automatically', async () => {
+    await collect(streamAnswer(baseInput({ format: 'general', questionType: 'behavioral' })));
+    const p = userPrompt();
+    expect(p).toMatch(/order the bullets as the story: the situation, what I\s+did/);
+    expect(p).toMatch(/then the result/);
+    expect(p).toMatch(/first person singular/);
+    expect(p).toMatch(/never an invented one/); // a fabricated metric is worse than none
+    expect(p).toMatch(/No labels/); // no Situation/Task/Action/Result headings
+    // Same under TECHNICAL — the shape rides on the question, not the style.
+    await collect(streamAnswer(baseInput({ format: 'technical', questionType: 'behavioral' })));
+    expect(userPrompt()).toMatch(/order the bullets as the story/);
+  });
+
+  it('no story shape without a behavioral question type, or outside the interview framing', async () => {
+    await collect(streamAnswer(baseInput()));
+    expect(userPrompt()).not.toMatch(/order the bullets as the story/);
+    await collect(streamAnswer(baseInput({ questionType: 'technical' })));
+    expect(userPrompt()).not.toMatch(/order the bullets as the story/);
+    await collect(streamAnswer(baseInput({ questionType: 'behavioral', framing: 'conversation' })));
+    expect(userPrompt()).not.toMatch(/order the bullets as the story/);
   });
 
   it('includes the structured pronunciation-guide instruction only when enabled', async () => {
@@ -121,16 +136,16 @@ describe('streamAnswer — request body', () => {
     expect(userPrompt()).not.toContain('[[PRONUNCIATION]]');
   });
 
-  it('gives pronunciation headroom above the format token cap', async () => {
-    await collect(streamAnswer(baseInput({ format: 'key_points', pronunciation: true })));
-    expect(h.lastBody!.max_output_tokens).toBe(220 + 160);
+  it('gives pronunciation headroom above the style token cap', async () => {
+    await collect(streamAnswer(baseInput({ format: 'general', pronunciation: true })));
+    expect(h.lastBody!.max_output_tokens).toBe(360 + 160);
   });
 
   it('on a reasoning answer model: sends a low effort + reasoning-token headroom', async () => {
     h.reasoning = true;
-    await collect(streamAnswer(baseInput({ format: 'key_points' })));
+    await collect(streamAnswer(baseInput({ format: 'general' })));
     expect(h.lastBody!.reasoning).toEqual({ effort: 'low' });
-    expect(h.lastBody!.max_output_tokens).toBe(220 + 1024);
+    expect(h.lastBody!.max_output_tokens).toBe(360 + 1024);
   });
 
   it('never sends a reasoning param to a non-reasoning model', async () => {
@@ -143,9 +158,9 @@ describe('streamAnswer — request body', () => {
     await expect(collect(streamAnswer(baseInput()))).rejects.toThrow(/no text/i);
   });
 
-  it('injects the chosen format and interview type', async () => {
-    await collect(streamAnswer(baseInput({ format: 'explanation', interviewType: 'coding' })));
-    expect(userPrompt()).toContain('EXPLANATION');
+  it('injects the chosen style and interview type', async () => {
+    await collect(streamAnswer(baseInput({ format: 'technical', interviewType: 'coding' })));
+    expect(userPrompt()).toContain('FORMAT = TECHNICAL');
     expect(userPrompt()).toContain('Interview type: coding');
   });
 
@@ -156,15 +171,14 @@ describe('streamAnswer — request body', () => {
     expect(system).toMatch(/As an AI/i); // it's in the BANNED list
   });
 
-  it('writes for the ear: system demands speakable prose; spoken formats demand read-aloud fluency', async () => {
-    await collect(streamAnswer(baseInput({ format: 'explanation' })));
+  it('writes for the ear: system demands speakable prose; both styles demand read-aloud fluency', async () => {
+    await collect(streamAnswer(baseInput({ format: 'general' })));
     const system = String((h.lastBody!.input as { role: string; content: string }[])[0].content);
     expect(system).toMatch(/WRITE FOR THE EAR/i);
     expect(system).toMatch(/READ ALOUD/i);
-    expect(userPrompt()).toMatch(/read aloud|say it across the table/i);
-    await collect(streamAnswer(baseInput({ format: 'story_teller' })));
-    expect(userPrompt()).toMatch(/out loud|first read/i);
-    expect(userPrompt()).toMatch(/no\s+flashbacks/i);
+    expect(userPrompt()).toMatch(/read aloud|say verbatim/i);
+    await collect(streamAnswer(baseInput({ format: 'technical' })));
+    expect(userPrompt()).toMatch(/out loud|read aloud/i);
   });
 
   it('embeds retrieved context tagged by source', async () => {
@@ -290,6 +304,19 @@ describe('answer framing', () => {
 });
 
 describe('streamAnswer — in-session history', () => {
+  it('tells the model a short follow-up continues the last exchange', async () => {
+    await collect(
+      streamAnswer(
+        baseInput({
+          question: 'Well, what was your role there?',
+          history: [{ role: 'asked', question: 'Tell me about your last project.', answer: 'The Acme migration…' }],
+        }),
+      ),
+    );
+    expect(userPrompt()).toMatch(/"there".*refer to the subject of the last answer/);
+    expect(userPrompt()).toMatch(/never switch to a different project or example/);
+  });
+
   it('adds the session-so-far block right before the QUESTION, heard and answered items labeled', async () => {
     await collect(
       streamAnswer(

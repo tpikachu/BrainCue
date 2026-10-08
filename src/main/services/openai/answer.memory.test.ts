@@ -34,7 +34,7 @@ async function run(mem?: RetrievedMemory[]): Promise<string> {
     contextChunks: [],
     memories: mem,
     profile,
-    format: 'key_points',
+    format: 'general',
     pronunciation: false,
     interviewType: 'general',
   });

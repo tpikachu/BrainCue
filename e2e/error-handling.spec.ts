@@ -23,7 +23,7 @@ test('a failed answer surfaces an error and clears the streaming state (B1/B2)',
       resumeText: null,
       jdText: null,
     });
-    const session = await api.session.start(profile.id, 'general', null, 'key_points');
+    const session = await api.session.start(profile.id, 'general', null, 'general');
 
     // Listen BEFORE asking. answerDone firing on a failed ask is the core B1 fix
     // (the Cue Card card stops spinning); sessionError proves the failure isn't silent.

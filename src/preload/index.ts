@@ -217,7 +217,7 @@ const api = {
        *  services/openai/answer.ts — framing). */
       interviewType: string | undefined,
       jobId: string | null = null,
-      answerFormat = 'key_points',
+      answerFormat = 'general',
       /** What this call IS (shared/activities.ts). The engine derives the mode
        *  from it — the renderer never picks one. */
       activity?: string,
@@ -237,7 +237,7 @@ const api = {
       }),
     setPresence: (presence: string) =>
       invoke<{ applied: boolean }>(IPC.session.setPresence, { presence }),
-    resume: (sessionId: string, answerFormat = 'key_points') =>
+    resume: (sessionId: string, answerFormat = 'general') =>
       invoke(IPC.session.resume, { sessionId, answerFormat }),
     setAnswerPrefs: (prefs: { interviewType?: string; format?: string; pronunciation?: boolean }) =>
       invoke<{ interviewType: string; format: string; pronunciation: boolean }>(

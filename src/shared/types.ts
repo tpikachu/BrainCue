@@ -10,21 +10,37 @@ export type InterviewType =
   | 'system_design'
   | 'general';
 
-/** Answer FORMAT — the single live Cue Card control (v1.2; replaces the old
- *  format/tone × length split). All read 100% human, never AI-generated.
- *  - `key_points`: short, glanceable — a terse opener + a few key-point bullets.
- *  - `explanation`: a natural, flowing first-person explanation, like talking it
- *    through with someone.
- *  - `detailed`: thorough, with one concrete example.
- *  - `story_teller`: a short, vivid first-person story (hook → challenge → what I
- *    did → outcome) — memorable, great for behavioral answers.
- *  - `star`: the same material under the named interview scaffold — Situation,
- *    Task, Action, Result. Distinct from `story_teller` on purpose: that one
- *    optimizes for how a story LANDS, this one for what a behavioural
- *    interviewer is scoring against. Panels listen for the four beats, and
- *    "what was YOUR task" and "what was the RESULT" are the two people
- *    reliably skip. */
-export type AnswerFormat = 'key_points' | 'explanation' | 'detailed' | 'story_teller' | 'star';
+/** Answer STYLE — the single live Cue Card control (v2.2: one two-way chip,
+ *  General | Technical, replacing five formats and the interview-type dropdown).
+ *  Both read 100% human, never AI-generated.
+ *  - `general`: one bold lead sentence that answers directly, then 3–4 short
+ *    bullets (reasons / next steps). ~120 words.
+ *  - `technical`: the same lead sentence, then 4–6 bullets that may hold
+ *    specifics (names, numbers, a line of code), then one short paragraph on
+ *    approach and trade-offs. ~200 words.
+ *  Behavioral questions get the story shape automatically (situation → what I
+ *  did → result) from the classified question type — no control for it.
+ *  Legacy values (`key_points`, `explanation`, `detailed`, `story_teller`,
+ *  `star`) may still arrive from stored prefs/old callers; see
+ *  `normalizeAnswerFormat`. */
+export type AnswerFormat = 'general' | 'technical';
+
+const LEGACY_ANSWER_FORMATS: Record<string, AnswerFormat> = {
+  key_points: 'general',
+  explanation: 'general',
+  story_teller: 'general',
+  star: 'general',
+  detailed: 'technical',
+};
+
+/** Coerce any stored/legacy answer-format value to the two live styles.
+ *  Unknown input falls back to `general`. */
+export function normalizeAnswerFormat(v: unknown): AnswerFormat {
+  if (v === 'general' || v === 'technical') return v;
+  if (typeof v === 'string' && Object.prototype.hasOwnProperty.call(LEGACY_ANSWER_FORMATS, v))
+    return LEGACY_ANSWER_FORMATS[v];
+  return 'general';
+}
 
 export type DocumentKind = 'resume' | 'jd' | 'note' | 'other';
 /** `tailored` = an application's tailored resume, indexed pack-scoped; when a pack
@@ -710,9 +726,13 @@ export interface TranscriptDeltaEvent {
   /** The remote side carries the mode's `remoteSpeaker` ('them' / 'interviewer';
    *  'you' for solo activities, where the user IS the trigger source); the
    *  user's own microphone turns carry the mode's `localSpeaker` ('you' /
-   *  'candidate'). Interim (non-final) deltas are broadcast for the trigger
-   *  stream only. */
+   *  'candidate'). Interim (non-final) deltas are broadcast for BOTH streams,
+   *  each tagged, so the UI keeps one in-flight line per speaker. */
   speaker: Speaker;
+  /** Non-final only: drop this speaker's in-flight line without adding a
+   *  transcript line — the user's own turn was judged an echo of the call
+   *  (engine/echoGuard.ts) and will never become a final. */
+  clear?: boolean;
 }
 export interface AnswerDeltaEvent {
   questionId: string;

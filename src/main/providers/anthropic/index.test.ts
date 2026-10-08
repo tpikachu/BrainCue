@@ -222,7 +222,7 @@ describe('anthropicVision.streamSolve', () => {
       anthropicVision.streamSolve({
         imageDataUrls: ['data:image/png;base64,AAAA', 'data:image/jpeg;base64,BBBB'],
         language: 'python',
-        format: 'key_points',
+        format: 'general',
       }),
     );
     const call = last();

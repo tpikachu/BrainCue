@@ -97,7 +97,7 @@ beforeEach(() => {
 
 describe('engine.start: the activity chooses the mode', () => {
   it.each(ACTIVITY_ORDER)('runs %s in the mode its activity declares', (kind) => {
-    const session = engine.start(makeProfile(), 'general', null, 'key_points', { activity: kind });
+    const session = engine.start(makeProfile(), 'general', null, 'general', { activity: kind });
     expect(session.mode).toBe(ACTIVITIES[kind as ContextPackKind].mode);
     // Persisted, not just returned — Reports and resume read the row.
     expect(row(session.id).mode).toBe(ACTIVITIES[kind as ContextPackKind].mode);
@@ -107,10 +107,10 @@ describe('engine.start: the activity chooses the mode', () => {
     // A project call and a standup both run 'meeting'. Storing only the derived
     // mode would erase the difference, and a session started without a Space
     // would have no record of what it was at all.
-    const project = engine.start(makeProfile(), 'general', null, 'key_points', {
+    const project = engine.start(makeProfile(), 'general', null, 'general', {
       activity: 'project',
     });
-    const standup = engine.start(makeProfile(), 'general', null, 'key_points', {
+    const standup = engine.start(makeProfile(), 'general', null, 'general', {
       activity: 'meeting',
     });
     expect(row(project.id).mode).toBe(row(standup.id).mode);
@@ -120,7 +120,7 @@ describe('engine.start: the activity chooses the mode', () => {
 
   it('gives interview framing to interviews and to nothing else', () => {
     for (const kind of ACTIVITY_ORDER) {
-      const s = engine.start(makeProfile(), 'general', null, 'key_points', { activity: kind });
+      const s = engine.start(makeProfile(), 'general', null, 'general', { activity: kind });
       expect(s.mode === 'interview', kind).toBe(kind === 'job');
     }
   });
@@ -129,18 +129,18 @@ describe('engine.start: the activity chooses the mode', () => {
 describe('the callers that have no activity', () => {
   it('falls back to the interview pipeline when nothing is passed', () => {
     // Mock and sparring rehearsals come through the facade with no activity.
-    const s = engine.start(makeProfile(), 'behavioral', null, 'key_points');
+    const s = engine.start(makeProfile(), 'behavioral', null, 'general');
     expect(s.mode).toBe('interview');
     expect(row(s.id).activity).toBeNull();
   });
 
   it('lets an explicit mode win, so rehearsals keep working', () => {
-    const s = engine.start(makeProfile(), 'general', null, 'key_points', { mode: 'meeting' });
+    const s = engine.start(makeProfile(), 'general', null, 'general', { mode: 'meeting' });
     expect(s.mode).toBe('meeting');
   });
 
   it('restores both on resume — a standup resumes as a standup', () => {
-    const started = engine.start(makeProfile(), 'general', null, 'key_points', {
+    const started = engine.start(makeProfile(), 'general', null, 'general', {
       activity: 'meeting',
     });
     engine.stop(started.id);
@@ -155,12 +155,12 @@ describe('what the Cue Card is told', () => {
     h.events.filter((e) => e.ch === EVENTS.clientInfo).at(-1)?.payload as { title: string };
 
   it('names the call by what the user said it was, when there is no Space', () => {
-    engine.start(makeProfile(), 'general', null, 'key_points', { activity: 'personal' });
+    engine.start(makeProfile(), 'general', null, 'general', { activity: 'personal' });
     expect(clientInfo().title).toBe(ACTIVITIES.personal.label);
   });
 
   it('still says Interview for a rehearsal, which has no activity', () => {
-    engine.start(makeProfile(), 'general', null, 'key_points');
+    engine.start(makeProfile(), 'general', null, 'general');
     expect(clientInfo().title).toBe('Interview');
   });
 });

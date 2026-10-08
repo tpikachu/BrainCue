@@ -49,7 +49,7 @@ export const sessionManager = {
     profileId: string,
     interviewType: InterviewType,
     jobId: string | null = null,
-    answerFormat: AnswerFormat = 'key_points',
+    answerFormat: AnswerFormat = 'general',
     opts: {
       activity?: ContextPackKind | null;
       mode?: SessionMode;
@@ -61,7 +61,7 @@ export const sessionManager = {
     return engine.start(profileId, interviewType, jobId, answerFormat, opts);
   },
 
-  resume(sessionId: string, answerFormat: AnswerFormat = 'key_points'): Session {
+  resume(sessionId: string, answerFormat: AnswerFormat = 'general'): Session {
     return engine.resume(sessionId, answerFormat);
   },
 

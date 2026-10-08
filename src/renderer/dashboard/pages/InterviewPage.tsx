@@ -152,7 +152,7 @@ export default function InterviewPage() {
         profileId,
         jobId: job.id,
         interviewType: 'general',
-        answerFormat: 'key_points',
+        answerFormat: 'general',
         // An interview is a call: heard on both sides, questions from the call.
         activity: 'job',
         listensTo: 'system',

@@ -173,7 +173,7 @@ describe('vision', () => {
       google.vision!.streamSolve({
         imageDataUrls: ['data:image/png;base64,AAAA', 'data:image/png;base64,BBBB'],
         language: 'go',
-        format: 'explanation',
+        format: 'general',
       }),
     );
     const messages = last().params.messages as { role: string; content: unknown }[];

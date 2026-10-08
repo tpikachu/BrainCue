@@ -446,10 +446,10 @@ test('@capture the demo film', async ({ dashboard }) => {
     await shot(dashboard, {
       dir: '07-start',
       kicker: 'Before anything is captured',
-      caption: 'It tells you exactly what will be recorded, and exactly what will be sent.',
+      caption: 'It says what it will hear: the call and your microphone, with questions taken only from the call.',
       hold: 5.0,
       spotlight: {
-        of: dialog.getByText(/captured on this machine/i),
+        of: dialog.getByTestId('hears'),
         label: 'no surprises',
       },
     });
@@ -526,7 +526,7 @@ test('@capture the demo film', async ({ dashboard }) => {
   await optional(dashboard, 'grounded, cited answer', async () => {
     liveId = await dashboard.evaluate(
       async ([pid, jid]) => {
-        const s = await (window as any).api.session.start(pid, 'behavioral', jid, 'key_points', 'job');
+        const s = await (window as any).api.session.start(pid, 'behavioral', jid, 'general', 'job');
         return s.id as string;
       },
       [profileId, googleId] as const,
@@ -571,11 +571,11 @@ test('@capture the demo film', async ({ dashboard }) => {
     });
   });
 
-  // STAR is an answer FORMAT, not a story bank: the same answer, re-told.
-  await optional(dashboard, 'STAR format', async () => {
+  // One two-way style chip since 2.2.2 (General | Technical): the same answer, re-told.
+  await optional(dashboard, 'Technical style', async () => {
     if (!liveId) throw new Error('no live session');
     await dashboard.evaluate(async () => {
-      await (window as any).api.session.setAnswerPrefs({ format: 'star' });
+      await (window as any).api.session.setAnswerPrefs({ format: 'technical' });
     });
     // Same rule as the ask above: `regenerate` resolves when the re-told answer
     // has finished streaming, so it is started and filmed, not awaited.
@@ -586,8 +586,8 @@ test('@capture the demo film', async ({ dashboard }) => {
       overlay,
       {
         dir: '12-star',
-        kicker: 'Answer formats',
-        caption: 'Re-tell the same answer as key points, a short explanation, or a STAR story.',
+        kicker: 'Two styles',
+        caption: 'Re-tell the same answer in the Technical style — one chip, nothing else to set.',
         fps: 10,
         tailHold: 3.4,
       },
@@ -598,7 +598,7 @@ test('@capture the demo film', async ({ dashboard }) => {
 
   await optional(dashboard, 'coding help', async () => {
     await dashboard.evaluate(async () => {
-      await (window as any).api.session.setAnswerPrefs({ format: 'key_points' });
+      await (window as any).api.session.setAnswerPrefs({ format: 'general' });
       await (window as any).api.capture.solve(
         'Given an array of integers nums and an integer target, return the indices of the two ' +
           'numbers that add up to target. You may assume exactly one solution exists.',
@@ -841,7 +841,7 @@ test('@capture the demo film', async ({ dashboard }) => {
     const sid = await dashboard.evaluate(
       async ([pid, jid]) => {
         const a = (window as any).api;
-        const s = await a.session.start(pid, undefined, jid, 'key_points', 'meeting');
+        const s = await a.session.start(pid, undefined, jid, 'general', 'meeting');
         return s.id as string;
       },
       [profileId, standupId] as const,

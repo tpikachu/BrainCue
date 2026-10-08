@@ -22,7 +22,7 @@ const codingLanguage = (): string =>
 
 /** The four-beat delivery follows the live Cue Card's Answer Format when a session
  *  is running; outside a session the coding default is the spoken explanation. */
-const codingFormat = (): AnswerFormat => sessionManager.activeAnswerFormat() ?? 'explanation';
+const codingFormat = (): AnswerFormat => sessionManager.activeAnswerFormat() ?? 'general';
 
 /** The screenshot solver, through the vision seam — it follows the `coding`
  *  task's model, so the provider is whatever the user picked for the solver. */

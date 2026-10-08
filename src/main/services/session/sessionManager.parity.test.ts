@@ -513,11 +513,12 @@ describe('in-session history (question N knows about question N-1)', () => {
       { role: 'heard', text: 'Thanks for joining, we have a few topics today.' },
       { role: 'asked', question: 'Which database did you pick for the rewrite?', answer: 'Hello world' },
     ]);
-    // Retrieval for the referential follow-up embeds the previous question too;
-    // the long first question retrieved on its own text.
+    // Retrieval for the referential follow-up embeds the previous question AND
+    // the opening of its answer (where the subject was named); the long first
+    // question retrieved on its own text.
     expect(h.retrieveCalls.map((c) => c[1])).toEqual([
       'Which database did you pick for the rewrite?',
-      'Which database did you pick for the rewrite? And why that one?',
+      'Which database did you pick for the rewrite? Hello world And why that one?',
     ]);
     expect(h.retrieveCalls[0][0]).toBe(profileId);
     sessionManager.stop(session.id);

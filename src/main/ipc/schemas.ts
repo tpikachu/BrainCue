@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { normalizeAnswerFormat } from '@shared/types';
 
 /**
  * Shared zod enums for IPC inputs — the single source of truth. These were
@@ -16,13 +17,13 @@ export const zInterviewType = z.enum([
   'general',
 ]);
 
-export const zAnswerFormat = z.enum([
-  'key_points',
-  'explanation',
-  'detailed',
-  'story_teller',
-  'star',
-]);
+/** The two live answer styles. The five legacy formats are still ACCEPTED (a
+ *  stored pref or an older caller may send them) and mapped: key_points /
+ *  explanation / story_teller / star → 'general', detailed → 'technical'. */
+export const zAnswerFormat = z.preprocess(
+  (v) => (typeof v === 'string' ? normalizeAnswerFormat(v) : v),
+  z.enum(['general', 'technical']),
+);
 
 export const zTtsVoice = z.enum(['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']);
 

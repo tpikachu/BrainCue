@@ -32,6 +32,8 @@ import type { AmbientPolicy, ModeDefinition, RuntimeSettings } from './modeDefin
 interface LastQuestion {
   questionId: string;
   text: string;
+  /** Classifier type ('behavioral', 'technical', …) — regenerate re-sends it. */
+  type: string;
 }
 
 /** In-session history budget. Sized for the prompt, not the archive: enough
@@ -43,6 +45,9 @@ const HISTORY_ANSWER_CHARS = 700;
 /** A question this short is almost always referential ("and the timeline?"),
  *  so retrieval embeds it together with the previous question. */
 const REFERENTIAL_MAX_WORDS = 8;
+/** How much of the previous answer joins a referential follow-up's retrieval
+ *  query — its lead names the subject; the rest would drown the question. */
+const REFERENTIAL_ANSWER_CHARS = 240;
 
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 
@@ -93,8 +98,13 @@ export class EngineSession {
    *  question says the same words; otherwise discarded. */
   private prefetch: { words: string[]; promise: Promise<RetrievedChunk[]> } | null = null;
   private readonly echo = new EchoGuard({
-    // Word count only — transcript text never goes to the log.
-    onDrop: (words) => log.info(`echo guard: dropped the microphone's copy of a call turn (${words} words)`),
+    onDrop: (words) => {
+      // Word count only — transcript text never goes to the log.
+      log.info(`echo guard: dropped the microphone's copy of a call turn (${words} words)`);
+      // The UI showed this turn as the user's in-flight line; it will never
+      // become a final, so tell both windows to drop that line.
+      broadcast(EVENTS.transcriptDelta, { text: '', isFinal: false, speaker: this.mode.localSpeaker, clear: true });
+    },
   });
   /** Ambient trigger state (Meeting/Companion) — per-session cooldowns/
    *  dedupe/pending questions. Null for Q&A modes (interview). */
@@ -375,9 +385,9 @@ export class EngineSession {
     });
     // Remember this question so the Cue Card can re-generate it (length/format/
     // pronunciation toggles) by reusing THIS question row — no duplicate line.
-    this.lastQuestion = { questionId, text: questionText };
+    this.lastQuestion = { questionId, text: questionText, type: q.type };
 
-    return this.generateContribution(questionId, questionText);
+    return this.generateContribution(questionId, questionText, q.type);
   }
 
   /** Stream (or re-stream) the grounded contribution for an already-registered
@@ -386,6 +396,7 @@ export class EngineSession {
   async generateContribution(
     questionId: string,
     questionText: string,
+    questionType?: string,
   ): Promise<{ questionId: string }> {
     const session = persist.sessionRow(this.sessionId);
     if (!session) throw new Error('Session not found');
@@ -434,6 +445,7 @@ export class EngineSession {
         profile,
         settings: this.settings,
         history,
+        questionType,
         signal: abort.signal,
       })) {
         if (ev.type === 'delta') {
@@ -533,16 +545,19 @@ export class EngineSession {
   async regenerate(questionId?: string): Promise<{ regenerated: boolean }> {
     let qid: string;
     let text: string;
+    let type: string | undefined;
     if (questionId) {
-      // A specific card: pull its text from its question row (any question in
-      // this session).
-      const rowText = persist.questionText(questionId);
-      if (rowText === null) return { regenerated: false }; // e.g. an ad-hoc coding-solve card (not persisted)
+      // A specific card: pull its text (+ classified type) from its question
+      // row (any question in this session).
+      const row = persist.question(questionId);
+      if (row === null) return { regenerated: false }; // e.g. an ad-hoc coding-solve card (not persisted)
       qid = questionId;
-      text = rowText;
+      text = row.text;
+      type = row.type;
     } else if (this.lastQuestion) {
       qid = this.lastQuestion.questionId;
       text = this.lastQuestion.text;
+      type = this.lastQuestion.type;
     } else {
       return { regenerated: false };
     }
@@ -551,7 +566,7 @@ export class EngineSession {
     this.answerAbort?.abort();
     // Clear that question's answer in the Cue Card (without touching the transcript).
     emitContributionReset(qid);
-    await this.generateContribution(qid, text);
+    await this.generateContribution(qid, text, type);
     return { regenerated: true };
   }
 
@@ -590,13 +605,17 @@ export class EngineSession {
   }
 
   /** The text retrieval embeds. A short follow-up carries the previous
-   *  question with it, so "and the timeline?" retrieves chunks about the
-   *  thing being asked about instead of about timelines in general. */
+   *  question AND the opening of its answer with it, so "what was your role
+   *  there?" retrieves chunks about the project the answer just named instead
+   *  of about roles in general (the question alone rarely names the subject;
+   *  the answer did). */
   private retrievalQuery(questionText: string): string {
     if (questionText.trim().split(/\s+/).length > REFERENTIAL_MAX_WORDS) return questionText;
     for (let i = this.history.length - 1; i >= 0; i--) {
       const h = this.history[i];
-      if (h.role === 'asked') return `${h.question} ${questionText}`;
+      if (h.role === 'asked') {
+        return `${h.question} ${clip(h.answer, REFERENTIAL_ANSWER_CHARS)} ${questionText}`;
+      }
     }
     return questionText;
   }

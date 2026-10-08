@@ -187,6 +187,12 @@ call and the mic never bleed into each other. In the protocol this means:
   the recognizer that created them. In practice that only happens between
   sessions.
 
+Since 2026-10-07 **both** streams publish their interim text, tagged with the
+speaker, and the Cue Card keeps one in-flight line per speaker. Before that the
+mic stream's interim was dropped on the way to the renderer, so the user's own
+speech only appeared after the endpoint fired *plus* the echo guard's 1.5 s
+hold — which read as "live transcription is not working" (06 §realtime).
+
 ## The provider (`localRealtimeStt.ts`)
 
 `localRealtimeStt` implements `RealtimeSttProvider` — the same interface the

@@ -181,7 +181,7 @@ function startCompanion(opts: {
     h.db.insert(schema.settings).values({ key: 'memory_enabled', value: '1' }).run();
   }
   vi.setSystemTime(T0);
-  const session = engine.start(profileId, 'general', null, 'explanation', {
+  const session = engine.start(profileId, 'general', null, 'general', {
     mode: 'companion',
     presence: 'summoned', // the engine dial; the policy runs companionPresence
     companionPresence: opts.companionPresence,
@@ -439,7 +439,7 @@ describe('companion evaluation harness — scripted scenarios', () => {
       .run();
     vi.setSystemTime(T0);
     // No explicit start-time posture → the stored prefs (with DND) apply.
-    const session = engine.start(profileId, 'general', null, 'explanation', { mode: 'companion' });
+    const session = engine.start(profileId, 'general', null, 'general', { mode: 'companion' });
 
     vi.setSystemTime(T0 + MIN);
     await engine.processFinalTranscript(session.id, 'I will send the summary to the board by Friday.');

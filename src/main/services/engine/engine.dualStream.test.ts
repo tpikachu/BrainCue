@@ -124,7 +124,7 @@ beforeEach(() => {
 
 describe('a call opens two transcribers, each tagged with a speaker', () => {
   it('interview: the call is the interviewer, the microphone is the candidate', async () => {
-    const s = engine.start(makeProfile(), 'general', null, 'key_points', { activity: 'job' });
+    const s = engine.start(makeProfile(), 'general', null, 'general', { activity: 'job' });
     expect(opened()).toHaveLength(2);
     const [system, mic] = opened();
 
@@ -149,18 +149,22 @@ describe('a call opens two transcribers, each tagged with a speaker', () => {
   });
 
   it('meeting: the call is `them`, the microphone is `you`', () => {
-    engine.start(makeProfile(), 'general', null, 'key_points', { activity: 'meeting' });
+    engine.start(makeProfile(), 'general', null, 'general', { activity: 'meeting' });
     expect(opened()).toHaveLength(2);
     const [system, mic] = opened();
     system.cb.onDelta('what is');
     mic.cb.onDelta('I think');
-    // Interim text is shown for the trigger stream only — the UI keeps ONE
-    // in-flight line, and two streams' partials interleaved would be unreadable.
-    expect(deltas()).toEqual([{ text: 'what is', speaker: 'them', isFinal: false }]);
+    // Interim text goes out for BOTH streams, each tagged with its speaker, so
+    // the UI can keep one in-flight line per speaker (the user sees their own
+    // words appear as they speak).
+    expect(deltas()).toEqual([
+      { text: 'what is', speaker: 'them', isFinal: false },
+      { text: 'I think', speaker: 'you', isFinal: false },
+    ]);
   });
 
   it('the Cue Card level meter follows whichever stream is louder', () => {
-    const s = engine.start(makeProfile(), 'general', null, 'key_points', { activity: 'meeting' });
+    const s = engine.start(makeProfile(), 'general', null, 'general', { activity: 'meeting' });
     const level = () =>
       (h.events.filter((e) => e.ch === EVENTS.audioLevel).at(-1)?.payload as { level: number }).level;
     engine.feedRealtimeAudio(s.id, pcm(300), 'system');
@@ -182,7 +186,7 @@ describe('a call opens two transcribers, each tagged with a speaker', () => {
 
 describe('sessions that hear one stream', () => {
   it('solo: the microphone alone, and it IS the trigger source (speaker `you`)', () => {
-    const s = engine.start(makeProfile(), 'general', null, 'key_points', { activity: 'solo' });
+    const s = engine.start(makeProfile(), 'general', null, 'general', { activity: 'solo' });
     expect(opened()).toHaveLength(1);
     const [mic] = opened();
     engine.feedRealtimeAudio(s.id, pcm(1000), 'mic');
@@ -203,7 +207,7 @@ describe('sessions that hear one stream', () => {
   });
 
   it('stopping the session stops every transcriber', () => {
-    const s = engine.start(makeProfile(), 'general', null, 'key_points', { activity: 'project' });
+    const s = engine.start(makeProfile(), 'general', null, 'general', { activity: 'project' });
     const [system, mic] = opened();
     engine.stop(s.id);
     expect(system.stop).toHaveBeenCalledTimes(1);

@@ -41,7 +41,7 @@ export interface AnswerInput {
    *  prompt byte-identical to v1 — memory only ever ADDS a section. */
   memories?: RetrievedMemory[];
   profile: Profile;
-  /** The single answer control (v1.2): key_points | explanation | detailed. */
+  /** The single answer control (v2.2): general | technical. */
   format: AnswerFormat;
   /** Annotate rare/technical/foreign terms with a quick phonetic respelling. */
   pronunciation: boolean;
@@ -49,65 +49,57 @@ export interface AnswerInput {
   framing?: AnswerFraming;
   /** Only meaningful under `interview` framing; ignored otherwise. */
   interviewType?: InterviewType;
+  /** The classifier's type for THIS question (e.g. 'behavioral'). Under the
+   *  interview framing a behavioral question gets the story shape automatically
+   *  (situation → what I did → result) — the user never picks it. Ignored
+   *  otherwise. */
+  questionType?: string;
   /** Earlier turns + answered questions of this session. Absent/empty leaves
    *  the prompt byte-identical — history only ever ADDS a section. */
   history?: SessionHistory;
   signal?: AbortSignal;
 }
 
-/** Human-readable instruction per answer FORMAT, injected into the prompt.
- *  explanation/story_teller are read ALOUD verbatim mid-interview, so their
- *  instructions optimize for speakability: first-read fluency, breath-sized
- *  paragraphs, linear structure. */
+/** Human-readable instruction per answer STYLE, injected into the prompt.
+ *  Both are read ALOUD verbatim mid-conversation, so the instructions optimize
+ *  for speakability: a lead sentence I can say as-is, then bullets I riff from. */
 const FORMAT_INSTRUCTION: Record<AnswerFormat, string> = {
-  key_points:
-    'FORMAT = KEY POINTS (STRICT). A glanceable cue to speak FROM, not a full answer. ' +
-    'Hard cap: ~60 words TOTAL. One short opening line (≤12 words) I can say verbatim, then ' +
-    '2–3 terse bullets of a few words each — keywords to riff on, not sentences. ' +
-    'No paragraphs, no preamble. Shorter is better.',
-  explanation:
-    'FORMAT = EXPLANATION. A natural spoken answer (~90–130 words) that I read aloud AS my ' +
-    'answer — it must sound like talking, not like an essay being recited. Open by actually ' +
-    'answering in one short sentence. Then the how and the why, with ONE specific detail from ' +
-    'the context doing the convincing. End on a short line that lands the point. Short ' +
-    'sentences, plain connectors, 2–3 short paragraphs as breathing points. Warm and direct, ' +
-    "never a lecture — exactly the way I'd say it across the table.",
-  detailed:
-    'FORMAT = DETAILED. A thorough, well-structured spoken answer (~150–220 words) with ' +
-    'specifics and one concrete example drawn from the context. Still speech, not an essay: ' +
-    'short sentences, clear spoken signposts ("First…", "The tricky part was…", "The result…"), ' +
-    'and short paragraphs as breathing points.',
-  story_teller:
-    'FORMAT = STORY TELLER. You are ME telling MY OWN story on my behalf, written exactly the ' +
-    "way I'd tell it out loud (~110–150 words). Shape: a one-line hook that drops us into the " +
-    'moment; the stakes in a sentence; what I actually did, as two or three concrete moves; ' +
-    'then how it ended, with a real result from the context. Keep the timeline straight — no ' +
-    'flashbacks, no nested asides. Short sentences with rhythm, a beat of tension before the ' +
-    'payoff, and a paragraph break wherever I would pause. One story, tightly told, effortless ' +
-    'to speak on the first read.',
-  star:
-    'FORMAT = STAR. You are ME answering a behavioural question under the STAR scaffold, spoken ' +
-    'aloud (~120–170 words). Four beats, in order, each led by its label on its own line — ' +
-    'Situation, Task, Action, Result — so I can see at a glance which beat I am on. ' +
-    'SITUATION: one or two sentences of context, enough to make the stakes real. ' +
-    'TASK: what *I* specifically was responsible for — not what the team was. This is the beat ' +
-    'people skip, and the one panels probe. ACTION: two or three concrete moves I made, in ' +
-    'first person singular ("I did", never "we did"), each a decision rather than a duty. ' +
-    'RESULT: how it ended, with the most specific figure or outcome the context actually ' +
-    'supports — and never invent one; if the context has no number, say what changed in plain ' +
-    'words. Keep each beat speakable in one breath.',
+  general:
+    'FORMAT = GENERAL. Lead with ONE sentence that actually answers the question, in **bold** — ' +
+    'something I can say verbatim the moment I glance at it. Then 3–4 short bullets, each one ' +
+    'idea in a few words: the reasons, or the next steps, whichever the question calls for. ' +
+    'Bullets are cues to riff on, not sentences to recite. No preamble, no closing line, ' +
+    '~120 words max. Shorter is better.',
+  technical:
+    'FORMAT = TECHNICAL. Same bold lead sentence — ONE line that answers directly, in **bold**. ' +
+    'Then 4–6 bullets that carry the specifics: names, numbers, a design choice, one line of ' +
+    'code if it says it faster than words. Each bullet is one idea, said the way I would say ' +
+    'it out loud. Then ONE short paragraph (two or three sentences) on the approach and its ' +
+    "trade-offs — what I'd pick, and what it costs. ~200 words max. No headers, no preamble.",
 };
 
-/** Hard output ceiling per format — the model literally cannot exceed this, so
- *  "key points" can never drift into a long answer regardless of the prompt. */
+/** One extra sentence for a BEHAVIORAL question under the interview framing:
+ *  the bullets take the story shape automatically. No labels — the four STAR
+ *  beats were the thing people had to pick before; now the classifier does it. */
+const BEHAVIORAL_SHAPE =
+  ' This is a behavioural question, so order the bullets as the story: the situation, what I ' +
+  'did (first person singular — "I did", never "we did"), then the result, with the most ' +
+  'specific outcome the context supports and never an invented one. No labels on the bullets.';
+
+/** Hard output ceiling per style — the model literally cannot exceed this, so
+ *  a General answer can never drift into a long one regardless of the prompt. */
 const FORMAT_MAX_TOKENS: Record<AnswerFormat, number> = {
-  key_points: 220,
-  explanation: 340,
-  detailed: 800,
-  story_teller: 420,
-  // Four labelled beats cost more than one flowing story, and the Result beat
-  // is the one that must not get truncated — it is the point of the answer.
-  star: 520,
+  general: 360,
+  technical: 600,
+};
+
+const CLOSING_LINE: Record<AnswerFormat, string> = {
+  general:
+    'Write the answer now — GENERAL: the bold lead sentence, then 3–4 short bullets (~120 words max), ' +
+    'first person and effortless to read aloud on the first try.',
+  technical:
+    'Write the answer now — TECHNICAL: the bold lead sentence, 4–6 specific bullets, then one short ' +
+    'paragraph on approach and trade-offs (~200 words max), first person and effortless to read aloud.',
 };
 
 export type AnswerEvent =
@@ -173,7 +165,7 @@ const NO_CONTEXT_WARNING: Record<AnswerFraming, string> = {
 const buildSystem = (framing: AnswerFraming): string => `${ROLE[framing]}
 Rules:
 - FORMAT is a HARD constraint. Obey the requested format EXACTLY — even if you have more
-  to say. When unsure, be shorter. Never pad. (KEY POINTS especially must stay tiny.)
+  to say. When unsure, be shorter. Never pad. (GENERAL especially must stay short.)
 - WRITE FOR THE EAR, not the page. This is speech: short sentences (aim under 15 words),
   one idea per sentence, subject and verb up front. No nested clauses, no parentheticals,
   no semicolons. Plain spoken connectors ("So", "And", "But", "That meant…") — never
@@ -197,9 +189,9 @@ Rules:
 ${FABRICATION_GUARD[framing]}
 ${CLOSING_RULE[framing]}
 - Formatting: lead with the single most important line; **bold** only the few words that
-  anchor the eye mid-glance; bullets for KEY POINTS and connected sentences for everything
-  else; no headers, no stage directions, no meta-commentary — every word on the card must
-  be safe to say out loud.`;
+  anchor the eye mid-glance; one bold lead sentence then bullets, as the FORMAT says; no
+  headers, no stage directions, no meta-commentary — every word on the card must be safe
+  to say out loud.`;
 
 /** What stands in for the context when nothing matched. The interview line is
  *  v1. The conversation line is deliberately blunt and sits exactly where the
@@ -252,7 +244,10 @@ export async function* streamAnswer(input: AnswerInput): AsyncGenerator<AnswerEv
     // is no such thing, and passing 'general' told the model to behave as if
     // there were.
     framing === 'interview' ? `Interview type: ${input.interviewType ?? 'general'}` : '',
-    FORMAT_INSTRUCTION[input.format],
+    // A behavioral question gets the story shape automatically — the classifier
+    // decides, not a control. Outside an interview the shape means nothing.
+    FORMAT_INSTRUCTION[input.format] +
+      (framing === 'interview' && input.questionType === 'behavioral' ? BEHAVIORAL_SHAPE : ''),
     input.pronunciation
       ? 'PRONUNCIATION GUIDE: keep the ANSWER itself clean — do NOT put respellings inline. ' +
         'AFTER the answer, if any words in it are genuinely hard to pronounce (rare, technical, ' +
@@ -287,18 +282,19 @@ export async function* streamAnswer(input: AnswerInput): AsyncGenerator<AnswerEv
     ...(input.history?.length
       ? [
           '',
-          'EARLIER IN THIS CONVERSATION (oldest first). Use it to resolve references in the ' +
-            'QUESTION ("that", "the second option", "what about the timeline") and to avoid ' +
-            'repeating an answer already given. Do NOT cite it and do NOT restate it:',
+          'EARLIER IN THIS CONVERSATION (oldest first). A short follow-up CONTINUES the most ' +
+            'recent exchange: "there", "that", "it", "the second one", "your role" refer to the ' +
+            'subject of the last answer (the same project, company, decision or example) — stay ' +
+            'on that subject and go deeper; never switch to a different project or example ' +
+            'unless the QUESTION names one. Also use it to avoid repeating an answer already ' +
+            'given. Do NOT cite it and do NOT restate it:',
           buildHistoryBlock(input.history),
         ]
       : []),
     '',
     `QUESTION: ${input.question}`,
     '',
-    input.format === 'key_points'
-      ? 'Write the answer now — KEY POINTS only (~60 words max, terse bullets).'
-      : 'Write the answer now, in the FORMAT above — first person, natural, and effortless to read aloud on the first try.',
+    CLOSING_LINE[input.format],
   ]
     .filter(Boolean)
     .join('\n');
@@ -313,7 +309,7 @@ export async function* streamAnswer(input: AnswerInput): AsyncGenerator<AnswerEv
     task: 'answer',
     system: buildSystem(framing),
     user: userPrompt,
-    // Hard ceiling per format so "key points" can never run long. Pronunciation adds
+    // Hard ceiling per style so a General answer can never run long. Pronunciation adds
     // a short trailing guide, so give it headroom (the guide must not eat the answer).
     maxOutputTokens: FORMAT_MAX_TOKENS[input.format] + (input.pronunciation ? 160 : 0),
     signal: input.signal,

@@ -45,7 +45,7 @@ const input = {
   contextChunks: [{ id: 'c1', sourceType: 'note' as const, content: 'Renewal is quarterly', score: 0.8 }],
   memories: [],
   profile: { name: 'Sam', targetRole: 'SWE', targetCompany: 'Acme' },
-  settings: { answerFormat: 'key_points', interviewType: 'behavioral', pronunciation: true },
+  settings: { answerFormat: 'general', interviewType: 'behavioral', pronunciation: true },
 } as unknown as GenerateInput;
 
 beforeEach(() => {
