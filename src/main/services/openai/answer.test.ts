@@ -304,6 +304,19 @@ describe('answer framing', () => {
 });
 
 describe('streamAnswer — in-session history', () => {
+  it('tells the model a short follow-up continues the last exchange', async () => {
+    await collect(
+      streamAnswer(
+        baseInput({
+          question: 'Well, what was your role there?',
+          history: [{ role: 'asked', question: 'Tell me about your last project.', answer: 'The Acme migration…' }],
+        }),
+      ),
+    );
+    expect(userPrompt()).toMatch(/"there".*refer to the subject of the last answer/);
+    expect(userPrompt()).toMatch(/never switch to a different project or example/);
+  });
+
   it('adds the session-so-far block right before the QUESTION, heard and answered items labeled', async () => {
     await collect(
       streamAnswer(

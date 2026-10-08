@@ -82,6 +82,28 @@ beforeEach(() => {
   h.generateInputs.length = 0;
 });
 
+describe('a referential follow-up grounds on the previous exchange', () => {
+  it('embeds the previous question AND the opening of its answer with the follow-up', async () => {
+    const s = session();
+    await s.onTranscriptFinal('Can you tell me about your last project and what was your role?');
+    // The answer the scripted generator produced is what the follow-up refers to.
+    const first = h.groundCalls.length;
+    await s.onTranscriptFinal('Well, what was your role there?');
+    const q = h.groundCalls[first];
+    expect(q).toContain('Can you tell me about your last project and what was your role?');
+    expect(q).toContain('A cue.'); // the previous answer's opening rides along
+    expect(q).toContain('Well, what was your role there?');
+  });
+
+  it('a long, self-contained question is embedded on its own', async () => {
+    const s = session();
+    await s.onTranscriptFinal('Tell me about your last project.');
+    const first = h.groundCalls.length;
+    await s.onTranscriptFinal('How do you usually approach estimating a project timeline with a new team?');
+    expect(h.groundCalls[first]).toBe('How do you usually approach estimating a project timeline with a new team?');
+  });
+});
+
 describe('prefetchGrounding', () => {
   it('starts grounding once the interim reads as a question, and the matching final reuses it', async () => {
     const s = session();

@@ -282,9 +282,12 @@ export async function* streamAnswer(input: AnswerInput): AsyncGenerator<AnswerEv
     ...(input.history?.length
       ? [
           '',
-          'EARLIER IN THIS CONVERSATION (oldest first). Use it to resolve references in the ' +
-            'QUESTION ("that", "the second option", "what about the timeline") and to avoid ' +
-            'repeating an answer already given. Do NOT cite it and do NOT restate it:',
+          'EARLIER IN THIS CONVERSATION (oldest first). A short follow-up CONTINUES the most ' +
+            'recent exchange: "there", "that", "it", "the second one", "your role" refer to the ' +
+            'subject of the last answer (the same project, company, decision or example) — stay ' +
+            'on that subject and go deeper; never switch to a different project or example ' +
+            'unless the QUESTION names one. Also use it to avoid repeating an answer already ' +
+            'given. Do NOT cite it and do NOT restate it:',
           buildHistoryBlock(input.history),
         ]
       : []),

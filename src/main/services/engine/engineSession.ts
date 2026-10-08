@@ -45,6 +45,9 @@ const HISTORY_ANSWER_CHARS = 700;
 /** A question this short is almost always referential ("and the timeline?"),
  *  so retrieval embeds it together with the previous question. */
 const REFERENTIAL_MAX_WORDS = 8;
+/** How much of the previous answer joins a referential follow-up's retrieval
+ *  query — its lead names the subject; the rest would drown the question. */
+const REFERENTIAL_ANSWER_CHARS = 240;
 
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 
@@ -602,13 +605,17 @@ export class EngineSession {
   }
 
   /** The text retrieval embeds. A short follow-up carries the previous
-   *  question with it, so "and the timeline?" retrieves chunks about the
-   *  thing being asked about instead of about timelines in general. */
+   *  question AND the opening of its answer with it, so "what was your role
+   *  there?" retrieves chunks about the project the answer just named instead
+   *  of about roles in general (the question alone rarely names the subject;
+   *  the answer did). */
   private retrievalQuery(questionText: string): string {
     if (questionText.trim().split(/\s+/).length > REFERENTIAL_MAX_WORDS) return questionText;
     for (let i = this.history.length - 1; i >= 0; i--) {
       const h = this.history[i];
-      if (h.role === 'asked') return `${h.question} ${questionText}`;
+      if (h.role === 'asked') {
+        return `${h.question} ${clip(h.answer, REFERENTIAL_ANSWER_CHARS)} ${questionText}`;
+      }
     }
     return questionText;
   }
