@@ -446,10 +446,10 @@ test('@capture the demo film', async ({ dashboard }) => {
     await shot(dashboard, {
       dir: '07-start',
       kicker: 'Before anything is captured',
-      caption: 'It tells you exactly what will be recorded, and exactly what will be sent.',
+      caption: 'It says what it will hear: the call and your microphone, with questions taken only from the call.',
       hold: 5.0,
       spotlight: {
-        of: dialog.getByText(/captured on this machine/i),
+        of: dialog.getByTestId('hears'),
         label: 'no surprises',
       },
     });
@@ -571,8 +571,8 @@ test('@capture the demo film', async ({ dashboard }) => {
     });
   });
 
-  // STAR is an answer FORMAT, not a story bank: the same answer, re-told.
-  await optional(dashboard, 'STAR format', async () => {
+  // One two-way style chip since 2.2.2 (General | Technical): the same answer, re-told.
+  await optional(dashboard, 'Technical style', async () => {
     if (!liveId) throw new Error('no live session');
     await dashboard.evaluate(async () => {
       await (window as any).api.session.setAnswerPrefs({ format: 'technical' });
@@ -586,8 +586,8 @@ test('@capture the demo film', async ({ dashboard }) => {
       overlay,
       {
         dir: '12-star',
-        kicker: 'Answer formats',
-        caption: 'Re-tell the same answer as key points, a short explanation, or a STAR story.',
+        kicker: 'Two styles',
+        caption: 'Re-tell the same answer in the Technical style — one chip, nothing else to set.',
         fps: 10,
         tailHold: 3.4,
       },

@@ -64,7 +64,7 @@ const GIFS = [
     out: 'format-switch',
     width: 420,
     fps: 10,
-    caption: 'Re-tell the same answer as a STAR story.',
+    caption: 'Re-tell the same answer in the Technical style.',
   },
   {
     scene: 'demo/13-coding',

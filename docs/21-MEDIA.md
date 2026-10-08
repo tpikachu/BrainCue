@@ -364,7 +364,7 @@ happens once.
 |---|---|---|
 | `cuecard-stream.gif` | `09-cuecard` | a question heard, an answer streaming into the Cue Card |
 | `grounded-answer.gif` | `10-grounded` | an answer built from the user's own material, with sources |
-| `format-switch.gif` | `12-star` | the same answer re-told in the other style (footage shows the pre-2026-10-07 five-format control) |
+| `format-switch.gif` | `12-star` | the same answer re-told in the Technical style (re-captured 2026-10-07 with the General \| Technical chip) |
 | `coding-solve.gif` | `13-coding` | a captured problem solved with its complexity |
 
 Widths are 420–480px on purpose: these are inline loops in a README, GitHub will

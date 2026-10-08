@@ -520,11 +520,16 @@ class Engine {
     // A stored/legacy value (key_points, star, …) is coerced to the two live styles.
     if (prefs.format !== undefined) s.settings.answerFormat = normalizeAnswerFormat(prefs.format);
     if (prefs.pronunciation !== undefined) s.settings.pronunciation = prefs.pronunciation;
-    return {
+    const applied = {
       interviewType: s.settings.interviewType,
       format: s.settings.answerFormat,
       pronunciation: s.settings.pronunciation,
     };
+    // Mirror the applied prefs to the Cue Card so its chips follow a change made
+    // from anywhere else (a legacy value coerced to General/Technical, a scripted
+    // caller, a second window) — not only one it made itself.
+    broadcast(EVENTS.answerPrefs, applied, ['overlay']);
+    return applied;
   }
 
   async regenerate(questionId?: string): Promise<{ regenerated: boolean }> {
