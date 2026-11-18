@@ -1,5 +1,6 @@
 import type { AnswerFormat } from '@shared/types';
 import type { ModelKey } from '../services/openai/models';
+import type { TaskRoute } from './taskRoute';
 
 /**
  * Provider capability interfaces (PRD §6.7). The engine and service modules
@@ -30,6 +31,11 @@ export interface ChatStreamRequest {
    *  headroom on OpenAI reasoning models) are added by the provider. */
   maxOutputTokens?: number;
   signal?: AbortSignal;
+  /** The exact provider + model this ATTEMPT uses, resolved once by the
+   *  caller (taskRoute) — the routed provider and the adapter both obey it,
+   *  so a failure is attributed to the route that actually failed and a
+   *  retry can be pinned to its provider. Absent: resolved at dispatch. */
+  route?: TaskRoute;
 }
 
 export interface ChatJsonRequest {
@@ -40,6 +46,8 @@ export interface ChatJsonRequest {
   /** Cancels the request (the interview classifier's timeout). Optional —
    *  callers that never time out keep the old shape. */
   signal?: AbortSignal;
+  /** See ChatStreamRequest.route. */
+  route?: TaskRoute;
 }
 
 export interface ChatProvider {

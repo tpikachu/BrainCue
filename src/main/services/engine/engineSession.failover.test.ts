@@ -12,6 +12,8 @@ const h = vi.hoisted(() => ({
   deltas: [] as string[],
   attempts: [] as string[],
   script: [] as (() => AsyncGenerator<{ type: 'delta'; token: string }>)[],
+  /** The route each attempt was SENT on (GenerateInput.route). */
+  routes: [] as (string | undefined)[],
 }));
 
 vi.mock('../../ipc/broadcast', () => ({
@@ -57,7 +59,11 @@ import type { ModeDefinition } from './modeDefinition';
 // override to OpenAI once it is marked unavailable.
 const dead = new Set<string>();
 let crossProvider = false;
+// `anthropicKeyGone`: the task resolves to OpenAI once the Anthropic key is
+// removed (the chat provider falls back to the provider that has a key).
+let anthropicKeyGone = false;
 installTaskRouteResolver(() => {
+  if (anthropicKeyGone) return { provider: 'openai', model: dead.has('gpt-6-luna') ? 'gpt-5-nano' : 'gpt-6-luna' };
   if (crossProvider)
     return dead.has('claude-opus-5-5')
       ? { provider: 'openai', model: 'gpt-6-luna' }
@@ -78,7 +84,8 @@ const mode: ModeDefinition = {
   surfaces: ['overlay'],
   defaultPresence: 'balanced',
   reportStrategy: 'interview_coaching',
-  generate() {
+  generate(input) {
+    h.routes.push(input.route ? `${input.route.provider}/${input.route.model}` : undefined);
     const next = h.script.shift();
     if (!next) throw new Error('no more scripted attempts');
     return next();
@@ -103,6 +110,8 @@ beforeEach(() => {
   h.script.length = 0;
   dead.clear();
   crossProvider = false;
+  anthropicKeyGone = false;
+  h.routes.length = 0;
 });
 
 describe('answer failover', () => {
@@ -133,6 +142,35 @@ describe('answer failover', () => {
     expect(h.deltas).toEqual([]);
     expect(h.script).toHaveLength(1); // the OpenAI attempt never ran
     expect(h.errors.join(' ')).not.toMatch(/answering with/);
+  });
+
+  it('review: the key is removed mid-request — the failure is the route it was SENT on, and no retry moves provider', async () => {
+    crossProvider = true; // starts on anthropic/claude-opus-5-5
+    attempt(async function* () {
+      anthropicKeyGone = true; // now the task resolves to OpenAI
+      throw fail({ status: 404, code: 'model_not_found', message: 'model: claude-opus-5-5 not found' });
+    });
+    attempt(async function* () {
+      yield { type: 'delta', token: 'Answer sent to OpenAI without consent' };
+    });
+    await expect(
+      session().answerQuestion('Tell me about yourself.', { type: 'resume_project', confidence: 1, strategy: '' }, null),
+    ).rejects.toThrow(/claude-opus-5-5 not found/);
+    expect(h.routes).toEqual(['anthropic/claude-opus-5-5']); // one attempt, on the captured route
+    expect(dead.has('claude-opus-5-5')).toBe(true); // blamed: the model that failed
+    expect(dead.has('gpt-6-luna')).toBe(false); // NOT the healthy route the task now resolves to
+    expect(h.deltas).toEqual([]);
+  });
+
+  it('each attempt carries its route: the retry is sent on the fallback model explicitly', async () => {
+    attempt(async function* () {
+      throw fail({ status: 404, code: 'model_not_found', message: 'The model gpt-6-luna does not exist' });
+    });
+    attempt(async function* () {
+      yield { type: 'delta', token: 'ok' };
+    });
+    await session().answerQuestion('Why this company?', { type: 'behavioral', confidence: 1, strategy: '' }, null);
+    expect(h.routes).toEqual(['openai/gpt-6-luna', 'openai/gpt-5-nano']);
   });
 
   it('a transient network error before the first token is retried once', async () => {

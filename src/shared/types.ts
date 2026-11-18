@@ -757,7 +757,7 @@ export interface Readiness {
   retrieval: { ready: true; mode: 'embeddings' | 'lexical'; note?: string };
   /** Per-feature gates for the latency-tolerant features (services/readiness.ts
    *  featureReadiness): each says whether it can run and, if not, why. */
-  features: Record<'parsing' | 'practice' | 'tailoring', { ready: boolean; problem?: string }>;
+  features: Record<'parsing' | 'mock' | 'sparring' | 'tailoring', { ready: boolean; problem?: string }>;
 }
 
 // ---- main -> renderer push event payloads ----

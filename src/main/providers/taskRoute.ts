@@ -31,13 +31,23 @@ export function installUnavailableMarker(fn: UnavailableMarker): void {
   markUnavailable = fn;
 }
 
-/** A request on `task` failed because its model is not served to the
- *  account: remember it so the task resolves to the next candidate on the
- *  SAME provider. Returns the route that failed (for the notice), or null. */
-export function reportUnavailable(task: ModelKey): TaskRoute | null {
-  const route = taskRoute(task);
-  if (route && markUnavailable) markUnavailable(route);
-  return route;
+/** A request failed because its model is not served to the account:
+ *  remember THAT route — the one the request was sent on, captured before it
+ *  was sent. (Resolving "the task's route" when the error arrives blamed
+ *  whatever the task resolves to by then: a concurrent failure marked the
+ *  healthy fallback, and a key removed mid-request moved the retry to
+ *  another provider.) */
+export function markRouteUnavailable(route: TaskRoute): void {
+  markUnavailable?.(route);
+}
+
+/** After a model error on `failed` (the attempt's captured route): mark it,
+ *  then return the route to retry on — only a DIFFERENT model on the SAME
+ *  provider, else null (the error surfaces; nothing moves elsewhere). */
+export function retryRouteAfterModelError(task: ModelKey, failed: TaskRoute): TaskRoute | null {
+  markRouteUnavailable(failed);
+  const next = taskRoute(task);
+  return next && next.provider === failed.provider && next.model !== failed.model ? next : null;
 }
 
 /** The full route (provider + model) for a task, or null before a resolver

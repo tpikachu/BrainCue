@@ -40,6 +40,7 @@ export const interviewMode: ModeDefinition = {
       // A behavioral question gets the story shape automatically (no control).
       questionType: input.questionType,
       signal: input.signal,
+      route: input.route,
     });
   },
 

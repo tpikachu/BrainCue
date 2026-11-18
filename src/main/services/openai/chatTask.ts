@@ -1,6 +1,6 @@
 import { providerFor } from '../../providers/registry';
 import { providerErrorKind } from '../../providers/errorKind';
-import { reportUnavailable, taskRoute } from '../../providers/taskRoute';
+import { retryRouteAfterModelError, taskRoute, type TaskRoute } from '../../providers/taskRoute';
 import type { ModelKey } from './models';
 
 /**
@@ -31,34 +31,39 @@ export interface ChatTaskRequest {
   maxOutputTokens?: number;
 }
 
-/** After a model error: may this task retry? Only when the next route is a
- *  DIFFERENT model on the SAME provider as the one that failed. */
-function retryableAfterModelError(e: unknown, task: ModelKey): boolean {
-  if (providerErrorKind(e) !== 'model') return false;
-  const failed = reportUnavailable(task);
-  const next = taskRoute(task);
-  return !!failed && !!next && next.provider === failed.provider && next.model !== failed.model;
+/** Each attempt's route is resolved ONCE, before it is sent, and travels
+ *  with the request; a model error is attributed to that captured route,
+ *  and the retry is pinned to its provider (retryRouteAfterModelError). */
+function nextAfter(e: unknown, task: ModelKey, failed: TaskRoute | null): TaskRoute | null {
+  if (!failed || providerErrorKind(e) !== 'model') return null;
+  return retryRouteAfterModelError(task, failed);
 }
 
 /** JSON-mode call; parse errors propagate (callers own their defaults). */
 export async function chatJson<T>(req: ChatTaskRequest): Promise<T> {
+  const route = taskRoute(req.task);
   try {
-    return await providerFor('chat').json<T>(req);
+    return await providerFor('chat').json<T>({ ...req, ...(route ? { route } : {}) });
   } catch (e) {
-    if (!retryableAfterModelError(e, req.task)) throw e;
-    return providerFor('chat').json<T>(req);
+    const next = nextAfter(e, req.task, route);
+    if (!next) throw e;
+    return providerFor('chat').json<T>({ ...req, route: next });
   }
 }
 
 /** Plain-text call (collected from the stream), trimmed. */
 export async function chatText(req: ChatTaskRequest): Promise<string> {
+  let route = taskRoute(req.task);
   for (let attempt = 0; ; attempt++) {
     let out = '';
     try {
-      for await (const ev of providerFor('chat').stream(req)) if (ev.type === 'delta') out += ev.token;
+      for await (const ev of providerFor('chat').stream({ ...req, ...(route ? { route } : {}) }))
+        if (ev.type === 'delta') out += ev.token;
       return out.trim();
     } catch (e) {
-      if (attempt >= 1 || out || !retryableAfterModelError(e, req.task)) throw e;
+      const next = attempt >= 1 || out ? null : nextAfter(e, req.task, route);
+      if (!next) throw e;
+      route = next;
     }
   }
 }

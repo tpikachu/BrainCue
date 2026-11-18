@@ -236,6 +236,7 @@ export const companionMode: ModeDefinition = {
       memories: input.memories,
       personaPreamble: buildPersonaPreamble(live?.personality ?? readCompanionPrefs().personality),
       signal: input.signal,
+      route: input.route,
     });
   },
 

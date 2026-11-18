@@ -1,3 +1,4 @@
+import type { TaskRoute } from '../../providers/taskRoute';
 import type {
   AnswerFormat,
   ContributionKind,
@@ -45,6 +46,9 @@ export interface GenerateInput {
    *  uses it to give behavioral answers the story shape automatically. */
   questionType?: string;
   signal: AbortSignal;
+  /** The provider + model this attempt is sent on (captured by the engine;
+   *  see providers/types.ts ChatStreamRequest.route). */
+  route?: TaskRoute;
 }
 
 /** One ambient card, ready to persist + broadcast. Built by the mode from an

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { providerFor } from '../../providers/registry';
 import { providerErrorKind } from '../../providers/errorKind';
-import { reportUnavailable } from '../../providers/taskRoute';
+import { markRouteUnavailable, taskRoute } from '../../providers/taskRoute';
 import type { QuestionType } from '@shared/types';
 
 export interface ClassifiedQuestion {
@@ -81,8 +81,11 @@ export async function classifyQuestion(
   opts: { recent?: ClassifierTurn[]; signal?: AbortSignal } = {},
 ): Promise<ClassifiedQuestion> {
   let raw: unknown;
+  // Captured once: a failure is attributed to the route it was sent on.
+  const route = taskRoute('classify');
   try {
     raw = await providerFor('chat').json<unknown>({
+      ...(route ? { route } : {}),
       task: 'classify',
       system: PROMPT,
       user: `${renderRecent(opts.recent)}LATEST interviewer utterance:\n${text}`,
@@ -94,7 +97,7 @@ export async function classifyQuestion(
     // gpt-4.1-nano, was retired 2026-10-23 and every classification failed
     // silently): remember it so the NEXT turn resolves to the next
     // candidate on the same provider. This turn takes the detector fallback.
-    if (providerErrorKind(e) === 'model') reportUnavailable('classify');
+    if (providerErrorKind(e) === 'model' && route) markRouteUnavailable(route);
     throw e;
   }
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {

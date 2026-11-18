@@ -170,7 +170,15 @@ Preferences are stored under the legacy preset names (`low_cost` / `balanced` /
 token — a partly streamed answer is never replayed. An unavailable model falls
 to the next candidate **on the same provider** (no interview data goes to a
 provider the user did not choose — the retry is refused if the next route is
-on any other provider, override or not); a network/5xx error retries once after
+on any other provider, override or not). **Each attempt's route is captured
+before it is sent** (`taskRoute`) and travels with the request
+(`ChatStreamRequest.route` / `ChatJsonRequest.route`): the routed provider and
+the adapter both use exactly that provider + model, a model error marks THAT
+route (`markRouteUnavailable`), and `retryRouteAfterModelError` allows only a
+different model on the same provider. Resolving "the task's route" when the
+error arrived blamed whatever the task resolved to by then — a concurrent
+failure marked the healthy fallback, and a key removed mid-request moved the
+retry to another provider; a network/5xx error retries once after
 400 ms; auth and quota errors surface with the provider named. Cross-provider
 failover is deliberately not built: it needs an explicit consent setting first.
 
@@ -196,9 +204,12 @@ once on the next candidate of the same provider, never after the first
 streamed token.
 
 **Per-feature readiness** (`readiness.features`), used by the screens that
-start them: `parsing` (the parsing task's provider has a key), `practice`
-(that AND an OpenAI key — the mock interviewer speaks through OpenAI TTS and
-sparring transcribes through OpenAI), `tailoring` (OpenAI only — its long,
+start them: `parsing` (the parsing task's provider has a key), `mock` (an
+OpenAI key for the interviewer's voice, the mock task's provider for its
+questions AND the answer task's provider — a mock streams real answer cues;
+`mockManager.start` checks all three before creating anything), `sparring`
+(an OpenAI key for voice + transcription, and the mock task's provider; it
+writes no answer cues), `tailoring` (OpenAI only — its long,
 no-retry request is an OpenAI SDK option; it asks OpenAI for an OpenAI model
 via `openaiOnlyModel`, never `model(task)`). Each blocked feature carries the
 reason and the fix.

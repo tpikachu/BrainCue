@@ -11,7 +11,7 @@ import {
   emitContributionReset,
   emitContributionTitle,
 } from '../../ipc/contributionBridge';
-import { reportUnavailable, taskRoute } from '../../providers/taskRoute';
+import { retryRouteAfterModelError, taskRoute } from '../../providers/taskRoute';
 import { providerErrorKind } from '../../providers/errorKind';
 import { QuestionScheduler, type QuestionJob } from './interview/questionScheduler';
 import { assessUtterance } from './interview/questionHeuristics';
@@ -596,9 +596,14 @@ export class EngineSession {
       // skipped for the next candidate on the SAME provider (no interview
       // data goes to a provider the user did not choose); a transient
       // network/5xx error is retried once. Auth and quota errors surface.
+      // Each attempt's route is captured BEFORE it is sent and travels with
+      // it; a failure is attributed to that route (never to whatever the
+      // task resolves to when the error arrives).
+      let attemptRoute = taskRoute('answer');
       for (let attempt = 0; ; attempt++) {
         try {
       for await (const ev of this.mode.generate({
+        ...(attemptRoute ? { route: attemptRoute } : {}),
         question: questionText,
         contextChunks: context,
         memories,
@@ -631,11 +636,12 @@ export class EngineSession {
           if (abort.signal.aborted || answer || attempt >= 1) throw e;
           const kind = providerErrorKind(e);
           if (kind === 'model') {
-            const failed = reportUnavailable('answer');
-            const next = taskRoute('answer');
+            const failed = attemptRoute;
             // Pinned to the provider this request went to: a retry may change
             // the MODEL, never the provider (an override's provider included).
-            if (!next || !failed || next.provider !== failed.provider || next.model === failed.model) throw e;
+            const next = failed ? retryRouteAfterModelError('answer', failed) : null;
+            if (!next || !failed) throw e;
+            attemptRoute = next;
             log.warn(`answer model unavailable (${failed?.provider}/${failed?.model}) — retrying on ${next.provider}/${next.model}`);
             broadcast(EVENTS.sessionError, {
               message: `${failed?.model ?? 'The answer model'} isn't available to your account — answering with ${next.model} instead. Pick another in Settings → Language Models to change it.`,

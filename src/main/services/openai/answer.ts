@@ -1,4 +1,5 @@
 import { providerFor } from '../../providers/registry';
+import type { TaskRoute } from '../../providers/taskRoute';
 import { normalizeSpeaker } from '@shared/types';
 import type { ConversationSnapshot } from '../engine/interview/conversationContext';
 import type {
@@ -65,6 +66,8 @@ export interface AnswerInput {
    *  suggested — kept apart so a suggestion is never mistaken for evidence. */
   conversation?: ConversationSnapshot;
   signal?: AbortSignal;
+  /** The attempt's captured route (providers/types.ts). */
+  route?: TaskRoute;
 }
 
 /** Human-readable instruction per answer STYLE, injected into the prompt.
@@ -394,6 +397,7 @@ export async function* streamAnswer(input: AnswerInput): AsyncGenerator<AnswerEv
     // a short trailing guide, so give it headroom (the guide must not eat the answer).
     maxOutputTokens: FORMAT_MAX_TOKENS[input.format] + (input.pronunciation ? 160 : 0),
     signal: input.signal,
+    ...(input.route ? { route: input.route } : {}),
   })) {
     if (ev.type === 'delta') {
       emitted = true;

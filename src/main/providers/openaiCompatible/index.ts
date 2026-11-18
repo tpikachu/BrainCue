@@ -66,9 +66,10 @@ export function openaiCompatibleProvider(info: CloudProviderInfo): {
     messages: OpenAI.ChatCompletionMessageParam[],
     ceiling: number | undefined,
     signal: AbortSignal | undefined,
+    pinnedModel?: string,
   ): AsyncGenerator<ChatStreamEvent> {
     const client = await compatClient(info);
-    const { model } = resolveModel(task);
+    const model = pinnedModel ?? resolveModel(task).model;
     try {
       const stream = await client.chat.completions.create(
         {
@@ -109,6 +110,7 @@ export function openaiCompatibleProvider(info: CloudProviderInfo): {
         ],
         req.maxOutputTokens,
         req.signal,
+        req.route?.model,
       );
     },
 
@@ -121,7 +123,7 @@ export function openaiCompatibleProvider(info: CloudProviderInfo): {
     },
     async json<T>(req: ChatJsonRequest): Promise<T> {
       const client = await compatClient(info);
-      const { model } = resolveModel(req.task);
+      const model = req.route?.model ?? resolveModel(req.task).model;
       const base: OpenAI.ChatCompletionCreateParamsNonStreaming = {
         model,
         messages: [

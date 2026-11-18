@@ -120,6 +120,7 @@ export const meetingMode: ModeDefinition = {
       pronunciation: false, // spoken-cue pronunciation aids are an interview thing
       framing: 'conversation',
       signal: input.signal,
+      route: input.route,
     });
   },
 

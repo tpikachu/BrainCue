@@ -107,9 +107,10 @@ async function* run(
   content: string | Anthropic.ContentBlockParam[],
   maxOutputTokens: number | undefined,
   signal: AbortSignal | undefined,
+  pinnedModel?: string,
 ): AsyncGenerator<ChatStreamEvent> {
   const client = await anthropicClient();
-  const { model: modelId } = resolveModel(task);
+  const modelId = pinnedModel ?? resolveModel(task).model;
   const params = buildParams(task, modelId, system, content, maxOutputTokens);
   const stream = isFable(modelId)
     ? client.beta.messages.stream(withFallbacks(params), { signal })
@@ -138,12 +139,12 @@ export const anthropicChat: ChatProvider = {
     }
   },
   stream(req) {
-    return run(req.task, req.system, req.user, req.maxOutputTokens, req.signal);
+    return run(req.task, req.system, req.user, req.maxOutputTokens, req.signal, req.route?.model);
   },
 
   async json<T>(req: ChatJsonRequest): Promise<T> {
     const client = await anthropicClient();
-    const { model: modelId } = resolveModel(req.task);
+    const modelId = req.route?.model ?? resolveModel(req.task).model;
     const params = buildParams(
       req.task,
       modelId,

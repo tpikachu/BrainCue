@@ -84,6 +84,10 @@ export const mockManager = {
     if (!apiKeyStore.isPresent())
       throw new Error('Mock interviews speak through OpenAI’s voice, so they need an OpenAI key — add one in Settings → Language Models.');
     if (!chatTaskReady('mock')) throw new Error(chatTaskProblem('mock', 'start a mock interview'));
+    // A mock streams real answer cues into the Cue Card: the answer task's
+    // provider must be usable too (a keyless answer override would start a
+    // mock whose cards can never be written). Checked before any row exists.
+    if (!chatTaskReady('answer')) throw new Error(chatTaskProblem('answer', 'write the answer cues in a mock interview'));
     const profile = profilesRepo.get(profileId);
     if (!profile) throw new Error('Profile not found');
     const id = crypto.randomUUID();

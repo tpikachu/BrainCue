@@ -22,6 +22,11 @@ const state = vi.hoisted(() => ({
   /** Scripted outcome per call, in order; default 'ok'. */
   script: [] as ('ok' | 'model' | 'auth' | 'partial')[],
   openaiSdkCalls: 0,
+  /** When set, every request waits here before it resolves or fails — so a
+   *  test can hold requests in flight and interleave their failures. */
+  gate: null as Promise<void> | null,
+  /** Runs while a request is in flight (e.g. remove a key mid-request). */
+  during: null as (() => void) | null,
 }));
 
 vi.mock('../../db/repositories/settings.repo', () => ({
@@ -74,6 +79,7 @@ import { generateQuestion } from './interviewer';
 import { evaluateAnswer } from './feedback';
 import { openaiOnlyModel, resetRuntimeAvailability } from './models';
 import { tailorApplication } from './tailor';
+import { classifyQuestion } from './questions';
 import { featureReadiness } from '../readiness';
 import { PROVIDER_PLANS } from '@shared/modelPolicy';
 import type { Profile } from '@shared/types';
@@ -84,20 +90,28 @@ const fail = (kind: 'model' | 'auth') =>
     ...(kind === 'model' ? { code: 'model_not_found' } : {}),
   });
 
+/** Like a real adapter: the model is the one the request CARRIES (its
+ *  captured route), else whatever the task resolves to at dispatch. */
 function fake(provider: string): ChatProvider {
-  const record = (task: string) => {
-    state.seen.push({ provider, model: taskRoute(task as never)?.model ?? '?', task });
+  const record = (req: { task: string; route?: { model: string } }) => {
+    state.seen.push({ provider, model: req.route?.model ?? taskRoute(req.task as never)?.model ?? '?', task: req.task });
     return state.script.shift() ?? 'ok';
+  };
+  const settle = async () => {
+    state.during?.();
+    if (state.gate) await state.gate;
   };
   return {
     async *stream(req) {
-      const outcome = record(req.task);
+      const outcome = record(req);
+      await settle();
       if (outcome === 'model' || outcome === 'auth') throw fail(outcome);
       yield { type: 'delta', token: 'Next question?' };
       if (outcome === 'partial') throw fail('model'); // dies after a token
     },
-    async json<T>(req: { task: string }): Promise<T> {
-      const outcome = record(req.task);
+    async json<T>(req: { task: string; route?: { model: string } }): Promise<T> {
+      const outcome = record(req);
+      await settle();
       if (outcome === 'model' || outcome === 'auth') throw fail(outcome);
       return {} as T;
     },
@@ -118,6 +132,8 @@ beforeEach(() => {
   state.seen.length = 0;
   state.script.length = 0;
   state.openaiSdkCalls = 0;
+  state.gate = null;
+  state.during = null;
   state.models = {};
   resetRuntimeAvailability();
   configure(['openai', 'anthropic'], 'anthropic');
@@ -246,17 +262,82 @@ describe('OpenAI-only features and the per-feature gates', () => {
     expect(state.openaiSdkCalls).toBe(0);
   });
 
-  it('feature readiness: Anthropic only → parsing ready; practice and tailoring gated with the reason', () => {
+  it('feature readiness: Anthropic only → parsing ready; mock, sparring and tailoring gated with the reason', () => {
     configure(['anthropic'], null);
     const f = featureReadiness();
     expect(f.parsing).toEqual({ ready: true });
-    expect(f.practice.ready).toBe(false);
-    expect(f.practice.problem).toMatch(/speaks and listens through OpenAI/);
+    expect(f.mock.ready).toBe(false);
+    expect(f.mock.problem).toMatch(/speak through OpenAI/);
+    expect(f.sparring.ready).toBe(false);
+    expect(f.sparring.problem).toMatch(/speaks and listens through OpenAI/);
     expect(f.tailoring.ready).toBe(false);
   });
 
   it('feature readiness: both keys → everything ready', () => {
     const f = featureReadiness();
-    expect([f.parsing.ready, f.practice.ready, f.tailoring.ready]).toEqual([true, true, true]);
+    expect([f.parsing.ready, f.mock.ready, f.sparring.ready, f.tailoring.ready]).toEqual([true, true, true, true]);
+  });
+
+  it('review: mock also needs its ANSWER model — a keyless answer override blocks Mock, not Sparring', () => {
+    configure(['openai'], 'openai');
+    state.models = { answer: 'anthropic/claude-sonnet-5-5' };
+    const f = featureReadiness();
+    expect(f.mock.ready).toBe(false);
+    expect(f.mock.problem).toMatch(/answer model override uses Anthropic, which has no API key.*answer cues in a mock interview/);
+    expect(f.sparring).toEqual({ ready: true }); // sparring writes no answer cues
+  });
+});
+
+describe('review: failures are attributed to the route the request was SENT on', () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it('the key is removed mid-request: the retry does NOT move to the provider the task now resolves to', async () => {
+    configure(['openai', 'anthropic'], 'anthropic');
+    state.script = ['model', 'ok'];
+    // While the Anthropic request is in flight the Anthropic key disappears,
+    // so the task now resolves to OpenAI.
+    state.during = () => {
+      delete state.settings[keyOf('anthropic')];
+      state.during = null;
+    };
+    await expect(parseResume('x')).rejects.toThrow(/does not exist/);
+    expect(state.seen.map((r) => r.provider)).toEqual(['anthropic']); // no OpenAI retry
+    expect(state.openaiSdkCalls).toBe(0);
+  });
+
+  it('two concurrent failures on one model mark THAT model only — the healthy fallback stays usable', async () => {
+    configure(['openai'], 'openai');
+    let release!: () => void;
+    state.gate = new Promise<void>((r) => (release = r));
+    state.script = ['model', 'model', 'ok', 'ok'];
+    const a = parseResume('a');
+    const b = parseResume('b');
+    await tick(); // both in flight on the first candidate
+    const first = state.seen[0].model;
+    expect(state.seen.map((r) => r.model)).toEqual([first, first]);
+    release();
+    await Promise.all([a, b]);
+    const fallback = state.seen[2].model;
+    expect(fallback).not.toBe(first);
+    // Both retries went to the fallback, and it is still the task's route —
+    // the second failure did not mark it (old code: blamed the CURRENT route).
+    expect(state.seen.map((r) => r.model)).toEqual([first, first, fallback, fallback]);
+    expect(taskRoute('parsing')?.model).toBe(fallback);
+  });
+
+  it('concurrent classifier failures do the same (detection runs classifications concurrently)', async () => {
+    configure(['openai'], 'openai');
+    let release!: () => void;
+    state.gate = new Promise<void>((r) => (release = r));
+    state.script = ['model', 'model'];
+    const first = taskRoute('classify')!.model;
+    const a = classifyQuestion('So, what about the migration').catch(() => {});
+    const b = classifyQuestion('And the rollback plan').catch(() => {});
+    await tick();
+    release();
+    await Promise.all([a, b]);
+    const candidates = PROVIDER_PLANS.openai.balanced.classify;
+    expect(first).toBe(candidates[0]);
+    expect(taskRoute('classify')?.model).toBe(candidates[1]); // not candidates[2]
   });
 });

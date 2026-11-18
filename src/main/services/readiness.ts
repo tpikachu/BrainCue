@@ -32,8 +32,11 @@ export function chatTaskProblem(task: PolicyTask, toDo: string): string {
  * which blocked an Anthropic-only user from parsing a résumé or drafting
  * stories that now run on Anthropic:
  *  - parsing (résumé/JD/company, briefs, stories): the parsing task's provider;
- *  - practice (mock, sparring): the mock task's provider AND OpenAI — the
- *    interviewer speaks (OpenAI TTS) and sparring transcribes (OpenAI);
+ *  - mock: OpenAI (the interviewer speaks through OpenAI TTS), the mock
+ *    task's provider (its questions) AND the answer task's provider — a mock
+ *    streams real answer cues into the Cue Card;
+ *  - sparring: OpenAI (voice + transcription of the answer) and the mock
+ *    task's provider (questions + feedback) — it writes no answer cues;
  *  - tailoring: OpenAI only.
  * Each blocked feature carries the reason, naming the fix.
  */
@@ -42,11 +45,19 @@ export function featureReadiness(): Readiness['features'] {
   const gate = (ready: boolean, problem: string) => (ready ? { ready } : { ready, problem });
   return {
     parsing: gate(chatTaskReady('parsing'), chatTaskProblem('parsing', 'read résumés and job descriptions')),
-    practice: gate(
+    mock: gate(
+      openai && chatTaskReady('mock') && chatTaskReady('answer'),
+      !openai
+        ? 'Mock interviews speak through OpenAI’s voice, so they need an OpenAI key — add one in Settings → Language Models.'
+        : !chatTaskReady('mock')
+          ? chatTaskProblem('mock', 'generate mock-interview questions')
+          : chatTaskProblem('answer', 'write the answer cues in a mock interview'),
+    ),
+    sparring: gate(
       openai && chatTaskReady('mock'),
       !openai
-        ? 'Practice speaks and listens through OpenAI, so it needs an OpenAI key — add one in Settings → Language Models.'
-        : chatTaskProblem('mock', 'practise'),
+        ? 'Sparring speaks and listens through OpenAI, so it needs an OpenAI key — add one in Settings → Language Models.'
+        : chatTaskProblem('mock', 'start a sparring session'),
     ),
     tailoring: gate(openai, 'Tailoring runs on OpenAI only for now — add an OpenAI key in Settings → Language Models.'),
   };

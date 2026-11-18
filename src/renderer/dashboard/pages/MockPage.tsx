@@ -18,13 +18,14 @@ const INTERVIEW_TYPES: InterviewType[] = [
 
 export default function MockPage() {
   const { settings, load: loadSettings } = useSettingsStore();
-  // Practice needs the mock task's provider AND OpenAI (the interviewer's
-  // voice / the answer's transcription) — main says which one is missing.
+  // A mock needs OpenAI (the interviewer's voice), the mock task's provider
+  // (questions) and the answer task's provider (the answer cues) — main says
+  // which one is missing.
   const [practice, setPractice] = useState<{ ready: boolean; problem?: string } | null>(null);
   useEffect(() => {
     void api.settings
       .readiness()
-      .then((r) => setPractice(r.features.practice))
+      .then((r) => setPractice(r.features.mock))
       .catch(() => setPractice(null));
   }, [settings]);
 

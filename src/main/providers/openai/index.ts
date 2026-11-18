@@ -39,7 +39,7 @@ export const openaiChat: ChatProvider = {
     }
   },
   async *stream(req): AsyncGenerator<ChatStreamEvent> {
-    const m = model(req.task);
+    const m = req.route?.model ?? model(req.task);
     // Effort from the catalog's capability metadata (models.ts effortFor):
     // live tasks get the model's lowest — "none" on GPT-6 Luna/Terra.
     const effort = effortFor(req.task, 'openai', m);
@@ -75,7 +75,7 @@ export const openaiChat: ChatProvider = {
   },
 
   async json<T>(req: ChatJsonRequest): Promise<T> {
-    const m = model(req.task);
+    const m = req.route?.model ?? model(req.task);
     const effort = effortFor(req.task, 'openai', m);
     const res = await openai().responses.create({
       model: m,
