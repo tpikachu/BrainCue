@@ -383,4 +383,48 @@ describe('M4 — conversation context at the prompt boundary', () => {
       { question: `${NOT_DETECTED_PREFIX}${B}`, assessment: 'A1' },
     ]);
   });
+
+  // ---- M4 review round 3 ----
+  it('TIED spoken timestamps: a fact that left the recent window is still recalled, live and after resume', async () => {
+    const { profileId, packId } = seed();
+    const sid = engine.start(profileId, 'general', packId).id;
+    const AT = Date.now(); // every final reports the same spoken time
+    const askT = async (q: string) => {
+      void engine.processFinalTranscript(sid, q, undefined, { finalAt: AT });
+      await vi.advanceTimersByTimeAsync(100);
+    };
+    const sayT = async (a: string) => {
+      void engine.processFinalTranscript(sid, a, 'candidate', { finalAt: AT });
+      await vi.advanceTimersByTimeAsync(1700);
+    };
+    await askT('How did the Atlas cut-over go?');
+    await sayT(`That was the Atlas cut-over, and we finished it with ${FACT}.`);
+    for (let i = 1; i <= 15; i++) {
+      await askT(`What did you build in sprint ${i}?`);
+      await sayT(`In sprint ${i} I built the reporting cache number ${i}.`);
+    }
+    const rows = h.db.select().from(schema.transcriptChunks).all().filter((r) => r.sessionId === sid);
+    expect(new Set(rows.map((r) => r.createdAt)).size).toBe(1); // really tied
+
+    await askT(RECALL);
+    const live = promptFor(RECALL);
+    // Out of the recent window, and supplied by retrieval instead.
+    const block = (p: string, head: string) => {
+      const i = p.indexOf(head);
+      if (i < 0) return '';
+      const end = p.indexOf('\n\n', i);
+      return end < 0 ? p.slice(i) : p.slice(i, end);
+    };
+    expect(block(live, 'MOST RECENT TURNS')).not.toBe('');
+    expect(block(live, 'MOST RECENT TURNS')).not.toContain(FACT);
+    expect(block(live, 'RELEVANT EARLIER TURNS')).toContain(FACT);
+
+    engine.stop(sid);
+    engine.resume(sid);
+    h.prompts.length = 0;
+    await askT(RECALL);
+    const resumed = promptFor(RECALL);
+    expect(block(resumed, 'MOST RECENT TURNS')).not.toContain(FACT);
+    expect(block(resumed, 'RELEVANT EARLIER TURNS')).toContain(FACT);
+  });
 });

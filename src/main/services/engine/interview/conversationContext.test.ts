@@ -313,3 +313,36 @@ describe('M4 review round 2: excerpts without punctuation; capture order for tie
     ]);
   });
 });
+
+describe('M4 review round 3: the recent/older boundary is a position, not a time', () => {
+  const T = 5000; // every turn spoken in the same millisecond; capture order decides
+  function tied() {
+    const c = new ConversationContext();
+    let o = 0;
+    c.addTurn('interviewer', 'How did the Atlas cut-over go?', T, ++o);
+    c.addTurn('candidate', 'That was the Atlas cut-over, and we finished it with 40 minutes of downtime.', T, ++o);
+    c.addTurn('interviewer', 'What is your notice period?', T, ++o); // never answered
+    for (let i = 1; i <= 15; i++) {
+      c.addTurn('interviewer', `What did you build in sprint ${i}?`, T, ++o);
+      c.addTurn('candidate', `In sprint ${i} I built the reporting cache number ${i}.`, T, ++o);
+    }
+    return c;
+  }
+
+  it('a tied older turn is recalled once it leaves the recent window', () => {
+    const snap = tied().snapshot('Coming back to the Atlas cut-over, what was the downtime?');
+    expect(snap.recent.some((t) => t.text.includes('40 minutes'))).toBe(false); // really out of the window
+    expect(snap.recalled.map((t) => t.text).join(' ')).toContain('40 minutes of downtime');
+  });
+
+  it('recent and older partition the transcript: every turn is in exactly one, ties included', () => {
+    const c = tied();
+    const snap = c.snapshot('Where did you go to university?');
+    const recentNs = new Set(snap.recent.map((t) => t.n));
+    expect(snap.recent).toHaveLength(LIMITS.recentTurns);
+    // earlier exchanges and open questions come only from before the window
+    for (const e of [...snap.earlier, ...snap.open]) expect(recentNs.has(e.n)).toBe(false);
+    expect(snap.earlier.length).toBeGreaterThan(0);
+    expect(snap.open.map((e) => e.question)).toEqual(['What is your notice period?']);
+  });
+});

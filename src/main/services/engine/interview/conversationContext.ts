@@ -334,6 +334,10 @@ export class ConversationContext {
     // question's own turn(s) are the QUESTION, not context.
     const recent: Turn[] = [];
     let chars = 0;
+    // The boundary is a POSITION in the ordered transcript, not a time: turns
+    // can share a spoken timestamp (ordered by capture order), and a time
+    // boundary left a tie neither recent nor older — so unrecallable.
+    let start = this.turns.length;
     for (let i = this.turns.length - 1; i >= 0 && recent.length < LIMITS.recentTurns; i--) {
       const t = this.turns[i];
       if (t.role === 'interviewer' && (t.text === q || q.endsWith(t.text))) continue;
@@ -341,12 +345,16 @@ export class ConversationContext {
       if (chars + text.length > LIMITS.recentChars && recent.length > 0) break;
       chars += text.length;
       recent.unshift({ ...t, text });
+      start = i;
     }
-    const oldestRecentAt = recent[0]?.at ?? Number.POSITIVE_INFINITY;
+    const olderTurns = this.turns.slice(0, start);
+    // Exchanges are keyed by their question turn's number: one opened before
+    // the boundary is "earlier", whatever its timestamp.
+    const olderNs = new Set(olderTurns.map((t) => t.n));
 
     const all = this.exchanges().filter((e) => e.question !== q && !q.endsWith(e.question));
     const earlier = all
-      .filter((e) => e.at < oldestRecentAt)
+      .filter((e) => olderNs.has(e.n))
       .slice(-LIMITS.earlierExchanges)
       .map((e) => ({
         n: e.n,
@@ -362,13 +370,13 @@ export class ConversationContext {
         : null;
 
     // Older turns this question needs (the recent window already has the rest).
-    const older = [...this.archived(), ...this.turns.filter((t) => t.at < oldestRecentAt)];
+    const older = [...this.archived(), ...olderTurns];
     // Searched over the FULL text of every older turn; each hit is rendered
     // as the passage that matched, not the turn's first N characters.
     const recallQuery = subject ? `${subject.question} ${q}` : q;
     const recalled = bm25(recallQuery, older, (t) => t.text, LIMITS.recalledTurns)
-      .map((s) => ({ ...s.item, text: excerpt(s.item.text, LIMITS.recalledChars, recallQuery) }))
-      .sort((a, b) => a.at - b.at);
+      .sort((a, b) => older.indexOf(a.item) - older.indexOf(b.item)) // transcript order, ties included
+      .map((s) => ({ ...s.item, text: excerpt(s.item.text, LIMITS.recalledChars, recallQuery) }));
 
     const suggestions = this.suggestions
       .filter((s) => s.question !== q)
@@ -378,7 +386,7 @@ export class ConversationContext {
     // Open questions: earlier interviewer questions with no reply captured,
     // outside the recent window (inside it, the model sees them verbatim).
     const open = all
-      .filter((e) => e.at < oldestRecentAt && !e.said)
+      .filter((e) => olderNs.has(e.n) && !e.said)
       .slice(-3)
       .map((e) => ({ ...e, question: clip(e.question, LIMITS.earlierQuestionChars) }));
 

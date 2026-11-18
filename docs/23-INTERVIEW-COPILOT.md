@@ -175,7 +175,10 @@ now carry when each turn was **spoken** (ms) and the engine's **capture order**
 (`capture_seq`, taken as the final arrives — before the echo guard holds the
 candidate's turns), and are read back in one order (`db/transcriptOrder.ts`:
 spoken time, capture order, then insertion for rows without one). The live
-context breaks ties the same way, and Resume continues the capture counter. Before M4 they carried
+context breaks ties the same way, and Resume continues the capture counter.
+The snapshot splits recent from older turns by **position** in that order, not
+by time — a time boundary left turns tied with the oldest recent one in
+neither block, so recall, earlier exchanges and open questions all missed them. Before M4 they carried
 the insert time at one-second resolution, so after resume a reply still in the
 echo hold when the next question arrived sorted after that question. Each session owns
 its context, so another session, profile or Space can never leak into an
