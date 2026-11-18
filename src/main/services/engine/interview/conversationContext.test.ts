@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ConversationContext, LIMITS, leadOf } from './conversationContext';
+import { ConversationContext, LIMITS, excerpt, leadOf } from './conversationContext';
 import { buildConversationBlock } from '../../openai/answer';
 
 // answer.ts reaches the provider registry (and through it the db); only its
@@ -280,5 +280,36 @@ describe('M4: whole turns in memory; the persisted transcript past the bound; bo
       3 * (LIMITS.earlierQuestionChars + 20) + 600;
     expect(block.length).toBeLessThanOrEqual(ceiling);
     expect(ceiling).toBeLessThan(16_000);
+  });
+});
+
+describe('M4 review round 2: excerpts without punctuation; capture order for ties', () => {
+  const words = (n: number) => Array.from({ length: n }, (_, i) => `word${i}`).join(' ');
+
+  it('a turn with NO punctuation keeps the passage around the matching words, bounded', () => {
+    const text = `${words(150)} that was the Atlas cut-over and we finished it with 40 minutes of downtime ${words(150)}`;
+    const out = excerpt(text, 500, 'What was the downtime on the Atlas cut-over?');
+    expect(out).toContain('Atlas cut-over');
+    expect(out).toContain('40 minutes of downtime');
+    expect(out.length).toBeLessThanOrEqual(520);
+  });
+
+  it('a matching SENTENCE longer than the whole budget still yields its matching part', () => {
+    const text = `Intro sentence here. ${words(200)}, and the Atlas cut-over took 40 minutes of downtime, ${words(200)}.`;
+    const out = excerpt(text, 400, 'Atlas downtime');
+    expect(out).toContain('Atlas cut-over took 40 minutes');
+    expect(out.length).toBeLessThanOrEqual(420);
+  });
+
+  it('turns with the SAME spoken time are placed by capture order, whatever order they are committed in', () => {
+    const c = new ConversationContext();
+    c.addTurn('interviewer', 'Which database did you choose for the ledger?', 5000, 1);
+    c.addTurn('interviewer', 'What was the hardest part of the rollout?', 5000, 3);
+    c.addTurn('candidate', 'We chose CockroachDB.', 5000, 2); // committed last (echo hold), captured second
+    expect(c.recentForClassifier(3).map((t) => t.text)).toEqual([
+      'Which database did you choose for the ledger?',
+      'We chose CockroachDB.',
+      'What was the hardest part of the rollout?',
+    ]);
   });
 });

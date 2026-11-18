@@ -44,6 +44,9 @@ export interface Turn {
   role: TurnRole;
   text: string;
   at: number;
+  /** Capture order — breaks ties in `at` (a turn held by the echo guard is
+   *  committed late but keeps its place). Absent: arrival order. */
+  order?: number;
 }
 
 export interface Suggestion {
@@ -107,16 +110,17 @@ const SENTENCE = /(?<=[.!?;])\s+|\n+/;
  * Fit `text` into `max` characters WITHOUT losing what a later question is
  * most likely to need. A head-clip drops the end of a long spoken answer —
  * which is where the project name and the figure ("…the Atlas cut-over,
- * 40 minutes of downtime instead of six hours") usually are. Instead keep
- * the first sentence, then the sentences that share words with the
- * question, then the ones carrying figures or names, in spoken order, with
- * " … " where text was left out. Deterministic, no model call.
+ * 40 minutes of downtime instead of six hours") usually are. Instead the text
+ * is cut into PIECES — sentences, and any piece longer than a small window
+ * (a run-on sentence, or a transcript with no punctuation at all) into word
+ * windows — and we keep the first piece, then the pieces that share words
+ * with the question, then the ones carrying figures or names, in spoken
+ * order, with " … " where text was left out. Deterministic, no model call.
  */
 export function excerpt(text: string, max: number, query = ''): string {
   const t = text.trim();
   if (t.length <= max) return t;
-  const parts = t.split(SENTENCE).map((s) => s.trim()).filter(Boolean);
-  if (parts.length < 2) return clip(t, max);
+  const parts = pieces(t, Math.max(60, Math.min(300, Math.floor(max / 3))));
   const want = new Set(tokenize(query));
   const scored = parts.map((s, i) => {
     let score = 0;
@@ -144,6 +148,27 @@ export function excerpt(text: string, max: number, query = ''): string {
     prev = p.i;
   }
   if (prev < parts.length - 1) out += ' …';
+  return out;
+}
+
+/** Sentences, with any longer than `window` characters split into word
+ *  windows of at most `window` (a single over-long word stands alone). */
+function pieces(text: string, window: number): string[] {
+  const out: string[] = [];
+  for (const sentence of text.split(SENTENCE).map((x) => x.trim()).filter(Boolean)) {
+    if (sentence.length <= window) {
+      out.push(sentence);
+      continue;
+    }
+    let cur = '';
+    for (const w of sentence.split(/\s+/)) {
+      if (cur && cur.length + 1 + w.length > window) {
+        out.push(cur.length > window ? clip(cur, window) : cur);
+        cur = w;
+      } else cur = cur ? `${cur} ${w}` : w;
+    }
+    if (cur) out.push(cur.length > window ? clip(cur, window) : cur);
+  }
   return out;
 }
 
@@ -189,13 +214,15 @@ export class ConversationContext {
    *  own turns are committed late (the echo guard holds them ~1.5 s), so a
    *  turn can arrive after a later one — it is placed by `at`, so a reply is
    *  never attributed to the question asked after it. Returns its number. */
-  addTurn(role: TurnRole, text: string, at = Date.now()): number {
+  addTurn(role: TurnRole, text: string, at = Date.now(), order?: number): number {
     const t = text.trim();
     if (!t) return 0;
     // Stored whole (safety cap only): budgets apply when a snapshot renders.
-    const turn = { n: this.nextN++, role, text: t, at }; // WHOLE: budgets apply at render
+    const turn: Turn = { n: this.nextN++, role, text: t, at, ...(order !== undefined ? { order } : {}) }; // WHOLE: budgets apply at render
+    // By when it was spoken, then by capture order for a tie.
+    const after = (o: Turn) => o.at > at || (o.at === at && order !== undefined && o.order !== undefined && o.order > order);
     let i = this.turns.length;
-    while (i > 0 && this.turns[i - 1].at > at) i--;
+    while (i > 0 && after(this.turns[i - 1])) i--;
     this.turns.splice(i, 0, turn);
     this.storedChars += t.length;
     while (this.turns.length > 1 && (this.turns.length > LIMITS.maxTurns || this.storedChars > LIMITS.maxStoredChars)) {
@@ -380,8 +407,11 @@ export class ConversationContext {
   }
 
   /** Restore a resumed session from its persisted rows (oldest first). */
-  hydrate(rows: { role: TurnRole; text: string; at: number }[], answers: { questionId: string; question: string; answer: string; at: number }[]): void {
-    for (const r of rows) this.addTurn(r.role, r.text, r.at);
+  hydrate(
+    rows: { role: TurnRole; text: string; at: number; order?: number }[],
+    answers: { questionId: string; question: string; answer: string; at: number }[],
+  ): void {
+    for (const r of rows) this.addTurn(r.role, r.text, r.at, r.order);
     for (const a of answers) this.addSuggestion(a.questionId, a.question, a.answer, a.at);
   }
 }

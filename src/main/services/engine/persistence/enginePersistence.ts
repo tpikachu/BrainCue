@@ -21,11 +21,19 @@ export const enginePersistence = {
   /** `at`: when the turn was SPOKEN (ms) — the order it is read back in
    *  (transcriptOrder). A candidate turn is committed late, after the echo
    *  guard; without it the row would sort after the next question. */
-  finalTranscript(sessionId: string, speaker: Speaker, text: string, at?: number): string {
+  finalTranscript(sessionId: string, speaker: Speaker, text: string, at?: number, captureSeq?: number): string {
     const id = crypto.randomUUID();
     db()
       .insert(schema.transcriptChunks)
-      .values({ id, sessionId, speaker, text, isFinal: 1, ...(at !== undefined ? { createdAt: Math.round(at) } : {}) })
+      .values({
+        id,
+        sessionId,
+        speaker,
+        text,
+        isFinal: 1,
+        ...(at !== undefined ? { createdAt: Math.round(at) } : {}),
+        ...(captureSeq !== undefined ? { captureSeq } : {}),
+      })
       .run();
     return id;
   },
@@ -116,17 +124,22 @@ export const enginePersistence = {
   /** This session's turns (ALL of them, whole — the conversation context
    *  bounds memory itself and searches these past its bound) and answers. */
   sessionTimeline(sessionId: string): {
-    turns: { speaker: Speaker; text: string; at: number }[];
+    turns: { speaker: Speaker; text: string; at: number; seq: number | null }[];
     answers: { questionId: string; question: string; answer: string; at: number }[];
   } {
     const turns = db()
-      .select({ speaker: schema.transcriptChunks.speaker, text: schema.transcriptChunks.text, at: schema.transcriptChunks.createdAt })
+      .select({
+        speaker: schema.transcriptChunks.speaker,
+        text: schema.transcriptChunks.text,
+        at: schema.transcriptChunks.createdAt,
+        seq: schema.transcriptChunks.captureSeq,
+      })
       .from(schema.transcriptChunks)
       .where(eq(schema.transcriptChunks.sessionId, sessionId))
       .orderBy(...transcriptOrder())
       .all()
       .filter((t) => t.text.trim())
-      .map((t) => ({ speaker: t.speaker as Speaker, text: t.text, at: t.at }));
+      .map((t) => ({ speaker: t.speaker as Speaker, text: t.text, at: t.at, seq: t.seq ?? null }));
     const answers = db()
       .select({
         questionId: schema.detectedQuestions.id,

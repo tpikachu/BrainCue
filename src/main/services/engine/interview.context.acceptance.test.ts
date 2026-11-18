@@ -22,6 +22,7 @@ const h = vi.hoisted(() => ({
   db: null as unknown as import('../../test/dbHarness').TestDb,
   prompts: [] as { user: string; system: string }[],
   grounds: [] as { profileId: string; query: string; packId: string | null }[],
+  json: [] as { system: string; user: string }[],
 }));
 
 vi.mock('../../db', async () => {
@@ -53,6 +54,8 @@ vi.mock('../openai/questions', () => ({
   classifyQuestion: async (text: string) => ({ isQuestion: false, text, type: 'followup', confidence: 0, strategy: '' }),
 }));
 vi.mock('../memory/recall', () => ({ recallMemories: async () => [] }));
+// The report's Sparring branch (not exercised here) reaches Electron-only modules.
+vi.mock('../mock/sparringManager', () => ({ buildSparringReport: () => null }));
 // Profile/Space-scoped documents: each profile has its own résumé and JD.
 vi.mock('./grounding', () => ({
   ground: async (profileId: string, query: string, packId: string | null) => {
@@ -71,7 +74,12 @@ vi.mock('../../providers/registry', () => ({
           h.prompts.push({ user: req.user, system: req.system });
           yield { type: 'delta', token: 'BrainCue cue text.' };
         },
-        json: async () => ({}),
+        // The coaching report: one assessment per numbered exchange.
+        json: async (req: { system: string; user: string }) => {
+          h.json.push(req);
+          const ns = [...req.user.matchAll(/^\[(\d+)\] Interviewer asked/gm)].map((m) => Number(m[1]));
+          return { summary: 'ok', strengths: [], improvements: [], perQuestion: ns.map((n) => ({ n, assessment: `A${n}` })) };
+        },
       };
     }
     if (cap === 'realtimeStt') return { open: () => ({ appendAudio: vi.fn(), stop: vi.fn() }) };
@@ -83,6 +91,7 @@ import * as schema from '../../db/schema';
 import { createTestDb } from '../../test/dbHarness';
 import { engine } from './engine';
 import { LIMITS } from './interview/conversationContext';
+import { generateReport, NO_ANSWER_CAPTURED, NOT_DETECTED_PREFIX } from '../session/report';
 
 // ~1,060 characters; the project name and the figure come LAST.
 const LONG =
@@ -139,6 +148,7 @@ afterAll(() => vi.useRealTimers());
 beforeEach(() => {
   h.prompts.length = 0;
   h.grounds.length = 0;
+  h.json.length = 0;
 });
 afterEach(() => {
   const cur = (engine as unknown as { current: { sessionId: string } | null }).current;
@@ -297,5 +307,80 @@ describe('M4 — conversation context at the prompt boundary', () => {
     expect(conv).not.toMatch(/You said: BrainCue cue text/);
     expect(p).toContain(`(jd — employer requirement, not the candidate's experience) JD of ${packId}`);
     expect(p).toContain(`(resume — the candidate's own background) Résumé of ${profileId}`);
+  });
+
+  // ---- M4 review round 2 ----
+  it('an UNPUNCTUATED long answer: the fact after character 600 reaches the prompt, live and after resume', async () => {
+    const BARE = LONG.replace(/[.,;!?]/g, ''); // one run-on "sentence", as some transcribers emit
+    expect(BARE).not.toMatch(/[.!?;]/);
+    expect(BARE.indexOf('Atlas')).toBeGreaterThan(600);
+    const { profileId, packId } = seed();
+    const sid = engine.start(profileId, 'general', packId).id;
+    await ask(sid, 'Tell me about a migration you led.');
+    await say(sid, BARE);
+    for (let i = 1; i <= 31; i++) {
+      await ask(sid, `What did you work on in quarter ${i}?`);
+      await say(sid, `In quarter ${i} I worked on the reporting service, mostly on caching layer ${i}.`);
+    }
+    await ask(sid, RECALL);
+    const live = promptFor(RECALL);
+    expect(live).toContain('Atlas cut-over and we finished it with 40 minutes of downtime');
+    expect(live.length).toBeLessThan(20_000);
+
+    engine.stop(sid);
+    engine.resume(sid);
+    h.prompts.length = 0;
+    await ask(sid, RECALL);
+    const resumed = promptFor(RECALL);
+    expect(resumed).toContain('Atlas cut-over and we finished it with 40 minutes of downtime');
+    expect(resumed.length).toBeLessThan(20_000);
+  });
+
+  it('A, the reply, then B in ONE millisecond (the reply held by the echo guard): A–reply–B after resume and in coaching', async () => {
+    const { profileId, packId } = seed();
+    const sid = engine.start(profileId, 'general', packId).id;
+    const QA = 'Which database did you choose for the ledger?';
+    const REPLY = 'We chose CockroachDB for the ledger because of multi-region writes.';
+    const QB = 'What was the hardest part of the rollout?';
+    const t = Date.now();
+    void engine.processFinalTranscript(sid, QA); // all three in this millisecond…
+    void engine.processFinalTranscript(sid, REPLY, 'candidate'); // …the reply waits in the echo hold
+    void engine.processFinalTranscript(sid, QB);
+    expect(Date.now()).toBe(t);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    engine.stop(sid);
+    engine.resume(sid);
+    const QC = 'How long did the rollout take overall?';
+    await ask(sid, QC);
+    const conv = conversationOf(promptFor(QC));
+    expect(conv.indexOf(QA)).toBeGreaterThan(-1);
+    expect(conv.indexOf(REPLY)).toBeGreaterThan(conv.indexOf(QA));
+    expect(conv.indexOf(QB)).toBeGreaterThan(conv.indexOf(REPLY));
+    engine.stop(sid);
+
+    const report = await generateReport(sid);
+    expect(report.perQuestion.find((p) => p.question === QA)?.assessment).toBe('A1'); // coached as A's answer
+    expect(report.perQuestion.find((p) => p.question === QB)?.assessment).toBe(NO_ANSWER_CAPTURED);
+  });
+
+  it('a reply to a question detection MISSED is coached under it — never credited to the card before it', async () => {
+    const { profileId, packId } = seed();
+    const sid = engine.start(profileId, 'general', packId).id;
+    const A = 'What is your notice period?';
+    const B = 'The ranking change you mentioned earlier.'; // the (scripted) classifier says no
+    await ask(sid, A);
+    await ask(sid, B);
+    await say(sid, 'I changed the ranking feature weights after an offline relevance evaluation.');
+    engine.stop(sid);
+    const cards = h.db.select().from(schema.detectedQuestions).all().filter((q) => q.sessionId === sid);
+    expect(cards.map((q) => q.text)).toEqual([A]); // B really has no card
+
+    const report = await generateReport(sid);
+    expect(h.json[0].user).toMatch(/\(not detected live\): The ranking change you mentioned earlier\.\nCandidate said: "I changed the ranking/);
+    expect(report.perQuestion).toEqual([
+      { question: A, assessment: NO_ANSWER_CAPTURED },
+      { question: `${NOT_DETECTED_PREFIX}${B}`, assessment: 'A1' },
+    ]);
   });
 });

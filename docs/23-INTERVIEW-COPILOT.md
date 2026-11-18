@@ -138,9 +138,12 @@ at stream start** (turns arriving mid-stream cannot change it).
 **Turns are stored whole; budgets apply when a snapshot renders** (M4). Until
 M4 every turn was clipped to 600 characters on the way IN, so the end of a
 long answer — usually the project name and the figure — was gone before
-recall could search it. Each rendered block now uses `excerpt()`: the first
-sentence, then the sentences sharing words with the question, then those with
-figures or names, in spoken order, with " … " for omissions. Memory holds up
+recall could search it. Each rendered block now uses `excerpt()`: the text is
+cut into pieces — sentences, and any piece longer than a small window (a
+run-on sentence, or a transcript with no punctuation at all) into word
+windows — and it keeps the first piece, then the pieces sharing words with the
+question, then those with figures or names, in spoken order, with " … " for
+omissions. Memory holds up
 to 3 000 turns / 2 M characters per session; past that the oldest turns leave
 memory but not the search — recall reads them from **this session's**
 persisted transcript.
@@ -168,8 +171,11 @@ when no candidate speech was captured (no microphone).
 
 **Resume** restores the session's own turns and answers from its rows
 (`enginePersistence.sessionTimeline`, scoped by session id). Transcript rows
-now carry when each turn was **spoken** (ms) and are read back in one order
-(`db/transcriptOrder.ts`: spoken time, then insertion). Before M4 they carried
+now carry when each turn was **spoken** (ms) and the engine's **capture order**
+(`capture_seq`, taken as the final arrives — before the echo guard holds the
+candidate's turns), and are read back in one order (`db/transcriptOrder.ts`:
+spoken time, capture order, then insertion for rows without one). The live
+context breaks ties the same way, and Resume continues the capture counter. Before M4 they carried
 the insert time at one-second resolution, so after resume a reply still in the
 echo hold when the next question arrived sorted after that question. Each session owns
 its context, so another session, profile or Space can never leak into an
@@ -187,11 +193,17 @@ consent-gated).
   gap to bridge honestly. "BrainCue suggested" lines prove nothing. General
   knowledge may explain a concept, never become a claim about the candidate.
 - **Coaching reports coach what the candidate said** (`session/report.ts`,
-  M4). Each question is paired with the candidate's captured speech that
-  follows it; BrainCue's suggestion travels separately, labelled *not the
-  candidate's answer*. A question with no captured speech is reported as such
-  and never assessed; with no speech at all there is no model call. Input is
-  bounded per exchange (the old 24 000-character cut dropped later questions).
+  M4). Speech is attributed to the interviewer turn it followed: every
+  interviewer turn is a boundary (backchannel and call logistics aside), not
+  only those BrainCue made a card for, so a reply to a question detection
+  missed is coached under that question (marked *not detected live*), never
+  under the card before it. BrainCue's suggestion travels separately, labelled
+  *not the candidate's answer*. A question with no captured speech is reported
+  as such and never assessed; a typed Ask has no spoken turn and says so; with
+  no speech at all there is no model call. Every request is capped (24 000
+  characters): exchanges go out in numbered batches and the batch summaries
+  are combined in one bounded call — the old 24 000-character tail cut dropped
+  later questions.
   Sparring keeps its own spoken-answer feedback report.
 - **Documents and transcript are data.** The prompt says to ignore instructions
   inside them; a test pins that an injected line stays inside the data block.

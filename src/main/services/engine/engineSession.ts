@@ -216,16 +216,27 @@ export class EngineSession {
     return this.context.recentForClassifier(4);
   }
 
-  /** Resume: restore this session's own turns and answers (oldest first). */
+  /** Resume: restore this session's own turns and answers (oldest first, in
+   *  transcriptOrder). Capture order continues after the restored turns, so
+   *  everything said after Resume sorts after everything said before it. */
   hydrate(
-    turns: { speaker: Speaker; text: string; at: number }[],
+    turns: { speaker: Speaker; text: string; at: number; seq?: number | null }[],
     answers: { questionId: string; question: string; answer: string; at: number }[],
   ): void {
+    turns.forEach((t, i) => (this.captureOrder = Math.max(this.captureOrder, t.seq ?? 0, i + 1)));
     this.context.hydrate(
-      turns.map((t) => ({ role: t.speaker === this.mode.remoteSpeaker ? 'interviewer' : 'candidate', text: t.text, at: t.at })),
+      turns.map((t, i) => ({
+        role: t.speaker === this.mode.remoteSpeaker ? ('interviewer' as const) : ('candidate' as const),
+        text: t.text,
+        at: t.at,
+        order: i + 1, // their position in transcriptOrder (seq where recorded, insertion otherwise)
+      })),
       answers,
     );
   }
+
+  /** Capture order of finals within this session (persisted as capture_seq). */
+  private captureOrder = 0;
 
   /** Pause/resume — the scheduler turns waiting questions into missed cards. */
   setPaused(paused: boolean): void {
@@ -282,6 +293,9 @@ export class EngineSession {
   ): Promise<void> {
     if (!text || this.stopped || this.paused) return;
     const finalAt = timing.finalAt ?? Date.now();
+    // Capture order is taken NOW, as the final arrives — before the echo
+    // guard holds the candidate's turns — and persisted with the row.
+    const captured = ++this.captureOrder;
     const own = speaker !== this.mode.remoteSpeaker;
     if (own) {
       // The user's own words: kept and remembered, never answered — and held
@@ -292,7 +306,7 @@ export class EngineSession {
       const order = this.scheduler?.orderMark();
       this.echo.ownTurn(text, () => {
         if (this.stopped) return;
-        this.commitTurn(text, speaker, finalAt);
+        this.commitTurn(text, speaker, finalAt, captured);
         // The candidate spoke: the interviewer's next words start a new
         // question rather than continue the last one. Only once the echo
         // guard has CONFIRMED the turn is theirs (on laptop speakers the
@@ -303,7 +317,7 @@ export class EngineSession {
       return;
     }
     this.echo.remoteTurn(text);
-    const tcId = this.commitTurn(text, speaker, finalAt);
+    const tcId = this.commitTurn(text, speaker, finalAt, captured);
     if (timing.speechEndAt) this.speechEnds.set(tcId, timing.speechEndAt);
     this.remoteTurns.push({ text, tcId, at: finalAt });
     if (this.remoteTurns.length > 12) this.remoteTurns.shift();
@@ -471,10 +485,10 @@ export class EngineSession {
   /** Persist a turn, broadcast it to the transcript and add it to the
    *  conversation context at the time it was spoken. The user's own turns
    *  are the candidate's ("You said:" in the prompt). */
-  private commitTurn(text: string, speaker: Speaker, at = Date.now()): string {
-    const tcId = persist.finalTranscript(this.sessionId, speaker, text, at);
+  private commitTurn(text: string, speaker: Speaker, at = Date.now(), captured = ++this.captureOrder): string {
+    const tcId = persist.finalTranscript(this.sessionId, speaker, text, at, captured);
     broadcast(EVENTS.transcriptDelta, { text, isFinal: true, speaker });
-    this.context.addTurn(speaker === this.mode.remoteSpeaker ? 'interviewer' : 'candidate', text, at);
+    this.context.addTurn(speaker === this.mode.remoteSpeaker ? 'interviewer' : 'candidate', text, at, captured);
     return tcId;
   }
 
