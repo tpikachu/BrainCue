@@ -684,7 +684,13 @@ export interface AppSettings {
   /** First-run setup (name → transcription → AI) finished or skipped. */
   onboardingDone: boolean;
   models: Record<string, string>; // user overrides only
-  modelPreset: string; // active cost/quality preset: 'balanced' | 'low_cost' | 'best'
+  modelPreset: string; // legacy preset name: 'balanced' | 'low_cost' | 'best' (mirrors modelPreference)
+  /** The provider chat tasks run on (null = never chosen → first with a key). */
+  chatProvider: CloudProviderId | null;
+  /** Fast / Balanced / Quality — picks a model per task on chatProvider. */
+  modelPreference: 'fast' | 'balanced' | 'quality';
+  /** What each chat task resolves to right now (qualified ids). */
+  effectiveModels: Record<string, string>;
   modelDefaults: Record<string, string>; // effective per-task defaults (the active preset's table)
   reasoningEfforts: Record<string, string>; // user reasoning-effort overrides per task
   reasoningEffortDefaults: Record<string, string>; // built-in reasoning effort per task
@@ -717,6 +723,26 @@ export interface AppSettings {
   devDbExplorer: boolean;
   shortcuts: Record<string, string>; // effective global-shortcut accelerators per action
   shortcutDefaults: Record<string, string>; // built-in default accelerator per action
+}
+
+/** What a live session can rely on, per capability (services/readiness.ts).
+ *  Booleans, provider/model ids and user-safe text only — never a key. */
+export interface Readiness {
+  chat: {
+    ready: boolean;
+    provider: CloudProviderId;
+    model: string;
+    classifyModel: string;
+    /** One line: which model answers, and why. */
+    explanation: string;
+    /** An override or preferred model had to give way (and why). */
+    notice?: string;
+    problem?: string;
+    action?: string;
+  };
+  transcription: { ready: boolean; engine: 'cloud' | 'local'; problem?: string; action?: string };
+  /** Never blocks a session: lexical mode is a stated limitation. */
+  retrieval: { ready: true; mode: 'embeddings' | 'lexical'; note?: string };
 }
 
 // ---- main -> renderer push event payloads ----

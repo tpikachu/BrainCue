@@ -5,7 +5,7 @@ import { useActiveProfile } from '../store/useProfileStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useLiveSession } from '../store/useLiveSession';
 import { ACTIVITIES, DEFAULT_ACTIVITY, activityOf } from '@shared/activities';
-import type { CompanionPresence, ContextPackKind, Job, Presence } from '@shared/types';
+import type { CompanionPresence, ContextPackKind, Job, Presence, Readiness } from '@shared/types';
 import { COMPANION_TO_ENGINE_PRESENCE } from '@shared/types';
 import { Button, Dropdown, Field, Modal, Select } from '../components/ui';
 import { JobFormModal } from './JobFormModal';
@@ -52,6 +52,16 @@ export function StartSessionModal(props: {
   const [creatingSpace, setCreatingSpace] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Per-capability readiness (chat / transcription / retrieval) from main —
+  // replaces the old "OpenAI key present?" gate.
+  const [readiness, setReadiness] = useState<Readiness | null>(null);
+  useEffect(() => {
+    if (!props.open) return;
+    void api.settings
+      .readiness()
+      .then(setReadiness)
+      .catch(() => setReadiness(null));
+  }, [props.open, settings]);
 
   const config = ACTIVITIES[activity] ?? ACTIVITIES[DEFAULT_ACTIVITY];
   const mode = config.mode;
@@ -101,8 +111,11 @@ export function StartSessionModal(props: {
   const spaceTitle = space ? space.company || space.title : null;
   const blocker = startBlocker({
     profile,
-    apiKeyPresent: !!settings?.apiKeyPresent,
-    sttReady: !!settings?.sttReady,
+    // Until readiness arrives, fall back to the stored flags (never a false "ready").
+    chatReady: readiness ? readiness.chat.ready : !!settings?.apiKeyPresent,
+    chatProblem: readiness?.chat.problem,
+    sttReady: readiness ? readiness.transcription.ready : !!settings?.sttReady,
+    sttProblem: readiness?.transcription.problem,
     sessionLive: !!live.session,
     activity,
     spaceId,

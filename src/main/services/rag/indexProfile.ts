@@ -13,6 +13,8 @@ import { apiKeyStore } from '../security/apiKey';
 import type { Story, StoryDraft, StoryInput } from '@shared/types';
 
 async function embedChunks(rows: { id: string; content: string }[]): Promise<number> {
+  // No embedding key: the chunks stay, unembedded, and rank lexically.
+  if (!apiKeyStore.isPresent() || rows.length === 0) return 0;
   const embedder = providerFor('embedding');
   const identity = embedder.identity();
   if (rows.length) assertEmbeddingCompatibility(identity);
@@ -61,10 +63,9 @@ export async function reindexProfile(
       ),
     )
     .run();
-  // Without a key we can't embed, so there's nothing to (re)index — but the stale
-  // chunks above are already gone.
-  if (!apiKeyStore.isPresent()) return { chunks: 0, embedded: 0 };
-
+  // Chunking is local text work, so it ALWAYS runs: without an embedding key
+  // the chunks are still retrievable lexically (retriever.ts), and embedding
+  // them later is a re-index away. Only the embedding step needs the key.
   const sources: { type: 'resume' | 'note' | 'profile'; text: string }[] = [];
   if (profile.resumeText) sources.push({ type: 'resume', text: profile.resumeText });
   // "About you" (ProfileAbout). Each section is indexed as its own chunk, led by
@@ -112,7 +113,7 @@ export async function indexJob(jobId: string): Promise<{ chunks: number; embedde
   // Always clear this job's chunks first (embeddings cascade), so removing a JD or
   // company research cleans up even with no key.
   db().delete(schema.chunks).where(eq(schema.chunks.packId, jobId)).run();
-  if (!apiKeyStore.isPresent()) return { chunks: 0, embedded: 0 };
+  // As for the profile: chunk always, embed only with a key.
 
   const sources: { type: 'jd' | 'company' | 'tailored'; text: string }[] = [];
   if (job.jdText) sources.push({ type: 'jd', text: job.jdText });

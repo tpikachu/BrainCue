@@ -26,6 +26,8 @@ export const IPC = {
     clearProviderKey: 'settings:clear-provider-key', // { provider }
     testProviderKey: 'settings:test-provider-key', // { provider } → { ok, model?, error? }
     listModels: 'settings:list-models', // — → string[] (OpenAI account ids, unfiltered)
+    readiness: 'settings:readiness', // per-capability readiness (chat / transcription / retrieval)
+    refreshModels: 'settings:refresh-models', // re-run model discovery for every provider with a key
     listProviderModels: 'settings:list-provider-models', // { provider } → string[] chat-capable ids the key can see
     setShortcuts: 'settings:set-shortcuts',
     resetShortcuts: 'settings:reset-shortcuts',

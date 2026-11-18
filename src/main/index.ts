@@ -18,6 +18,9 @@ import { affinityReadable } from './services/session/displayAffinity';
 import { initAutoUpdate } from './services/update/updater';
 import { log } from './services/security/logger';
 import { setLatencySink } from './services/engine/metrics/latencyStore';
+import { installKeyPresence } from './services/openai/models';
+import { providerKeys } from './services/security/providerKeys';
+import { scheduleDiscovery } from './services/models/discovery';
 
 // Escape hatch for hybrid-GPU laptops (e.g. NVIDIA Optimus) where the GPU surface
 // won't display the window: launch with `--disable-gpu` or set `AI_DISABLE_GPU=1`
@@ -175,6 +178,10 @@ app.whenReady().then(() => {
     } catch (e) {
       log.warn('latency sink unavailable', e);
     }
+    // Model selection sees the real key presence (env key + encrypted
+    // store), and learns what each key can use — in the background.
+    installKeyPresence(() => providerKeys.presence());
+    scheduleDiscovery();
     // Point the realtimeStt capability at the chosen engine (cloud or the
     // on-device model) before the first session can open.
     applySttSelection();

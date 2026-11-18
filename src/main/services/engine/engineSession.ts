@@ -11,7 +11,8 @@ import {
   emitContributionReset,
   emitContributionTitle,
 } from '../../ipc/contributionBridge';
-import { taskRoute } from '../../providers/taskRoute';
+import { reportUnavailable, taskRoute } from '../../providers/taskRoute';
+import { providerErrorKind } from '../../providers/errorKind';
 import { QuestionScheduler, type QuestionJob } from './interview/questionScheduler';
 import { assessUtterance } from './interview/questionHeuristics';
 import type { Detection } from './interview/detector';
@@ -576,6 +577,14 @@ export class EngineSession {
         chunks: context,
         ...(memories.length ? { memories } : {}),
       });
+      // Bounded failover (docs/06 §Failover): at most ONE retry, and only
+      // before any token was shown — a partly streamed answer is never
+      // replayed as a duplicate. A model the account does not have is
+      // skipped for the next candidate on the SAME provider (no interview
+      // data goes to a provider the user did not choose); a transient
+      // network/5xx error is retried once. Auth and quota errors surface.
+      for (let attempt = 0; ; attempt++) {
+        try {
       for await (const ev of this.mode.generate({
         question: questionText,
         contextChunks: context,
@@ -602,6 +611,29 @@ export class EngineSession {
         } else if (ev.type === 'meta') {
           meta = ev;
           emitContributionMeta(questionId, { questionId, ...ev });
+        }
+      }
+          break;
+        } catch (e) {
+          if (abort.signal.aborted || answer || attempt >= 1) throw e;
+          const kind = providerErrorKind(e);
+          if (kind === 'model') {
+            const failed = reportUnavailable('answer');
+            const next = taskRoute('answer');
+            if (!next || (failed && next.model === failed.model && next.provider === failed.provider)) throw e;
+            log.warn(`answer model unavailable (${failed?.provider}/${failed?.model}) — retrying on ${next.provider}/${next.model}`);
+            broadcast(EVENTS.sessionError, {
+              message: `${failed?.model ?? 'The answer model'} isn't available to your account — answering with ${next.model} instead. Pick another in Settings → Language Models to change it.`,
+            });
+            continue;
+          }
+          if (kind === 'network') {
+            log.warn('answer stream failed before its first token (network) — retrying once');
+            await new Promise((r) => setTimeout(r, 400));
+            if (abort.signal.aborted) throw e;
+            continue;
+          }
+          throw e;
         }
       }
     } catch (e) {

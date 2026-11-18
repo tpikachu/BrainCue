@@ -1,10 +1,6 @@
 import { openai } from '../../services/openai/client';
-import {
-  EMBEDDING_DIM,
-  isReasoningModel,
-  model,
-  reasoningEffort,
-} from '../../services/openai/models';
+import { EMBEDDING_DIM, model } from '../../services/openai/models';
+import { effortFor, reasoningBody } from '../effort';
 import { embed, embedOne } from '../../services/openai/embeddings';
 import { transcribeChunk } from '../../services/openai/transcription';
 import { speak, type TtsVoice } from '../../services/openai/tts';
@@ -44,13 +40,16 @@ export const openaiChat: ChatProvider = {
   },
   async *stream(req): AsyncGenerator<ChatStreamEvent> {
     const m = model(req.task);
-    const reasoning = isReasoningModel(m);
+    // Effort from the catalog's capability metadata (models.ts effortFor):
+    // live tasks get the model's lowest — "none" on GPT-6 Luna/Terra.
+    const effort = effortFor(req.task, 'openai', m);
+    const thinks = !!effort && effort !== 'none';
     const stream = await openai().responses.stream(
       {
         model: m,
-        ...(reasoning ? { reasoning: { effort: reasoningEffort(req.task) ?? 'low' } } : {}),
+        ...reasoningBody(effort),
         ...(req.maxOutputTokens !== undefined
-          ? { max_output_tokens: req.maxOutputTokens + (reasoning ? REASONING_HEADROOM : 0) }
+          ? { max_output_tokens: req.maxOutputTokens + (thinks ? REASONING_HEADROOM : 0) }
           : {}),
         input: [
           { role: 'system', content: req.system },
@@ -76,14 +75,19 @@ export const openaiChat: ChatProvider = {
   },
 
   async json<T>(req: ChatJsonRequest): Promise<T> {
+    const m = model(req.task);
+    const effort = effortFor(req.task, 'openai', m);
     const res = await openai().responses.create({
-      model: model(req.task),
+      model: m,
+      ...reasoningBody(effort),
       input: [
         { role: 'system', content: req.system },
         { role: 'user', content: req.user },
       ],
       text: { format: { type: 'json_object' } },
-      ...(req.maxOutputTokens !== undefined ? { max_output_tokens: req.maxOutputTokens } : {}),
+      ...(req.maxOutputTokens !== undefined
+        ? { max_output_tokens: req.maxOutputTokens + (effort && effort !== 'none' ? REASONING_HEADROOM : 0) }
+        : {}),
     }, req.signal ? { signal: req.signal } : undefined);
     return JSON.parse(res.output_text) as T;
   },

@@ -35,7 +35,7 @@ describe('the start catalog — one list, not two', () => {
 });
 
 describe('startBlocker — the explicit-start gate', () => {
-  const ok = { profile: profile(), apiKeyPresent: true, sttReady: true, sessionLive: false };
+  const ok = { profile: profile(), chatReady: true, sttReady: true, sessionLive: false };
 
   it('passes when a keyed profile is picked and nothing is live', () => {
     expect(startBlocker(ok)).toBeNull();
@@ -43,7 +43,11 @@ describe('startBlocker — the explicit-start gate', () => {
 
   it('blocks in priority order: live session > key > transcription > profile', () => {
     expect(startBlocker({ ...ok, sessionLive: true })).toMatch(/already live/);
-    expect(startBlocker({ ...ok, apiKeyPresent: false })).toMatch(/API key/);
+    expect(startBlocker({ ...ok, chatReady: false })).toMatch(/API key/);
+    // The readiness service's own wording wins when it has one.
+    expect(startBlocker({ ...ok, chatReady: false, chatProblem: 'Anthropic is selected but has no key.' })).toBe(
+      'Anthropic is selected but has no key.',
+    );
     expect(startBlocker({ ...ok, sttReady: false })).toMatch(/Transcription is not set up/);
     expect(startBlocker({ ...ok, profile: undefined })).toMatch(/profile/i);
   });
@@ -51,8 +55,8 @@ describe('startBlocker — the explicit-start gate', () => {
   it('names the missing key before missing transcription — one fix can clear both', () => {
     // Cloud engine + no key: sttReady is false too, but "add the key" is the
     // actionable message. Local engine with a model but no key: still the key.
-    expect(startBlocker({ ...ok, apiKeyPresent: false, sttReady: false })).toMatch(/API key/);
-    expect(startBlocker({ ...ok, apiKeyPresent: false, sttReady: false })).not.toMatch(/Transcription/);
+    expect(startBlocker({ ...ok, chatReady: false, sttReady: false })).toMatch(/API key/);
+    expect(startBlocker({ ...ok, chatReady: false, sttReady: false })).not.toMatch(/Transcription/);
   });
 
   it('asks for a résumé before an interview', () => {

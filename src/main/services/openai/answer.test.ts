@@ -141,10 +141,10 @@ describe('streamAnswer — request body', () => {
     expect(h.lastBody!.max_output_tokens).toBe(360 + 160);
   });
 
-  it('on a reasoning answer model: sends a low effort + reasoning-token headroom', async () => {
-    h.reasoning = true;
+  it('on a reasoning answer model: sends its LOWEST accepted effort + reasoning-token headroom', async () => {
+    h.reasoning = true; // gpt-5-mini — catalog efforts start at "minimal"
     await collect(streamAnswer(baseInput({ format: 'general' })));
-    expect(h.lastBody!.reasoning).toEqual({ effort: 'low' });
+    expect(h.lastBody!.reasoning).toEqual({ effort: 'minimal' });
     expect(h.lastBody!.max_output_tokens).toBe(360 + 1024);
   });
 

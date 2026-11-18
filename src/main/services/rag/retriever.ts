@@ -1,4 +1,5 @@
 import { providerFor } from '../../providers/registry';
+import { bm25 } from './lexical';
 import { sqliteVectorStore } from './vectorStore';
 import { STORY_CUE_MIN_SCORE, type ChunkSource, type RetrievedChunk } from '@shared/types';
 
@@ -93,6 +94,27 @@ export function balanceSources(
   return out.sort((a, b) => b.score - a.score);
 }
 
+/** Ranking when no comparable vector exists: BM25 over the scope, the same
+ *  archive cap and source balance. Scores are BM25 normalised to 0..1 (the
+ *  best match = 1) so the balance floors read the same. Weaker than vectors
+ *  on paraphrase ("led" vs "managed"), and said so in readiness. */
+export function lexicalRetrieve(
+  query: string,
+  pool: { id: string; sourceType: ChunkSource; content: string }[],
+  k: number,
+  storyCue: boolean,
+): RetrievedChunk[] {
+  const scored = bm25(query, pool, (c) => c.content, k * 4);
+  const max = scored[0]?.score ?? 1;
+  const ranked = scored.map((s) => ({ id: s.item.id, sourceType: s.item.sourceType, content: s.item.content, score: s.score / max }));
+  const chunks = balanceSources(capSource(ranked, 'session', SESSION_ARCHIVE_MAX, k), ranked, { cosine: false });
+  if (storyCue) {
+    const story = ranked.find((c) => c.sourceType === 'story' && c.score >= 0.5);
+    if (story && !chunks.some((c) => c.id === story.id)) chunks.push(story);
+  }
+  return chunks;
+}
+
 /** Embed the query and return the top-k chunks for grounding: the profile's
  *  resume/notes plus, when given, the selected pack's JD — and up to
  *  SESSION_ARCHIVE_MAX archives of earlier conversations.
@@ -108,10 +130,36 @@ export async function retrieve(
   jobId: string | null = null,
   opts: { storyCue?: boolean; tailoredResume?: boolean } = {},
 ): Promise<RetrievedChunk[]> {
+  const allowTailored = opts.tailoredResume === true;
+  // Everything in scope, with the embedding space each chunk was embedded in.
+  const scope = sqliteVectorStore.scope({ profileId, jobId, allowTailored });
   // Nothing indexed for this profile → nothing to rank. Skipping the embedding
   // call here took 1.5 s off the first token for a Space without documents.
-  if (!sqliteVectorStore.hasAny(profileId)) return [];
-  const vector = await providerFor('embedding').embedOne(query);
+  if (scope.length === 0) return [];
+
+  // Vector path: only when some chunk shares the current embedder's space.
+  // No embedding provider (no OpenAI key), a failed embedding call, or an
+  // index from another embedding model → those chunks are ranked LEXICALLY
+  // (BM25) instead of being compared across incompatible spaces or dropped.
+  const embedder = providerFor('embedding');
+  let identity: { provider: string; model: string; dim: number } | null = null;
+  try {
+    identity = embedder.identity();
+  } catch {
+    identity = null;
+  }
+  const comparable = (c: (typeof scope)[number]) =>
+    !!identity && !!c.embedded && c.embedded.provider === identity.provider && c.embedded.model === identity.model && c.embedded.dim === identity.dim;
+  let vector: Float32Array | null = null;
+  if (scope.some(comparable)) {
+    try {
+      vector = await embedder.embedOne(query);
+    } catch {
+      vector = null; // degrade to lexical for this question
+    }
+  }
+  const lexicalPool = vector ? scope.filter((c) => !comparable(c)) : scope;
+  if (!vector) return lexicalRetrieve(query, lexicalPool, k, opts.storyCue !== false);
   // Over-fetch so capping archives promotes real alternatives rather than
   // simply returning fewer chunks.
   //
@@ -119,16 +167,29 @@ export async function retrieve(
   // letting a tailored résumé stand in for the real one changes what the model
   // is told the user's experience IS. Defaulting that on for a caller who did
   // not ask is how a job application ended up grounding a client meeting.
-  const ranked = sqliteVectorStore.search({
+  let ranked = sqliteVectorStore.search({
     profileId,
     query: vector,
     k: k * 4,
     jobId,
-    allowTailored: opts.tailoredResume === true,
+    allowTailored,
+    ...(identity ? { identity } : {}),
   });
+  // Chunks with no comparable vector (added before an embedder existed, or
+  // under another embedding model) still compete — lexically, scaled under
+  // the best vector match so they fill gaps rather than displace it.
+  if (lexicalPool.length) {
+    const top = ranked[0]?.score ?? 0.5;
+    const lex = bm25(query, lexicalPool, (c) => c.content, k * 2);
+    const max = lex[0]?.score ?? 1;
+    ranked = [
+      ...ranked,
+      ...lex.map((s) => ({ id: s.item.id, sourceType: s.item.sourceType, content: s.item.content, score: (s.score / max) * top * 0.9 })),
+    ].sort((a, b) => b.score - a.score);
+  }
   const chunks = balanceSources(capSource(ranked, 'session', SESSION_ARCHIVE_MAX, k), ranked);
   if (opts.storyCue === false) return chunks;
-  const story = sqliteVectorStore.topStory({ profileId, query: vector });
+  const story = sqliteVectorStore.topStory({ profileId, query: vector, ...(identity ? { identity } : {}) });
   if (story && story.score >= STORY_CUE_MIN_SCORE && !chunks.some((c) => c.id === story.id)) {
     chunks.push(story);
   }

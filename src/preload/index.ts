@@ -27,6 +27,7 @@ import type {
   MemoryConflict,
   MemoryItem,
   Presence,
+  Readiness,
   SparringFeedback,
   Story,
   VoiceAudioEvent,
@@ -71,6 +72,10 @@ const api = {
       invoke<{ ok: boolean; model?: string; error?: string }>(IPC.settings.testProviderKey, { provider }),
     listModels: () => invoke<string[]>(IPC.settings.listModels),
     listProviderModels: (provider: string) => invoke<string[]>(IPC.settings.listProviderModels, { provider }),
+    /** Per-capability readiness: chat / transcription / retrieval. */
+    readiness: () => invoke<Readiness>(IPC.settings.readiness),
+    /** Re-run model discovery for every provider with a key. */
+    refreshModels: () => invoke<Readiness>(IPC.settings.refreshModels),
     setShortcuts: (shortcuts: Record<string, string>) =>
       invoke<{ shortcuts: Record<string, string> }>(IPC.settings.setShortcuts, { shortcuts }),
     resetShortcuts: () =>

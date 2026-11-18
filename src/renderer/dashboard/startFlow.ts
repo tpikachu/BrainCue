@@ -115,19 +115,25 @@ export const BUDGET_OPTIONS: { value: number | null; label: string }[] = [
  */
 export function startBlocker(a: {
   profile: Profile | undefined;
-  apiKeyPresent: boolean;
+  /** Can questions be detected and answered — does the provider the chat
+   *  tasks resolve to have a key? (Any provider: the OpenAI key is no longer
+   *  required — services/readiness.ts.) */
+  chatReady: boolean;
+  /** The readiness service's own wording for a chat problem, when known. */
+  chatProblem?: string;
   /** Can the chosen transcription engine run — cloud needs the OpenAI key,
    *  local needs its model downloaded (`AppSettings.sttReady`). */
   sttReady: boolean;
+  sttProblem?: string;
   sessionLive: boolean;
   activity?: ContextPackKind;
   spaceId?: string | null;
 }): string | null {
   if (a.sessionLive) return 'A session is already live — stop it first.';
-  // The key first: with the cloud engine it is ALSO what makes transcription
-  // ready, so it is the one fix that can clear both.
-  if (!a.apiKeyPresent) return 'Add your OpenAI API key in Settings.';
-  if (!a.sttReady) return 'Transcription is not set up — choose an engine under Settings → Speech-to-Text.';
+  if (!a.chatReady)
+    return a.chatProblem ?? 'No AI provider is set up — add an API key in Settings → Language Models.';
+  if (!a.sttReady)
+    return a.sttProblem ?? 'Transcription is not set up — choose an engine under Settings → Speech-to-Text.';
   if (!a.profile) return 'Pick a profile.';
   const config = ACTIVITIES[a.activity ?? DEFAULT_ACTIVITY];
   if (config?.needsResume && !a.profile.parsedResume)

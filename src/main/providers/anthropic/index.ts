@@ -7,6 +7,7 @@ import {
   type ModelKey,
 } from '../../services/openai/models';
 import { STRICT_JSON_INSTRUCTION, parseJsonText } from '../jsonText';
+import { LIVE_TASKS as POLICY_LIVE_TASKS } from '@shared/modelPolicy';
 import type { ChatJsonRequest, ChatProvider, ChatStreamEvent, VisionProvider } from '../types';
 import { anthropicClient } from './client';
 
@@ -67,6 +68,13 @@ export function anthropicEffort(task: ModelKey, modelId: string): Effort | null 
   return 'high';
 }
 
+/** Live tasks on a model whose thinking can be switched off (catalog
+ *  `disableThinking` — Haiku 5.5) run without it: first-token latency is
+ *  the product, and a classifier or a read-aloud cue gains little from it. */
+export function thinkingOff(task: ModelKey, modelId: string): boolean {
+  return POLICY_LIVE_TASKS.has(task) && modelOption('anthropic', modelId)?.disableThinking === true;
+}
+
 function buildParams(
   task: ModelKey,
   modelId: string,
@@ -75,14 +83,16 @@ function buildParams(
   maxOutputTokens: number | undefined,
 ): Anthropic.MessageCreateParamsNonStreaming {
   const effort = anthropicEffort(task, modelId);
+  const off = thinkingOff(task, modelId);
   return {
     model: modelId,
     max_tokens:
       (maxOutputTokens ?? DEFAULT_MAX_TOKENS) +
-      (isReasoningClaude(modelId) ? REASONING_HEADROOM : 0),
+      (isReasoningClaude(modelId) && !off ? REASONING_HEADROOM : 0),
     system,
     messages: [{ role: 'user', content }],
     ...(effort ? { output_config: { effort } } : {}),
+    ...(off ? { thinking: { type: 'disabled' as const } } : {}),
   };
 }
 

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { providerFor } from '../../providers/registry';
+import { providerErrorKind } from '../../providers/errorKind';
+import { reportUnavailable } from '../../providers/taskRoute';
 import type { QuestionType } from '@shared/types';
 
 export interface ClassifiedQuestion {
@@ -78,13 +80,23 @@ export async function classifyQuestion(
   text: string,
   opts: { recent?: ClassifierTurn[]; signal?: AbortSignal } = {},
 ): Promise<ClassifiedQuestion> {
-  const raw = await providerFor('chat').json<unknown>({
-    task: 'classify',
-    system: PROMPT,
-    user: `${renderRecent(opts.recent)}LATEST interviewer utterance:\n${text}`,
-    maxOutputTokens: 120,
-    signal: opts.signal,
-  });
+  let raw: unknown;
+  try {
+    raw = await providerFor('chat').json<unknown>({
+      task: 'classify',
+      system: PROMPT,
+      user: `${renderRecent(opts.recent)}LATEST interviewer utterance:\n${text}`,
+      maxOutputTokens: 120,
+      signal: opts.signal,
+    });
+  } catch (e) {
+    // A classifier model the account no longer has (v1's default,
+    // gpt-4.1-nano, was retired 2026-10-23 and every classification failed
+    // silently): remember it so the NEXT turn resolves to the next
+    // candidate on the same provider. This turn takes the detector fallback.
+    if (providerErrorKind(e) === 'model') reportUnavailable('classify');
+    throw e;
+  }
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new ClassifierOutputError('The question classifier returned something other than a JSON object.');
   }

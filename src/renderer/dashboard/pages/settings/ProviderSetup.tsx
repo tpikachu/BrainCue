@@ -12,10 +12,12 @@ import { Badge, Button, Field, TextInput } from '../../../components/ui';
  * encrypted; this window only ever learns a boolean per provider.
  */
 
+/** Fast / Balanced / Quality — stored under the legacy preset values so an
+ *  older build reading the same database still understands them. */
 export const PRESET_OPTIONS: { value: string; label: string; hint: string }[] = [
-  { value: 'balanced', label: 'Balanced', hint: 'Fast + smart (default)' },
-  { value: 'low_cost', label: 'Low cost', hint: 'Cheapest tiers' },
-  { value: 'best', label: 'Best', hint: 'Max quality' },
+  { value: 'low_cost', label: 'Fast', hint: 'Lowest latency' },
+  { value: 'balanced', label: 'Balanced', hint: 'Fast + stronger (default)' },
+  { value: 'best', label: 'Quality', hint: 'Best answers, still live' },
 ];
 
 export function ProviderTiles({

@@ -65,6 +65,8 @@ export const SETTINGS_KEYS = {
   devDbExplorer: 'dev_db_explorer', // raw table browser in the sidebar ('1'/'0'; absent = off)
   sttPrefs: 'stt_prefs', // json SttPrefs (engine cloud|local + local model id)
   onboardingDone: 'onboarding_done', // first-run setup finished/skipped ('1'/'0'; absent = not done)
+  chatProvider: 'chat_provider', // the provider chat tasks run on (absent = first provider with a key)
+  modelDiscovery: 'model_discovery', // json { [provider]: { ids, at } } — cached GET /models, off the hot path
   /** Encrypted key + presence flag per NON-OpenAI cloud provider (the OpenAI
    *  key keeps its original keys above). */
   providerKeyEnc: (provider: string) => `provider_key_enc:${provider}`,
@@ -77,6 +79,8 @@ const APP_SETTING_KEYS: string[] = [
   SETTINGS_KEYS.onboardingDone,
   SETTINGS_KEYS.models,
   SETTINGS_KEYS.modelPreset,
+  SETTINGS_KEYS.chatProvider,
+  SETTINGS_KEYS.modelDiscovery,
   SETTINGS_KEYS.reasoningEfforts,
   SETTINGS_KEYS.overlayPrefs,
   SETTINGS_KEYS.privacyMode,

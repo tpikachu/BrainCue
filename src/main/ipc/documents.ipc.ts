@@ -1,3 +1,4 @@
+import { chatTaskReady } from '../services/readiness';
 import { z } from 'zod';
 import { IPC } from '@shared/ipc';
 import { handle } from './helpers';
@@ -6,7 +7,6 @@ import { fetchUrlText } from '../services/documents/fetchUrl';
 import { parseResume } from '../services/openai/parsing';
 import { reindexProfile } from '../services/rag/indexProfile';
 import { profilesRepo } from '../db/repositories/profiles.repo';
-import { apiKeyStore } from '../services/security/apiKey';
 
 export function registerDocumentsIpc(): void {
   // Extract text from a file WITHOUT persisting — used to populate the editor's
@@ -35,7 +35,9 @@ export function registerDocumentsIpc(): void {
     IPC.documents.saveResume,
     z.object({ profileId: z.string().min(1), resumeText: z.string() }),
     async ({ profileId, resumeText }) => {
-      const hasKey = apiKeyStore.isPresent();
+      // Parsing runs on whichever provider the 'parsing' task resolves to —
+      // not only OpenAI (services/readiness.ts chatTaskReady).
+      const hasKey = chatTaskReady('parsing');
       const hasText = !!resumeText.trim();
       // Save the text; clearing the resume also drops its parsed structure.
       profilesRepo.update(profileId, { resumeText, ...(hasText ? {} : { parsedResume: null }) });

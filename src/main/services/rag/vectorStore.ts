@@ -23,13 +23,43 @@ export interface VectorStore {
     /** Allow an application's TAILORED résumé to stand in for the base one.
      *  Interview-family grounding only — see retriever.ts. */
     allowTailored?: boolean;
+    /** Only compare vectors from THIS embedding space (provider/model/dim).
+     *  Vectors from another space are not comparable — the query vector
+     *  came from the current embedder — so they are skipped, never scored. */
+    identity?: { provider: string; model: string; dim: number };
   }): RetrievedChunk[];
   /** The single best-matching `story` chunk for the query (or null), regardless of
    *  the top-k. Reuses the caller's query vector so it adds no extra embedding call. */
-  topStory(args: { profileId: string; query: Float32Array }): RetrievedChunk | null;
+  topStory(args: {
+    profileId: string;
+    query: Float32Array;
+    identity?: { provider: string; model: string; dim: number };
+  }): RetrievedChunk | null;
+  /** Every chunk in a retrieval scope (same scoping as `search`), with the
+   *  embedding space it was embedded in, if any — the lexical fallback ranks
+   *  the ones with no comparable vector. Bounded. */
+  scope(args: {
+    profileId: string;
+    jobId?: string | null;
+    allowTailored?: boolean;
+  }): { id: string; sourceType: ChunkSource; content: string; embedded: { provider: string; model: string; dim: number } | null }[];
   /** Does this profile have ANY embedded chunk? Lets the retriever skip the
    *  embedding round trip (≈1–1.5 s on the answer path) for an empty Space. */
   hasAny(profileId: string): boolean;
+}
+
+/** Bound on how many chunks one retrieval scope reads (lexical fallback). */
+const SCOPE_MAX = 5000;
+
+/** Is a stored vector comparable with a query from `identity`? A dimension
+ *  mismatch is never comparable, whatever the labels say. */
+function sameSpace(
+  r: { provider: string; model: string; dim: number },
+  identity: { provider: string; model: string; dim: number } | undefined,
+  queryDim: number,
+): boolean {
+  if (r.dim !== queryDim) return false;
+  return !identity || (r.provider === identity.provider && r.model === identity.model && r.dim === identity.dim);
 }
 
 export const sqliteVectorStore: VectorStore = {
@@ -63,7 +93,38 @@ export const sqliteVectorStore: VectorStore = {
     );
   },
 
-  search({ profileId, query, k, jobId, allowTailored = false }) {
+  scope({ profileId, jobId, allowTailored = false }) {
+    const rows = db()
+      .select({
+        id: schema.chunks.id,
+        jobId: schema.chunks.packId,
+        sourceType: schema.chunks.sourceType,
+        content: schema.chunks.content,
+        provider: schema.embeddings.provider,
+        model: schema.embeddings.model,
+        dim: schema.embeddings.dim,
+      })
+      .from(schema.chunks)
+      .leftJoin(schema.embeddings, eq(schema.embeddings.chunkId, schema.chunks.id))
+      .where(eq(schema.chunks.profileId, profileId))
+      .limit(SCOPE_MAX)
+      .all();
+    const hasTailored = allowTailored && rows.some((r) => r.jobId === jobId && r.sourceType === 'tailored');
+    return rows
+      .filter(
+        (r) =>
+          (r.jobId == null || r.jobId === jobId) &&
+          !(hasTailored && r.jobId == null && r.sourceType === 'resume'),
+      )
+      .map((r) => ({
+        id: r.id,
+        sourceType: r.sourceType as ChunkSource,
+        content: r.content,
+        embedded: r.provider && r.model && r.dim ? { provider: r.provider, model: r.model, dim: r.dim } : null,
+      }));
+  },
+
+  search({ profileId, query, k, jobId, allowTailored = false, identity }) {
     // Join chunks (for the profile) with their embeddings, score in-process.
     const rows = db()
       .select({
@@ -72,11 +133,15 @@ export const sqliteVectorStore: VectorStore = {
         sourceType: schema.chunks.sourceType,
         content: schema.chunks.content,
         vector: schema.embeddings.vector,
+        provider: schema.embeddings.provider,
+        model: schema.embeddings.model,
+        dim: schema.embeddings.dim,
       })
       .from(schema.chunks)
       .innerJoin(schema.embeddings, eq(schema.embeddings.chunkId, schema.chunks.id))
       .where(eq(schema.chunks.profileId, profileId))
-      .all();
+      .all()
+      .filter((r) => sameSpace(r, identity, query.length));
 
     // An application job carries `tailored` chunks (the resume rewritten FOR that
     // job) — when present, they REPLACE the base resume for this job's retrieval,
@@ -107,17 +172,21 @@ export const sqliteVectorStore: VectorStore = {
       .slice(0, k);
   },
 
-  topStory({ profileId, query }) {
+  topStory({ profileId, query, identity }) {
     const rows = db()
       .select({
         id: schema.chunks.id,
         content: schema.chunks.content,
         vector: schema.embeddings.vector,
+        provider: schema.embeddings.provider,
+        model: schema.embeddings.model,
+        dim: schema.embeddings.dim,
       })
       .from(schema.chunks)
       .innerJoin(schema.embeddings, eq(schema.embeddings.chunkId, schema.chunks.id))
       .where(and(eq(schema.chunks.profileId, profileId), eq(schema.chunks.sourceType, 'story')))
-      .all();
+      .all()
+      .filter((r) => sameSpace(r, identity, query.length));
 
     let best: RetrievedChunk | null = null;
     for (const r of rows) {

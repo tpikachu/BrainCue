@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { modelOption, type CloudProviderInfo } from '@shared/providers';
 import { visionSolvePrompt } from '../../services/openai/codingPrompt';
 import { resolveModel, type ModelKey } from '../../services/openai/models';
+import { effortFor } from '../effort';
 import { STRICT_JSON_INSTRUCTION, parseJsonText } from '../jsonText';
 import type { ChatJsonRequest, ChatProvider, ChatStreamEvent, VisionProvider } from '../types';
 import { compatClient } from './client';
@@ -51,6 +52,14 @@ export function openaiCompatibleProvider(info: CloudProviderInfo): {
           max_tokens:
             ceiling + (modelOption(info.id, modelId)?.reasoning ? REASONING_HEADROOM : 0),
         };
+  /** `reasoning_effort` for catalogued reasoning models (Gemini accepts
+   *  "minimal" as its lowest; Groq's GPT-OSS "low"). Unknown ids get none —
+   *  a vendor that rejects the field would fail the whole request. */
+  const effort = (task: ModelKey, modelId: string) => {
+    if (!modelOption(info.id, modelId)?.efforts) return {};
+    const e = effortFor(task, info.id, modelId);
+    return e ? ({ reasoning_effort: e } as unknown as Record<string, never>) : {};
+  };
 
   async function* run(
     task: ModelKey,
@@ -68,6 +77,7 @@ export function openaiCompatibleProvider(info: CloudProviderInfo): {
           stream: true,
           stream_options: { include_usage: true },
           ...maxTokens(model, ceiling),
+          ...effort(task, model),
         },
         { signal },
       );
@@ -119,6 +129,7 @@ export function openaiCompatibleProvider(info: CloudProviderInfo): {
           { role: 'user', content: req.user },
         ],
         ...maxTokens(model, req.maxOutputTokens),
+        ...effort(req.task, model),
       };
       let text: string;
       try {

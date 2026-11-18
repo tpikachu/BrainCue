@@ -28,6 +28,7 @@ import {
   isReasoningModel,
   reasoningParam,
 } from './models';
+import { modelOption } from '@shared/providers';
 
 beforeEach(() => {
   state.preset = null;
@@ -57,10 +58,14 @@ describe('presetModels() / PRESETS', () => {
     expect(Object.keys(PRESETS.low_cost).sort()).toEqual(keys);
     expect(Object.keys(PRESETS.best).sort()).toEqual(keys);
   });
-  it('keeps the live paths (answer/classify) on NON-reasoning models in every preset', () => {
+  it('keeps the live paths (answer/classify) free of hidden reasoning in every preset', () => {
+    // The GPT-6 live models are reasoning models whose lowest effort is
+    // "none" — the policy always sends that on live tasks (providers/effort.ts).
     for (const p of [PRESETS.balanced, PRESETS.low_cost, PRESETS.best]) {
-      expect(isReasoningModel(p.answer)).toBe(false);
-      expect(isReasoningModel(p.classify)).toBe(false);
+      for (const id of [p.answer, p.classify]) {
+        const opt = modelOption('openai', id);
+        expect(!isReasoningModel(id) || opt?.efforts?.[0] === 'none').toBe(true);
+      }
     }
   });
   it('uses a reasoning model for the coding solver in every preset', () => {
@@ -134,8 +139,9 @@ describe('reasoningParam()', () => {
     state.models = { coding: 'gpt-4.1' };
     expect(reasoningParam('coding')).toEqual({});
   });
-  it('is empty for tasks with no configured effort even on a reasoning model', () => {
-    state.preset = 'best'; // answer = full gpt-4.1 (non-reasoning) — still empty
+  it('a live task on a reasoning model sends its LOWEST effort ("none"), never the default', () => {
+    expect(reasoningParam('answer')).toEqual({ reasoning: { effort: 'none' } });
+    state.models = { answer: 'gpt-4.1-mini' }; // non-reasoning → no param at all
     expect(reasoningParam('answer')).toEqual({});
   });
   it('respects an effort override on a reasoning model', () => {

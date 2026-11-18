@@ -1,3 +1,4 @@
+import { chatTaskReady } from '../services/readiness';
 import { z } from 'zod';
 import { IPC } from '@shared/ipc';
 import { isInterviewSpace } from '@shared/activities';
@@ -54,7 +55,8 @@ export function registerJobsIpc(): void {
         ? jobsRepo.update(id, { kind, title, company, jdUrl, jdText, companyUrl, notes })
         : jobsRepo.create({ profileId, kind, title, company, jdUrl, jdText, companyUrl, notes });
 
-      const hasKey = apiKeyStore.isPresent();
+      // JD parsing runs on the 'parsing' task's provider (any chat key).
+      const hasKey = chatTaskReady('parsing');
       // Structured JD parsing extracts requirements, responsibilities, and
       // seniority — an interview artifact. Run over a standup agenda it invents
       // all three, so non-job Spaces index their document as plain text.

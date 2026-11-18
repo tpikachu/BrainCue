@@ -23,6 +23,23 @@ export function installTaskRouteResolver(fn: TaskRouteResolver): void {
   resolver = fn;
 }
 
+type UnavailableMarker = (route: TaskRoute) => void;
+let markUnavailable: UnavailableMarker | null = null;
+
+/** models.ts installs where "this model is not served" is remembered. */
+export function installUnavailableMarker(fn: UnavailableMarker): void {
+  markUnavailable = fn;
+}
+
+/** A request on `task` failed because its model is not served to the
+ *  account: remember it so the task resolves to the next candidate on the
+ *  SAME provider. Returns the route that failed (for the notice), or null. */
+export function reportUnavailable(task: ModelKey): TaskRoute | null {
+  const route = taskRoute(task);
+  if (route && markUnavailable) markUnavailable(route);
+  return route;
+}
+
 /** The full route (provider + model) for a task, or null before a resolver
  *  is installed — latency records name the model that answered. */
 export function taskRoute(task: ModelKey): TaskRoute | null {

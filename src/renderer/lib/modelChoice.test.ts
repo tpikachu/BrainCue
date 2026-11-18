@@ -32,17 +32,22 @@ describe('grouping the catalog per task', () => {
     const groups = modelGroupsFor('coding', keys);
     const openai = groups.find((g) => g.provider === 'openai')!;
     // Recommended for coding lead, then the rest of the OpenAI catalog in order.
-    expect(openai.models.slice(0, 2).map((m) => m.id)).toEqual(['gpt-5', 'gpt-5-mini']);
-    expect(openai.models.slice(0, 2).every((m) => m.recommended)).toBe(true);
+    expect(openai.models.slice(0, 3).map((m) => m.id)).toEqual(['gpt-6.1-terra', 'gpt-6.2-sol', 'gpt-6.2-astra']);
+    expect(openai.models.slice(0, 3).every((m) => m.recommended)).toBe(true);
+    // Deprecated / retired ids stay listed (an existing override still shows
+    // its name) but are never recommended.
     expect(openai.models.map((m) => m.id)).toEqual(
       expect.arrayContaining(['gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'gpt-5-nano']),
     );
     expect(openai.models.find((m) => m.id === 'gpt-4.1-nano')!.recommended).toBe(false);
     const anthropic = groups.find((g) => g.provider === 'anthropic')!;
-    expect(anthropic.models[0].id).toBe('claude-fable-5-1');
+    expect(anthropic.models.filter((m) => m.recommended).map((m) => m.id)).toEqual([
+      'claude-sonnet-5-5',
+      'claude-opus-5-5',
+      'claude-fable-5-2',
+    ]);
     // Haiku is not a coding recommendation, but a paying user may still pick it.
-    expect(anthropic.models.map((m) => m.id)).toContain('claude-haiku-4-5');
-    expect(anthropic.models.at(-1)!.id).toBe('claude-haiku-4-5');
+    expect(anthropic.models.map((m) => m.id)).toContain('claude-haiku-5-5');
   });
 
   it('merges the models a key can see under the catalog, for keyed providers only', () => {

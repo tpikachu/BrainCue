@@ -10,7 +10,11 @@ import type { AppSettings, AudioPrefs, OverlayPrefs } from '@shared/types';
 import { handle, NoInput } from './helpers';
 import { apiKeyStore } from '../services/security/apiKey';
 import { listModels, testApiKey } from '../services/openai/client';
-import { defaultEfforts, modelPreset, presetModels } from '../services/openai/models';
+import { chatProviderSetting, defaultEfforts, modelPreference, modelPreset, presetModels, resolveTask } from '../services/openai/models';
+import { qualifyModel } from '@shared/providers';
+import { POLICY_TASKS } from '@shared/modelPolicy';
+import { clearDiscovery, refreshDiscovery, storeDiscovery } from '../services/models/discovery';
+import { getReadiness } from '../services/readiness';
 import { SETTINGS_KEYS, settingsRepo } from '../db/repositories/settings.repo';
 import { profilesRepo } from '../db/repositories/profiles.repo';
 import { readCompanionPrefs } from '../services/engine/modes/companion.mode';
@@ -46,6 +50,14 @@ function readSettings(): AppSettings {
     apiKeyPresent: apiKeyStore.isPresent(),
     models: settingsRepo.getJson(SETTINGS_KEYS.models, {}),
     modelPreset: modelPreset(),
+    chatProvider: chatProviderSetting(),
+    modelPreference: modelPreference(),
+    effectiveModels: Object.fromEntries(
+      POLICY_TASKS.map((t) => {
+        const r = resolveTask(t);
+        return [t, qualifyModel(r.provider, r.model)];
+      }),
+    ),
     modelDefaults: { ...presetModels() }, // effective per-task defaults for the active preset
     reasoningEfforts: settingsRepo.getJson(SETTINGS_KEYS.reasoningEfforts, {}),
     reasoningEffortDefaults: { ...defaultEfforts },
@@ -79,6 +91,8 @@ function readSettings(): AppSettings {
 const settingsPatch = z.object({
   models: z.record(z.string()).optional(),
   modelPreset: z.enum(['balanced', 'low_cost', 'best']).optional(),
+  modelPreference: z.enum(['fast', 'balanced', 'quality']).optional(),
+  chatProvider: z.enum(['openai', 'anthropic', 'google', 'groq', 'openrouter']).nullable().optional(),
   reasoningEfforts: z.record(z.string()).optional(),
   overlay: z
     .object({
@@ -148,6 +162,17 @@ export function registerSettingsIpc(): void {
       settingsRepo.set(SETTINGS_KEYS.activeProfileId, patch.activeProfileId ?? '');
     if (patch.models) settingsRepo.setJson(SETTINGS_KEYS.models, patch.models);
     if (patch.modelPreset) settingsRepo.set(SETTINGS_KEYS.modelPreset, patch.modelPreset);
+    // Stored under the legacy preset names, so an older build reading this
+    // database still sees a preset it understands.
+    if (patch.modelPreference)
+      settingsRepo.set(
+        SETTINGS_KEYS.modelPreset,
+        patch.modelPreference === 'fast' ? 'low_cost' : patch.modelPreference === 'quality' ? 'best' : 'balanced',
+      );
+    if (patch.chatProvider !== undefined) {
+      if (patch.chatProvider) settingsRepo.set(SETTINGS_KEYS.chatProvider, patch.chatProvider);
+      else settingsRepo.delete(SETTINGS_KEYS.chatProvider);
+    }
     if (patch.reasoningEfforts)
       settingsRepo.setJson(SETTINGS_KEYS.reasoningEfforts, patch.reasoningEfforts);
     if (patch.overlay) {
@@ -194,11 +219,14 @@ export function registerSettingsIpc(): void {
     z.object({ provider: providerId, key: z.string().min(1) }),
     ({ provider, key }) => {
       providerKeys.set(provider, key);
+      // Learn what the new key can see — in the background, off any answer path.
+      void refreshDiscovery([provider], true);
       return { providerKeys: providerKeys.presence() };
     },
   );
   handle(IPC.settings.clearProviderKey, z.object({ provider: providerId }), ({ provider }) => {
     providerKeys.clear(provider);
+    clearDiscovery(provider);
     return { providerKeys: providerKeys.presence() };
   });
   handle(IPC.settings.testProviderKey, z.object({ provider: providerId }), ({ provider }) =>
@@ -218,9 +246,16 @@ export function registerSettingsIpc(): void {
   handle(IPC.settings.testApiKey, NoInput, () => testApiKey());
 
   handle(IPC.settings.listModels, NoInput, () => listModels());
-  handle(IPC.settings.listProviderModels, z.object({ provider: providerId }), ({ provider }) =>
-    listProviderModels(provider),
-  );
+  handle(IPC.settings.listProviderModels, z.object({ provider: providerId }), async ({ provider }) => {
+    const ids = await listProviderModels(provider);
+    storeDiscovery(provider, ids); // the picker's fetch doubles as a discovery refresh
+    return ids;
+  });
+  handle(IPC.settings.readiness, NoInput, () => getReadiness());
+  handle(IPC.settings.refreshModels, NoInput, async () => {
+    await refreshDiscovery(undefined, true);
+    return getReadiness();
+  });
 
   // Re-binds the global shortcuts live (no restart needed).
   handle(

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { api } from '../../../lib/api';
-import type { AppSettings } from '@shared/types';
+import type { AppSettings, Readiness } from '@shared/types';
 import { FLAGS } from '@shared/flags';
 import { CLOUD_PROVIDERS, modelLabel, parseModelId, qualifyModel, type CloudProviderId } from '@shared/providers';
 import { Badge, Button, Card, Dropdown, Field, TextInput, type DropdownOption } from '../../../components/ui';
@@ -166,15 +166,31 @@ function ModelsCard({
     ([k, v]) => v && v.trim() && v !== (settings.modelDefaults?.[k] ?? ''),
   );
 
-  // Switch the cost/quality preset. Picking one is a clean switch — it clears the
-  // per-task overrides, so the config matches the preset (no lingering "Custom").
+  // What the policy picked (provider-aware), and why — from main.
+  const [readiness, setReadiness] = useState<Readiness | null>(null);
+  const loadReadiness = () =>
+    api.settings
+      .readiness()
+      .then(setReadiness)
+      .catch(() => setReadiness(null));
+  useEffect(() => {
+    void loadReadiness();
+  }, [settings]);
+
+  // Switch Fast / Balanced / Quality. Explicit per-task overrides are KEPT —
+  // they are the user's own choices; an override that cannot run is
+  // corrected by the policy (with the reason shown), not silently wiped.
   const selectPreset = async (p: string) => {
     setPreset(p);
-    setOverrides({});
-    dirty.current.clear();
-    await api.settings.set({ modelPreset: p, models: {} });
+    await api.settings.set({ modelPreset: p });
     await onSaved();
-    setStatus(`Preset: ${PRESET_OPTIONS.find((o) => o.value === p)?.label ?? p}.`);
+    const label = PRESET_OPTIONS.find((o) => o.value === p)?.label ?? p;
+    setStatus(customized ? `${label} — your per-task overrides in Advanced still apply.` : `${label}.`);
+  };
+
+  const selectProvider = async (p: string) => {
+    await api.settings.set({ chatProvider: p === 'auto' ? null : p });
+    await onSaved();
   };
 
   const keyedChat = CLOUD_PROVIDERS.filter(
@@ -251,8 +267,11 @@ function ModelsCard({
    *  beyond the catalog; keyless providers collapse to "Add key"), then the
    *  free-text OpenRouter entry when that key exists. */
   const chatRows = (key: string, def: string, current: string): DropdownOption[] => {
+    // The policy's pick for this task on the chosen provider (not the OpenAI
+    // preset table — a Claude user's default is a Claude model).
+    const effective = settings.effectiveModels?.[key] ?? def;
     const rows: DropdownOption[] = [
-      { value: '', label: `Default — ${modelLabel(def)}`, description: 'From the preset' },
+      { value: '', label: `Default — ${modelLabel(effective)}`, description: 'Picked for your provider and preference' },
       ...pickerRows(key, settings.providerKeys, current, { addKeyDisabled: false }, account),
     ];
     if (settings.providerKeys?.openrouter) {
@@ -269,27 +288,71 @@ function ModelsCard({
   return (
     <Card>
       <div className="mb-1 flex items-center justify-between">
-        <h3 className="font-medium">Models per task</h3>
-        <Button variant="ghost" onClick={loadLists} loading={loadingList} disabled={!keyedChat.length}>
+        <h3 className="font-medium">Answer model</h3>
+        <Button
+          variant="ghost"
+          onClick={async () => {
+            await loadLists();
+            setReadiness(await api.settings.refreshModels());
+          }}
+          loading={loadingList}
+          disabled={!keyedChat.length}
+        >
           Refresh model lists
         </Button>
       </div>
       <p className="mb-4 text-sm text-neutral-400">
-        Pick a preset, or override any single task below. Every dropdown lists every model from each
-        provider you have a key for — ★ marks the ones suited to that task — plus whatever else your
-        key can see. Non-OpenAI picks are stored as <span className="font-mono">provider/model</span>.
+        Choose a provider and a preference — BrainCue picks a suitable model for each job (question
+        detection, live answers, parsing, the coding solver) from what your key can actually use.
       </p>
 
-      {/* Cost/quality preset — sets the per-task defaults; overrides below still win. */}
-      <div className="mb-4">
-        <span className="mb-1.5 block text-xs font-medium text-neutral-400">Preset</span>
-        <PresetPicker value={preset} customized={customized} onSelect={(p) => void selectPreset(p)} />
-        <p className="mt-1.5 text-xs text-neutral-500">
-          The live answer &amp; question detection stay on fast, non-reasoning models in every preset
-          (even “Best”) — a reasoning model there would add latency without helping. “Best” reserves
-          a reasoning model for the coding solver.
-        </p>
+      <div className="mb-4 grid gap-3 sm:grid-cols-[minmax(0,14rem)_1fr]">
+        <Field label="Provider">
+          <Dropdown
+            value={settings.chatProvider ?? 'auto'}
+            onChange={(v) => void selectProvider(v)}
+            options={[
+              { value: 'auto', label: 'Automatic', description: 'The first provider you have a key for' },
+              ...CLOUD_PROVIDERS.filter((p) => p.capabilities.includes('chat')).map((p) => ({
+                value: p.id,
+                label: p.name,
+                description: settings.providerKeys?.[p.id] ? 'Key stored' : 'No key yet',
+                disabled: !settings.providerKeys?.[p.id],
+              })),
+            ]}
+          />
+        </Field>
+        <div>
+          <span className="mb-1.5 block text-xs font-medium text-neutral-400">Preference</span>
+          <PresetPicker value={preset} customized={false} onSelect={(p) => void selectPreset(p)} />
+        </div>
       </div>
+      {readiness && (
+        <div className="mb-4 rounded-lg border border-white/5 bg-neutral-950/60 px-3 py-2 text-xs">
+          <p className="text-neutral-300">{readiness.chat.explanation}</p>
+          {readiness.chat.notice && <p className="mt-1 text-amber-300">{readiness.chat.notice}</p>}
+          {readiness.chat.problem && (
+            <p className="mt-1 text-red-300">
+              {readiness.chat.problem} {readiness.chat.action}
+            </p>
+          )}
+          <p className="mt-1 text-neutral-500">
+            Question detection: {modelLabel(settings.effectiveModels?.classify ?? '')}. Live tasks always run
+            with the lowest reasoning effort the model allows — first-token time matters most there.
+          </p>
+        </div>
+      )}
+
+      <details className="group" open={customized}>
+        <summary className="mb-3 cursor-pointer select-none text-sm font-medium text-neutral-300">
+          Advanced — choose a model per task{customized ? ' (overrides active)' : ''}
+        </summary>
+        <p className="mb-4 text-sm text-neutral-400">
+          An override wins over the automatic pick while it can run; if its provider has no key or your
+          account no longer lists it, the automatic pick is used and the reason is shown above. Every
+          dropdown lists each provider you have a key for — ★ marks the ones suited to that task. Non-OpenAI
+          picks are stored as <span className="font-mono">provider/model</span>.
+        </p>
 
       <div className="space-y-4">
         {MODEL_FIELDS.map((f) => {
@@ -357,6 +420,7 @@ function ModelsCard({
           Reset to defaults
         </Button>
       </div>
+      </details>
       {status && <p className="mt-3 text-sm text-neutral-300">{status}</p>}
     </Card>
   );
