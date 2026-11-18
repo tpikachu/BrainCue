@@ -1,0 +1,200 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+/**
+ * Review finding: audio startup could report success when capture failed.
+ *  - an acquisition failure returned normally, so the start modal closed;
+ *  - an attach failure (AudioContext) was swallowed into a notice, leaving
+ *    the session marked live with no pipeline and the streams held open;
+ *  - the capture status was reported BEFORE the pipeline was attached.
+ * The store now returns an explicit StartResult and rolls back on failure.
+ */
+const h = vi.hoisted(() => ({
+  calls: [] as string[],
+  savePrompt: null as null | ((p: unknown) => void),
+  startFails: false,
+  ctxFails: false,
+  displayFails: false,
+  micFails: false,
+  tracks: [] as { stop: ReturnType<typeof vi.fn>; readyState: string }[],
+}));
+
+vi.mock('../lib/api', () => ({
+  api: {
+    events: {
+      onTranscriptDelta: () => () => {},
+      onQuestionDetected: () => () => {},
+      onSavePrompt: (cb: (p: unknown) => void) => {
+        h.savePrompt = cb;
+        return () => {};
+      },
+      onSessionError: () => () => {},
+      onSessionState: () => () => {},
+    },
+    session: {
+      start: async () => {
+        h.calls.push('start');
+        if (h.startFails) throw new Error('No AI provider is set up');
+        return { id: 's-new' };
+      },
+      resume: async (id: string) => {
+        h.calls.push('resume');
+        return { id };
+      },
+      stop: async (id: string) => h.calls.push(`stop:${id}`),
+      delete: async (id: string) => h.calls.push(`delete:${id}`),
+      reportCapture: async (st: { system: boolean; mic: boolean }) => h.calls.push(`report:${st.system}/${st.mic}`),
+      sendRealtimeAudio: () => {},
+    },
+  },
+}));
+
+/** 'ended' listeners per source, so a test can end a track mid-session. */
+const ended: Record<string, (() => void)[]> = { display: [], mic: [] };
+
+function stream(kind: 'display' | 'mic') {
+  const audio = {
+    stop: vi.fn(),
+    readyState: 'live',
+    addEventListener: (ev: string, cb: () => void) => ev === 'ended' && ended[kind].push(cb),
+    kind: 'audio',
+  };
+  const video = { stop: vi.fn(), readyState: 'live', addEventListener: vi.fn(), kind: 'video' };
+  h.tracks.push(audio, ...(kind === 'display' ? [video] : []));
+  const all = kind === 'display' ? [audio, video] : [audio];
+  return {
+    getTracks: () => all,
+    getAudioTracks: () => [audio],
+    getVideoTracks: () => (kind === 'display' ? [video] : []),
+  };
+}
+
+vi.stubGlobal('navigator', {
+  mediaDevices: {
+    getDisplayMedia: async () => {
+      if (h.displayFails) throw new Error('Permission denied');
+      return stream('display');
+    },
+    getUserMedia: async () => {
+      if (h.micFails) throw new Error('Permission denied');
+      return stream('mic');
+    },
+  },
+});
+vi.stubGlobal(
+  'AudioContext',
+  class {
+    destination = {};
+    async resume() {
+      if (h.ctxFails) throw new Error('AudioContext was not allowed to start');
+    }
+    createGain() {
+      return { gain: { value: 1 }, connect: () => {} };
+    }
+    createMediaStreamSource() {
+      return { connect: () => {} };
+    }
+    createScriptProcessor() {
+      h.calls.push('pump');
+      return { connect: () => {}, disconnect: () => {}, onaudioprocess: null };
+    }
+    async close() {}
+  },
+);
+vi.stubGlobal('window', { api: {} });
+
+import { useLiveSession } from './useLiveSession';
+
+const startArgs = { profileId: 'p1', answerFormat: 'general', jobId: 'j1', activity: 'job', listensTo: 'system' as const };
+
+beforeEach(() => {
+  h.calls.length = 0;
+  h.tracks.length = 0;
+  h.startFails = h.ctxFails = h.displayFails = h.micFails = false;
+  ended.display.length = 0;
+  ended.mic.length = 0;
+  useLiveSession.setState({ session: null, micError: null, sessionError: null, pendingSave: null });
+});
+
+describe('start reports what actually happened', () => {
+  it('success: the pipeline is attached BEFORE capture status is reported', async () => {
+    const r = await useLiveSession.getState().startNew(startArgs);
+    expect(r).toEqual({ ok: true, sessionId: 's-new' });
+    expect(h.calls).toEqual(['start', 'pump', 'pump', 'report:true/true']);
+    expect(useLiveSession.getState().session?.id).toBe('s-new');
+  });
+
+  it('no audio at all: an explicit failure, and no session is created', async () => {
+    h.displayFails = true;
+    h.micFails = true;
+    const r = await useLiveSession.getState().startNew(startArgs);
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.stage).toBe('capture');
+    expect(h.calls).not.toContain('start');
+  });
+
+  it('the audio pipeline fails to attach: the session is stopped and deleted, the streams released', async () => {
+    h.ctxFails = true;
+    const r = await useLiveSession.getState().startNew(startArgs);
+    expect(r).toMatchObject({ ok: false, stage: 'audio' });
+    expect(r.ok === false && r.error).toMatch(/AudioContext was not allowed to start/);
+    expect(h.calls).toEqual(['start', 'stop:s-new', 'delete:s-new']); // never reported as capturing
+    expect(h.tracks.every((t) => t.stop.mock.calls.length > 0)).toBe(true);
+    const st = useLiveSession.getState();
+    expect(st.session).toBeNull();
+    // The stopped session's save prompt is not offered — it heard nothing.
+    h.savePrompt?.({ sessionId: 's-new' });
+    expect(useLiveSession.getState().pendingSave).toBeNull();
+  });
+
+  it('the session fails to open: the acquired streams are released', async () => {
+    h.startFails = true;
+    const r = await useLiveSession.getState().startNew(startArgs);
+    expect(r).toMatchObject({ ok: false, stage: 'start', error: 'No AI provider is set up' });
+    expect(h.tracks.every((t) => t.stop.mock.calls.length > 0)).toBe(true);
+    expect(useLiveSession.getState().sessionError).toBe('No AI provider is set up');
+  });
+
+  it('a resumed session whose audio fails is stopped but NOT deleted (it has earlier content)', async () => {
+    h.ctxFails = true;
+    const r = await useLiveSession.getState().resumeExisting({ sessionId: 's-old', listensTo: 'system', prior: [] });
+    expect(r).toMatchObject({ ok: false, stage: 'audio' });
+    expect(h.calls).toEqual(['resume', 'stop:s-old']);
+  });
+
+  it('a share that ends during setup is not reported as live', async () => {
+    const real = navigator.mediaDevices.getDisplayMedia;
+    (navigator.mediaDevices as { getDisplayMedia: unknown }).getDisplayMedia = async () => {
+      const s = stream('display');
+      s.getAudioTracks()[0].readyState = 'ended';
+      return s;
+    };
+    const r = await useLiveSession.getState().startNew(startArgs);
+    (navigator.mediaDevices as { getDisplayMedia: unknown }).getDisplayMedia = real;
+    expect(r.ok).toBe(true); // the microphone still flows
+    expect(h.calls.at(-1)).toBe('report:false/true');
+  });
+it('picker cancelled (or no display audio) but the mic works: the session runs and NAMES the missing stream', async () => {
+    h.displayFails = true;
+    const r = await useLiveSession.getState().startNew(startArgs);
+    expect(r.ok).toBe(true);
+    expect(useLiveSession.getState().micError).toMatch(/System audio was not captured/);
+    expect(h.calls.at(-1)).toBe('report:false/true');
+  });
+
+  it('no microphone device but the call is captured: runs, names the missing stream', async () => {
+    h.micFails = true;
+    const r = await useLiveSession.getState().startNew(startArgs);
+    expect(r.ok).toBe(true);
+    expect(useLiveSession.getState().micError).toMatch(/Microphone access was denied/);
+    expect(h.calls.at(-1)).toBe('report:true/false');
+  });
+
+  it('a track ending mid-session is reported truthfully, with what it means', async () => {
+    await useLiveSession.getState().startNew(startArgs);
+    for (const cb of ended.display) cb();
+    expect(h.calls.at(-1)).toBe('report:false/true');
+    expect(useLiveSession.getState().micError).toMatch(/call audio stopped/);
+    expect(useLiveSession.getState().session?.id).toBe('s-new'); // still live: the mic flows
+  });
+});
+

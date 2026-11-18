@@ -203,6 +203,22 @@ mock/sparring rehearsals, prep briefs, résumé tailoring.
 - **Capture truth**: the dashboard reports which audio streams actually flow,
   and again when a track ends; the Cue Card names a missing stream and what it
   costs ("Call audio is not captured — questions can't be heard").
+- **Startup is all-or-nothing** (M1, `store/useLiveSession.ts`). `startNew` /
+  `resumeExisting` return a `StartResult` — `{ ok: true, sessionId }` only once
+  the session exists AND its audio pipeline is attached; otherwise
+  `{ ok: false, stage: 'capture' | 'start' | 'audio', error }`:
+  - `capture` — no stream could be acquired (picker refused, mic denied, no
+    device): no session is created.
+  - `start` — the session IPC failed: every acquired track is stopped.
+  - `audio` — the AudioContext/pump failed to attach: the tracks are
+    stopped, the session is stopped (a new one is also deleted — it heard
+    nothing; a resumed one keeps its earlier content), and its save prompt
+    is suppressed.
+
+  The start modal stays open on any failure and shows the reason. Capture
+  status is reported only AFTER the pipeline is attached, and a track that
+  already ended during setup is not reported as live. One missing stream is
+  still a running session with a notice that names the missing side.
 
 ## 8. Evidence and how to re-measure
 

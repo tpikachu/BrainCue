@@ -7,6 +7,14 @@ import type { SavePrompt } from '@shared/ipc';
 
 export type { AudioSource };
 
+/** What a start/resume actually achieved. It succeeds only once the session
+ *  exists AND its audio pipeline is attached; anything less is a failure the
+ *  caller must show (the start modal stays open), never a normal return that
+ *  looks like success. `stage` says where it failed. */
+export type StartResult =
+  | { ok: true; sessionId: string }
+  | { ok: false; stage: 'capture' | 'start' | 'audio'; error: string };
+
 export interface Line {
   id: number;
   speaker: string;
@@ -63,13 +71,13 @@ interface LiveSessionState {
     companionPresence?: string;
     /** Hard session budget in cents — companion cost governance. */
     budgetCents?: number | null;
-  }) => Promise<void>;
+  }) => Promise<StartResult>;
   resumeExisting: (a: {
     sessionId: string;
     listensTo?: 'system' | 'mic';
     micDeviceId?: string | null;
     prior: Line[];
-  }) => Promise<void>;
+  }) => Promise<StartResult>;
   stop: () => Promise<void>;
   togglePause: () => void;
   ask: (question: string) => Promise<void>;
@@ -87,6 +95,8 @@ interface Pump {
 let ctx: AudioContext | null = null;
 let pumps: Pump[] = [];
 let lineId = 0;
+/** Sessions whose start failed after they were created (see begin()). */
+const abandoned = new Set<string>();
 /** Latest RMS per stream — `speaking` follows whichever is louder. */
 const levels: Record<AudioSource, number> = { system: 0, mic: 0 };
 const SPEAKING_RMS = 0.012;
@@ -181,7 +191,11 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
       ].slice(-MAX_TRANSCRIPT),
     }));
   });
-  api.events.onSavePrompt((p) => set({ pendingSave: p }));
+  // A session abandoned at start (its audio never attached) is not offered for
+  // saving — it heard nothing, and a new one was already deleted.
+  api.events.onSavePrompt((p) => {
+    if (!abandoned.has((p as SavePrompt).sessionId)) set({ pendingSave: p });
+  });
   // Surface backend session failures (transcription socket dropped, OpenAI auth,
   // etc.) — otherwise the UI shows a happy "listening" state forever.
   api.events.onSessionError((p) =>
@@ -210,53 +224,106 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
     capture: ReturnType<typeof resolveCapture<MediaStream>>,
     wantsSystem: boolean,
   ): Promise<void> {
-    try {
-      const primary = capture.streams[capture.order[0]] ?? null;
-      set({ stream: primary, micError: capture.notice });
-      // Tell the Cue Card what is ACTUALLY flowing — and again if a track
-      // ends mid-session (screen share stopped, mic unplugged).
-      const live = { system: !!capture.streams.system, mic: !!capture.streams.mic };
-      const report = () => void api.session.reportCapture({ ...live, wantsSystem }).catch(() => {});
-      report();
-      for (const source of capture.order) {
-        for (const track of capture.streams[source]!.getAudioTracks()) {
-          track.addEventListener('ended', () => {
-            if (!pumps.length) return; // stopped on purpose
-            live[source] = false;
-            set({
-              micError:
-                source === 'system'
-                  ? 'The call audio stopped (screen share ended?) — questions can no longer be heard. Stop and start again to recapture.'
-                  : 'Your microphone stopped — your own answers are no longer transcribed.',
-            });
-            report();
-          });
-        }
-      }
-      levels.system = 0;
-      levels.mic = 0;
+    // THROWS on failure — begin() then releases the streams and stops the
+    // session. (It used to swallow the error into a notice, leaving a session
+    // marked live with no audio pipeline.) Capture status is reported only
+    // once the pipeline is attached: a status sent before that claimed audio
+    // that never flowed.
+    const primary = capture.streams[capture.order[0]] ?? null;
+    set({ stream: primary, micError: capture.notice });
+    levels.system = 0;
+    levels.mic = 0;
 
-      ctx = new AudioContext({ sampleRate: 24000 });
-      await ctx.resume();
-      const mute = ctx.createGain();
-      mute.gain.value = 0;
-      mute.connect(ctx.destination);
-      for (const source of capture.order) {
-        const stream = capture.streams[source]!;
-        const src = ctx.createMediaStreamSource(stream);
-        const node = ctx.createScriptProcessor(4096, 1, 1);
-        node.onaudioprocess = (e) => {
-          const input = e.inputBuffer.getChannelData(0);
-          levels[source] = rms(input);
-          set({ speaking: Math.max(levels.system, levels.mic) > SPEAKING_RMS });
-          api.session.sendRealtimeAudio(sessionId, floatTo16BitPCM(input).buffer as ArrayBuffer, source);
-        };
-        src.connect(node);
-        node.connect(mute);
-        pumps.push({ source, stream, node });
+    ctx = new AudioContext({ sampleRate: 24000 });
+    await ctx.resume();
+    const mute = ctx.createGain();
+    mute.gain.value = 0;
+    mute.connect(ctx.destination);
+    for (const source of capture.order) {
+      const stream = capture.streams[source]!;
+      const src = ctx.createMediaStreamSource(stream);
+      const node = ctx.createScriptProcessor(4096, 1, 1);
+      node.onaudioprocess = (e) => {
+        const input = e.inputBuffer.getChannelData(0);
+        levels[source] = rms(input);
+        set({ speaking: Math.max(levels.system, levels.mic) > SPEAKING_RMS });
+        api.session.sendRealtimeAudio(sessionId, floatTo16BitPCM(input).buffer as ArrayBuffer, source);
+      };
+      src.connect(node);
+      node.connect(mute);
+      pumps.push({ source, stream, node });
+    }
+
+    // Tell the Cue Card what is ACTUALLY flowing — and again if a track ends
+    // mid-session (screen share stopped, mic unplugged). A track that already
+    // ended during setup is not flowing.
+    const flowing = (source: AudioSource) =>
+      !!capture.streams[source]?.getAudioTracks().some((t) => t.readyState !== 'ended');
+    const live = { system: flowing('system'), mic: flowing('mic') };
+    if (!live.system && !live.mic) throw new Error('the audio stopped before the session could start');
+    const report = () => void api.session.reportCapture({ ...live, wantsSystem }).catch(() => {});
+    report();
+    for (const source of capture.order) {
+      for (const track of capture.streams[source]!.getAudioTracks()) {
+        track.addEventListener('ended', () => {
+          if (!pumps.length) return; // stopped on purpose
+          live[source] = false;
+          set({
+            micError:
+              source === 'system'
+                ? 'The call audio stopped (screen share ended?) — questions can no longer be heard. Stop and start again to recapture.'
+                : 'Your microphone stopped — your own answers are no longer transcribed.',
+          });
+          report();
+        });
       }
+    }
+  }
+
+  /** Release every acquired stream — also ones no pump was created for. */
+  function releaseStreams(capture: ReturnType<typeof resolveCapture<MediaStream>>): void {
+    for (const s of Object.values(capture.streams)) s?.getTracks().forEach((t) => t.stop());
+  }
+
+  /**
+   * Open the session, then attach its audio — and undo BOTH on failure, so a
+   * start never leaves a session marked live with nothing flowing, nor the
+   * screen share / microphone held open. A brand-new session that never
+   * heard anything is deleted (`discardOnFailure`); a resumed one keeps its
+   * earlier content.
+   */
+  async function begin(
+    capture: ReturnType<typeof resolveCapture<MediaStream>>,
+    open: () => Promise<Session>,
+    prior: Line[],
+    wantsSystem: boolean,
+    discardOnFailure: boolean,
+  ): Promise<StartResult> {
+    let s: Session;
+    try {
+      s = await open();
     } catch (e) {
-      set({ micError: (e as Error).message });
+      releaseStreams(capture);
+      const error = (e as Error).message || String(e);
+      // The pages that start sessions inline (Interview, Tailor) show this.
+      set({ micError: null, sessionError: error });
+      return { ok: false, stage: 'start', error };
+    }
+    lineId = prior.length;
+    set({ session: s, transcript: prior, interim: '', interims: {}, paused: false, micError: null, sessionError: null });
+    try {
+      await attachCapture(s.id, capture, wantsSystem);
+      return { ok: true, sessionId: s.id };
+    } catch (e) {
+      stopCapture();
+      releaseStreams(capture);
+      const reason = (e as Error).message || String(e);
+      abandoned.add(s.id);
+      await api.session.stop(s.id).catch(() => {});
+      if (discardOnFailure) await api.session.delete(s.id).catch(() => {});
+      const error = `Audio capture couldn't start (${reason}). The session was stopped — nothing was recorded.`;
+      set({ session: null, transcript: [], pendingSave: null, micError: error });
+      return { ok: false, stage: 'audio', error };
     }
   }
 
@@ -305,22 +372,27 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
       try {
         capture = await acquire(listensTo, micDeviceId);
       } catch (e) {
-        set({ micError: (e as Error).message, sessionError: null });
-        return;
+        const error = (e as Error).message || String(e);
+        set({ micError: error, sessionError: null });
+        return { ok: false, stage: 'capture', error };
       }
-      const s = (await api.session.start(
-        profileId,
-        interviewType,
-        jobId,
-        answerFormat,
-        activity,
-        presence as Presence | undefined,
-        budgetCents,
-        companionPresence,
-      )) as Session;
-      lineId = 0;
-      set({ session: s, transcript: [], interim: '', interims: {}, paused: false, micError: null, sessionError: null });
-      await attachCapture(s.id, capture, listensTo === 'system');
+      return begin(
+        capture,
+        async () =>
+          (await api.session.start(
+            profileId,
+            interviewType,
+            jobId,
+            answerFormat,
+            activity,
+            presence as Presence | undefined,
+            budgetCents,
+            companionPresence,
+          )) as Session,
+        [],
+        listensTo === 'system',
+        true,
+      );
     },
 
     resumeExisting: async ({ sessionId, listensTo = 'system', micDeviceId, prior }) => {
@@ -328,13 +400,11 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
       try {
         capture = await acquire(listensTo, micDeviceId);
       } catch (e) {
-        set({ micError: (e as Error).message, sessionError: null });
-        return;
+        const error = (e as Error).message || String(e);
+        set({ micError: error, sessionError: null });
+        return { ok: false, stage: 'capture', error };
       }
-      const s = (await api.session.resume(sessionId)) as Session;
-      lineId = prior.length;
-      set({ session: s, transcript: prior, interim: '', interims: {}, paused: false, micError: null, sessionError: null });
-      await attachCapture(s.id, capture, listensTo === 'system');
+      return begin(capture, async () => (await api.session.resume(sessionId)) as Session, prior, listensTo === 'system', false);
     },
 
     stop: async () => {

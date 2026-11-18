@@ -126,7 +126,7 @@ export function StartSessionModal(props: {
     setStarting(true);
     setError(null);
     try {
-      await live.startNew({
+      const started = await live.startNew({
         profileId,
         jobId: spaceId || null,
         // No interviewType: it is chosen live in the Cue Card for interviews and
@@ -148,6 +148,12 @@ export function StartSessionModal(props: {
         companionPresence: mode === 'companion' ? companionPresence : undefined,
         budgetCents: mode === 'companion' ? budgetCents : undefined,
       });
+      // Nothing is flowing: stay open and say why (the streams are released
+      // and no session is left running).
+      if (!started.ok) {
+        setError(started.error);
+        return;
+      }
       props.onClose();
       // Interviews continue in their workspace; ambient sessions live in the Cue Card.
       navigate(mode === 'interview' ? '/interview' : '/home');
