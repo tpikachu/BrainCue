@@ -26,6 +26,7 @@ import type {
   MeetingReport,
   MemoryConflict,
   MemoryItem,
+  CaptureStatus,
   Presence,
   Readiness,
   SparringFeedback,
@@ -264,6 +265,8 @@ const api = {
       invoke<{ ok: boolean }>(IPC.session.askActive, { questionText }),
     /** "Answer that": answer the interviewer's latest words (detection missed). */
     answerLast: () => invoke<{ ok: boolean }>(IPC.session.answerLast),
+    /** Which audio streams are actually flowing (shown in the Cue Card). */
+    reportCapture: (status: CaptureStatus) => invoke<{ ok: true }>(IPC.session.reportCapture, status),
     /** Keep this conversation: archive it for retrieval and extract memory
      *  candidates. Both stay gated by the user's own settings, so the counts
      *  can legitimately come back as zero. */
@@ -511,6 +514,7 @@ const api = {
     onTranscriberStatus: (
       cb: (p: { status: 'reconnecting' | 'connected' | 'disconnected' }) => void,
     ) => on(EVENTS.transcriberStatus, cb),
+    onCaptureStatus: (cb: (p: CaptureStatus) => void) => on(EVENTS.captureStatus, cb),
     onSavePrompt: (cb: (p: SavePrompt) => void) => on(EVENTS.savePrompt, cb),
     onCaptureBuffer: (cb: (p: { images: string[] }) => void) => on(EVENTS.captureBuffer, cb),
     onConfirmRequest: (cb: (p: ConfirmRequest) => void) => on(EVENTS.confirmRequest, cb),

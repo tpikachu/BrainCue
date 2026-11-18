@@ -191,3 +191,14 @@ like `needsResume`, and true for exactly one activity — see
 [16 §15](./16-CONTINUITY.md) for why the interview is the one that cannot start
 without a Space, and for the rule that makes a Space the only place a
 conversation is kept.
+
+## 10 · Interview is the default (2026-11-17)
+
+`DEFAULT_ACTIVITY` is now `job` (Interview) and Interview leads `ACTIVITY_ORDER`
+— the product priority changed ([00-VISION.md](./00-VISION.md),
+[23-INTERVIEW-COPILOT.md](./23-INTERVIEW-COPILOT.md)). It is still ONE catalog
+and ONE start flow: Home's **Start interview** opens it on Interview, **Other
+conversation** opens the same flow on Meeting. What did not change: stored
+Spaces and sessions keep their kinds, and an unknown kind still reads as
+`custom` (never as the default). `startBlocker` called with no activity now
+applies the Interview's gates (a résumé and a Space), which is the point.

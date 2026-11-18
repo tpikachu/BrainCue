@@ -3,6 +3,13 @@
 > Status: design of record, 2026-07-28. Vision: [00-VISION.md](./00-VISION.md) ·
 > Memory: [14-MEMORY.md](./14-MEMORY.md) · Delegate: [15-DELEGATE.md](./15-DELEGATE.md).
 
+> **Within one session** (2026-11-17): the 10-item history buffer that carried
+> question N-1 into question N is replaced by a bounded conversation context —
+> recent turns verbatim, a traceable record of earlier exchanges, recalled older
+> turns, and BrainCue's suggestions kept apart from what was said; resumed
+> sessions restore it. See [23-INTERVIEW-COPILOT.md](./23-INTERVIEW-COPILOT.md)
+> §3. This document is about continuity ACROSS sessions.
+
 ## 1. The gap this closes
 
 BrainCue could hold a conversation. It could not hold *a relationship*.

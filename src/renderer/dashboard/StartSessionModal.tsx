@@ -9,6 +9,7 @@ import type { CompanionPresence, ContextPackKind, Job, Presence, Readiness } fro
 import { COMPANION_TO_ENGINE_PRESENCE } from '@shared/types';
 import { Button, Dropdown, Field, Modal, Select } from '../components/ui';
 import { JobFormModal } from './JobFormModal';
+import { ReadinessChecklist } from './ReadinessChecklist';
 import {
   BUDGET_OPTIONS,
   COMPANION_PRESENCE_OPTIONS,
@@ -188,7 +189,7 @@ export function StartSessionModal(props: {
     <Modal
       open={props.open && !creatingSpace}
       onClose={props.onClose}
-      title="Start a session"
+      title={activity === 'job' ? 'Start an interview' : 'Start a session'}
       width="max-w-lg"
     >
       <div className="space-y-5 text-sm">
@@ -277,25 +278,22 @@ export function StartSessionModal(props: {
           </p>
         </Field>
 
-        {/* 3 · What it hears. Not a question any more: a call is heard on BOTH
-            sides — the call's audio and your microphone — and questions are
-            taken from the call, never from you. A solo session is just you.
-            Said plainly, so what happens on Start is never a surprise. */}
-        <p className="text-xs leading-snug text-neutral-400" data-testid="hears">
-          {config.listensTo === 'mic' ? (
-            <>
-              <span className="font-medium text-neutral-300">Hears your microphone.</span> No call —
-              questions come from what you say.
-            </>
-          ) : (
-            <>
-              <span className="font-medium text-neutral-300">
-                Hears the call (system audio) and your microphone.
-              </span>{' '}
-              Questions come from the call; your own words are kept in the transcript, never answered.
-            </>
-          )}
-        </p>
+        {/* 3 · Readiness — everything the session needs, checked in one place:
+            the candidate's résumé and the interview's JD (interviews), what it
+            hears (a call is heard on BOTH sides — the call and your microphone —
+            and questions are taken from the call, never from you), the AI model
+            and why it was picked, and transcription. Each problem names its fix. */}
+        <ReadinessChecklist
+          profile={profile}
+          space={space}
+          interview={!!config.needsResume}
+          listensTo={config.listensTo}
+          readiness={readiness}
+          onGo={(path) => {
+            props.onClose();
+            navigate(path);
+          }}
+        />
 
         {/* 3b · Presence — how present it should be. The one dial that genuinely
             varies WITHIN an activity, so it stays a question. */}

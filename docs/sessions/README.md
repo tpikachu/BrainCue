@@ -10,6 +10,7 @@ notes; this folder is the developer-facing running log.
 
 | Date | Summary |
 | --- | --- |
+| [2026-11-17](./2026-11-17.md) | Interview-first cycle: rule+model question detection with an explicit scheduling policy; bounded session context (said vs suggested); provider-aware Fast/Balanced/Quality models with discovery + bounded failover; per-capability readiness (no OpenAI key required); interview-first Home/start/Cue Card. Root cause of missed questions: retired gpt-4.1-nano classifier |
 | [2026-10-07](./2026-10-07.md) | Answer styles: General \| Technical replace the five formats + the Cue Card type dropdown; behavioral story shape automatic via `questionType`; legacy values mapped |
 | [2026-10-06](./2026-10-06.md) | Local engine clipped the first word after silence — sherpa-onnx rule 1 endpoint off (60 s); experiment A–D |
 | [2026-09-07](./2026-09-07.md) | v2.2 train: meetings answer questions (balanced default); local STT + multi-provider + Settings/onboarding; live question-detection test on both engines (endpoint rules, warm-up, unpunctuated questions); system audio + mic capture |

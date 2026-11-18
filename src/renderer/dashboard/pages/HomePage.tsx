@@ -156,22 +156,33 @@ export default function HomePage() {
           (FLAGS.voice) — a summon starts push-to-talk listening in the Cue
           Card, with or without a session. */}
       <div
-        className={`grid grid-cols-1 gap-3 ${FLAGS.voice ? 'sm:grid-cols-2 lg:grid-cols-4' : 'sm:grid-cols-3'}`}
+        className={`grid grid-cols-1 gap-3 ${FLAGS.voice ? 'sm:grid-cols-2 lg:grid-cols-5' : 'sm:grid-cols-2 lg:grid-cols-4'}`}
         data-tour="primary-actions"
       >
+        {/* Interview first — the primary feature. Everything else the app
+            does is one tap away in the same start flow. */}
         <PrimaryAction
           Icon={MicIcon}
-          title="Start listening"
-          desc="Live cues for the conversation you're in"
+          title="Start interview"
+          desc="Your résumé + the JD, answers as they ask"
           onClick={() => {
             setStartActivity(DEFAULT_ACTIVITY);
             setStartOpen(true);
           }}
           tour="action-start"
         />
+        <PrimaryAction
+          Icon={SparklesIcon}
+          title="Other conversation"
+          desc="A meeting, a call, a study session…"
+          onClick={() => {
+            setStartActivity('meeting');
+            setStartOpen(true);
+          }}
+        />
         {FLAGS.voice && (
           <PrimaryAction
-            Icon={SparklesIcon}
+            Icon={MicIcon}
             title="Talk to BrainCue"
             desc="Push-to-talk: ask by voice, hear the answer"
             onClick={() => void api.voice.summon()}

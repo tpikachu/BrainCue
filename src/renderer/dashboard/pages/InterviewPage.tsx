@@ -111,10 +111,12 @@ export default function InterviewPage() {
   // resume). Per-row Start also requires no other session to be live (single
   // live session at a time). `startHint` is the disabled button's tooltip —
   // it says WHICH piece is missing, in the same order as `startBlocker`.
-  const canStartBase =
-    !!profileId && !!settings?.apiKeyPresent && !!settings?.sttReady && !!selectedProfile?.parsedResume;
-  const startHint = !settings?.apiKeyPresent
-    ? 'OpenAI key missing — add it in Settings → Language Models'
+  // Any chat provider works for answers now (services/readiness.ts) — the
+  // OpenAI key is no longer the gate.
+  const chatKey = !!settings && Object.values(settings.providerKeys ?? {}).some(Boolean);
+  const canStartBase = !!profileId && chatKey && !!settings?.sttReady && !!selectedProfile?.parsedResume;
+  const startHint = !chatKey
+    ? 'No AI provider key — add one in Settings → Language Models'
     : !settings?.sttReady
       ? 'Transcription is not set up — choose an engine in Settings → Speech-to-Text'
       : !selectedProfile?.parsedResume
@@ -320,16 +322,16 @@ export default function InterviewPage() {
               .
             </p>
           )}
-          {!settings?.apiKeyPresent && (
+          {!chatKey && (
             <p className="mt-2 text-xs text-amber-400">
-              ⚠ No OpenAI key —{' '}
+              ⚠ No AI provider key —{' '}
               <Link to="/settings/models" className="underline">
                 add it in Settings
               </Link>
               .
             </p>
           )}
-          {settings?.apiKeyPresent && !settings.sttReady && (
+          {chatKey && !settings?.sttReady && (
             <p className="mt-2 text-xs text-amber-400">
               ⚠ Transcription is not set up —{' '}
               <Link to="/settings/speech" className="underline">

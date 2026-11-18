@@ -47,16 +47,20 @@ ritual, and the Roadmap status table now carries 5.1 and 5.7–5.10 as ✅.
 Theme in one line: what got in the way during a week of real interviews and
 meetings on 2.2 — nothing new to learn, everything already there made to work.
 
-**Now in flight:** 5.11–5.13, all on `feature/v2.2.2-cue-card-and-transcript`,
-one PR. 5.14 is a candidate, not yet pulled.
+**Now in flight:** the interview-first cycle (6.1–6.4) and 5.14, all on
+`feature/interview-copilot-first`, one PR. 5.11–5.13 merged in #74.
 
 | # | Milestone | Status | Branch / PR | Notes |
 | --- | --- | --- | --- | --- |
-| 5.11 | Own speech shows as it is spoken — interim text from both streams, one in-flight line per speaker | 🔨 | `feature/v2.2.2-cue-card-and-transcript` | Added 2026-10-07 (user: "live transcription is not working at all"). Root cause was the mic stream publishing no interim, then the echo guard's 1.5 s hold ([22](22-LOCAL-STT.md), [06](06-OPENAI-SERVICE.md)) |
-| 5.12 | One answer style — **General \| Technical** chip replaces five formats and the interview-type dropdown | 🔨 | `feature/v2.2.2-cue-card-and-transcript` | Added 2026-10-07 (user: "too complex… the key point is performance"). Behavioral shape is applied from the classifier, not a control; legacy values map on read ([06](06-OPENAI-SERVICE.md), [11](11-UX-NAVIGATION.md)) |
-| 5.13 | Follow-ups stay on the last answer's subject; save dialog drops "What kind of interview was this?" | 🔨 | `feature/v2.2.2-cue-card-and-transcript` | Added 2026-10-07 (user: "what was your role there?" got an unrelated answer). History header rewritten + the previous answer's lead joins a short follow-up's retrieval query. **Verified live 2026-10-07** against a two-project resume: no drift across two follow-ups |
-| 5.14 | Start without an OpenAI key when another chat provider is configured | ⬜ | — | Candidate. Only embeddings and resume parsing are OpenAI-only; the start gate is stricter than that. Needs a graceful no-embedder retrieval path |
+| 5.11 | Own speech shows as it is spoken — interim text from both streams, one in-flight line per speaker | ✅ | #74 | Added 2026-10-07 (user: "live transcription is not working at all"). Root cause was the mic stream publishing no interim, then the echo guard's 1.5 s hold ([22](22-LOCAL-STT.md), [06](06-OPENAI-SERVICE.md)) |
+| 5.12 | One answer style — **General \| Technical** chip replaces five formats and the interview-type dropdown | ✅ | #74 | Added 2026-10-07 (user: "too complex… the key point is performance"). Behavioral shape is applied from the classifier, not a control; legacy values map on read ([06](06-OPENAI-SERVICE.md), [11](11-UX-NAVIGATION.md)) |
+| 5.13 | Follow-ups stay on the last answer's subject; save dialog drops "What kind of interview was this?" | ✅ | #74 | Added 2026-10-07 (user: "what was your role there?" got an unrelated answer). History header rewritten + the previous answer's lead joins a short follow-up's retrieval query. **Verified live 2026-10-07** against a two-project resume: no drift across two follow-ups |
+| 5.14 | Start without an OpenAI key when another chat provider is configured | 🔍 | `feature/interview-copilot-first` | Candidate. Only embeddings and resume parsing are OpenAI-only; the start gate is stricter than that. Needs a graceful no-embedder retrieval path |
 | 5.2–5.5 | Documents → memory · Export & backup · Encryption at rest · Labs graduation | ⬜ | — | Carried from the v2.2.0 scope, unscheduled; see the Roadmap |
+| 6.1 | Question detection + scheduling — rules where reliable, classifier with context/validation/timeout/late verdicts; detect while streaming, queue, coalesce, supersede, missed cards, "Answer that"; latency instrumentation to first visible | 🔍 | `feature/interview-copilot-first` | Root cause of missed questions: the classify default gpt-4.1-nano was retired 2026-10-23 ([23](23-INTERVIEW-COPILOT.md) §1–2, §8) |
+| 6.2 | Session continuity + grounding — bounded context (said vs suggested), follow-ups on what the candidate said, resume restore, source-ranked prompt, résumé/JD balance | 🔍 | `feature/interview-copilot-first` | Replaces the 10-item history buffer ([23](23-INTERVIEW-COPILOT.md) §3–4) |
+| 6.3 | Provider-aware Fast/Balanced/Quality selection, discovery, capability metadata, bounded same-provider failover, per-capability readiness, lexical retrieval fallback | 🔍 | `feature/interview-copilot-first` | Delivers 5.14. Cross-provider failover deliberately not built ([23](23-INTERVIEW-COPILOT.md) §5–6) |
+| 6.4 | Interview-first UI — Interview default + first on Home, start-modal readiness checklist, trimmed Cue Card, capture-status notice | 🔍 | `feature/interview-copilot-first` | [23](23-INTERVIEW-COPILOT.md) §7, [18](18-ACTIVITIES.md) §10 |
 
 ## Decision log
 
@@ -65,3 +69,5 @@ one PR. 5.14 is a candidate, not yet pulled.
 | 2026-10-07 | v2.2.2 is a patch train cut from user reports, not from the Roadmap; 5.2–5.5 stay unscheduled until the app has had real-world hours on 2.2. |
 | 2026-10-07 | Answer styles collapse to **General \| Technical**: the question type is something the classifier knows, not something a user should set mid-interview. Performance and a clean Cue Card over configurability. |
 | 2026-10-07 | Post-release work never continues on a merged release branch; every train starts its own branch from master. |
+| 2026-11-17 | Interview Copilot becomes the primary feature: interview is the default activity and the first action, and its pipeline is what gets measured first. Other activities keep working unchanged. |
+| 2026-11-17 | Model ids are policy data filtered by each account's own model list, not hard-coded defaults — a retired default (gpt-4.1-nano) silently disabled detection for a month. |

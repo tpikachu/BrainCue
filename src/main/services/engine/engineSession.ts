@@ -114,6 +114,8 @@ export class EngineSession {
   private readonly remoteTurns: { text: string; tcId: string; at: number }[] = [];
   /** Speech-end time per transcript row, for the latency record. */
   private readonly speechEnds = new Map<string, number>();
+  /** Missed-question cards waiting for the answer slot to free. */
+  private readonly pendingMissed: { job: QuestionJob; why: 'queue-full' | 'paused' }[] = [];
 
   /** Set on teardown/replacement: an in-flight classify/stream/prediction that
    *  wakes up afterwards must act as if the old module-level `live` changed. */
@@ -280,12 +282,15 @@ export class EngineSession {
       // briefly so the microphone's echo of the call (speakers, no headphones)
       // is dropped instead of showing every remote turn twice.
       this.echo.ownTurn(text, () => {
-        if (!this.stopped) this.commitTurn(text, speaker, finalAt);
+        if (this.stopped) return;
+        this.commitTurn(text, speaker, finalAt);
+        // The candidate spoke: the interviewer's next words start a new
+        // question rather than continue the last one. Only once the echo
+        // guard has CONFIRMED the turn is theirs (on laptop speakers the
+        // mic's copy of the interviewer would otherwise split a question),
+        // timed from when it was spoken. "Okay" / "mm-hmm" does not count.
+        if (assessUtterance(text).verdict !== 'not') this.scheduler?.onCandidateTurn(finalAt);
       });
-      // The candidate is speaking: the interviewer's next words start a new
-      // question rather than continue the last one. ("Okay" / "mm-hmm" while
-      // listening does not count — that is not an answer starting.)
-      if (assessUtterance(text).verdict !== 'not') this.scheduler?.onCandidateTurn(finalAt);
       return;
     }
     this.echo.remoteTurn(text);
@@ -353,10 +358,17 @@ export class EngineSession {
    *  no answer, and one tap (↻) to answer it. Never silently dropped. */
   private surfaceMissed(job: QuestionJob, why: 'queue-full' | 'paused'): void {
     if (this.stopped) return;
+    // Never while an answer streams: opening a card collapses the streaming
+    // one in the Cue Card. Shown as soon as the slot frees instead.
+    if (this.answering) {
+      this.pendingMissed.push({ job, why });
+      return;
+    }
     const questionId = this.registerQuestion(
       job.text,
       { type: job.type, confidence: job.confidence, strategy: job.strategy },
       job.transcriptChunkIds[job.transcriptChunkIds.length - 1] ?? null,
+      { abortInFlight: false },
     );
     emitContributionMeta(questionId, {
       questionId,
@@ -495,10 +507,11 @@ export class EngineSession {
     questionText: string,
     q: { type: string; confidence: number; strategy: string },
     transcriptChunkId: string | null,
+    opts: { abortInFlight?: boolean } = {},
   ): string {
     const session = persist.sessionRow(this.sessionId);
     if (!session) throw new Error('Session not found');
-    this.answerAbort?.abort();
+    if (opts.abortInFlight !== false) this.answerAbort?.abort();
 
     const questionId = persist.insertQuestion({
       sessionId: this.sessionId,
@@ -661,7 +674,11 @@ export class EngineSession {
         this.answerAbort = null;
         // A detected question may be waiting behind this stream (a manual
         // Ask or regenerate held the slot) — let the scheduler start it.
-        if (this.scheduler) queueMicrotask(() => this.scheduler?.slotFreed());
+        if (this.scheduler)
+          queueMicrotask(() => {
+            for (const m of this.pendingMissed.splice(0)) this.surfaceMissed(m.job, m.why);
+            this.scheduler?.slotFreed();
+          });
       }
     }
 

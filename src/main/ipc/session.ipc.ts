@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ipcMain } from 'electron';
-import { IPC } from '@shared/ipc';
+import { EVENTS, IPC } from '@shared/ipc';
+import { broadcast } from './broadcast';
 import type { AudioSource } from '@shared/types';
 import { handle, zId, zSpaceKind } from './helpers';
 import { zAnswerFormat, zInterviewType, zPresence } from './schemas';
@@ -160,6 +161,18 @@ export function registerSessionIpc(): void {
   );
 
   handle(IPC.session.answerLast, z.void(), () => sessionManager.answerLastActive());
+
+  // The dashboard owns capture (getDisplayMedia / getUserMedia live in the
+  // renderer); it reports what it actually got — and again when a track ends
+  // — so the Cue Card never shows "listening" over a dead stream.
+  handle(
+    IPC.session.reportCapture,
+    z.object({ system: z.boolean(), mic: z.boolean(), wantsSystem: z.boolean() }),
+    (status) => {
+      broadcast(EVENTS.captureStatus, status, ['overlay']);
+      return { ok: true as const };
+    },
+  );
 
   handle(
     IPC.session.setInterviewType,

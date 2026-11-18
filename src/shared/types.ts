@@ -725,6 +725,18 @@ export interface AppSettings {
   shortcutDefaults: Record<string, string>; // built-in default accelerator per action
 }
 
+/** Which audio streams a live session is actually receiving. A "live"
+ *  indicator must mean capture is working, so the Cue Card shows exactly
+ *  what is missing. */
+export interface CaptureStatus {
+  /** The call (system audio): where interviewer questions come from. */
+  system: boolean;
+  /** The user's microphone: what the candidate actually said. */
+  mic: boolean;
+  /** Whether the session wanted the call at all (solo activities do not). */
+  wantsSystem: boolean;
+}
+
 /** What a live session can rely on, per capability (services/readiness.ts).
  *  Booleans, provider/model ids and user-safe text only — never a key. */
 export interface Readiness {

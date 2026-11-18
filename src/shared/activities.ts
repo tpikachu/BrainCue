@@ -285,12 +285,13 @@ export const capturePlan = (listensTo: ActivityConfig['listensTo']): CapturePlan
     ? { streams: ['mic'], triggerSource: 'mic' }
     : { streams: ['system', 'mic'], triggerSource: 'system' };
 
-/** Menu order: the conversations someone has every day come first. Interview is
- *  still fully shipped — it just no longer defines the product. */
+/** Menu order: Interview first — it is the primary feature (docs/00-VISION.md,
+ *  2026-11 product decision). The daily conversations follow; every one of
+ *  them keeps working exactly as before. */
 export const ACTIVITY_ORDER: ContextPackKind[] = [
+  'job',
   'meeting',
   'project',
-  'job',
   'subject',
   'personal',
   'game',
@@ -298,8 +299,12 @@ export const ACTIVITY_ORDER: ContextPackKind[] = [
   'custom',
 ];
 
-/** The default for a new Space and a new session: the daily case. */
-export const DEFAULT_ACTIVITY: ContextPackKind = 'meeting';
+/** The default for a new Space and a new session: an interview — the
+ *  primary feature. (It was `meeting` while the product led with the
+ *  ambient companion; changed deliberately in the interview-first cycle.
+ *  Stored data is unaffected: existing Spaces and sessions keep their kind,
+ *  and an unknown kind still reads as `custom`, never as this default.) */
+export const DEFAULT_ACTIVITY: ContextPackKind = 'job';
 
 /** An unknown or absent kind falls back to `custom` rather than throwing, so v1
  *  rows and hand-edited databases keep working. Deliberately NOT

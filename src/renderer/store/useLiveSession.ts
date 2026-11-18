@@ -208,10 +208,31 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
   async function attachCapture(
     sessionId: string,
     capture: ReturnType<typeof resolveCapture<MediaStream>>,
+    wantsSystem: boolean,
   ): Promise<void> {
     try {
       const primary = capture.streams[capture.order[0]] ?? null;
       set({ stream: primary, micError: capture.notice });
+      // Tell the Cue Card what is ACTUALLY flowing — and again if a track
+      // ends mid-session (screen share stopped, mic unplugged).
+      const live = { system: !!capture.streams.system, mic: !!capture.streams.mic };
+      const report = () => void api.session.reportCapture({ ...live, wantsSystem }).catch(() => {});
+      report();
+      for (const source of capture.order) {
+        for (const track of capture.streams[source]!.getAudioTracks()) {
+          track.addEventListener('ended', () => {
+            if (!pumps.length) return; // stopped on purpose
+            live[source] = false;
+            set({
+              micError:
+                source === 'system'
+                  ? 'The call audio stopped (screen share ended?) — questions can no longer be heard. Stop and start again to recapture.'
+                  : 'Your microphone stopped — your own answers are no longer transcribed.',
+            });
+            report();
+          });
+        }
+      }
       levels.system = 0;
       levels.mic = 0;
 
@@ -299,7 +320,7 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
       )) as Session;
       lineId = 0;
       set({ session: s, transcript: [], interim: '', interims: {}, paused: false, micError: null, sessionError: null });
-      await attachCapture(s.id, capture);
+      await attachCapture(s.id, capture, listensTo === 'system');
     },
 
     resumeExisting: async ({ sessionId, listensTo = 'system', micDeviceId, prior }) => {
@@ -313,7 +334,7 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
       const s = (await api.session.resume(sessionId)) as Session;
       lineId = prior.length;
       set({ session: s, transcript: prior, interim: '', interims: {}, paused: false, micError: null, sessionError: null });
-      await attachCapture(s.id, capture);
+      await attachCapture(s.id, capture, listensTo === 'system');
     },
 
     stop: async () => {

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { AnswerFormat, AppSettings, InterviewType } from '@shared/types';
 import type { CloudProviderId } from '@shared/providers';
 import { TrashIcon } from '../../components/icons';
@@ -34,19 +35,15 @@ export function AnswerControls(props: {
   onToggleHistory: () => void;
   onClear: () => void;
 }) {
+  // Uncommon controls live one tap away — during an interview the card shows
+  // the answer, the style chip, and nothing else competing for a glance.
+  const [more, setMore] = useState(false);
   return (
     <div
       data-ct-interactive
       className="mb-2 flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1"
       style={noDrag}
     >
-      {/* Which model answers THIS session's questions: the solver in a coding
-          interview, the live cue otherwise. Picking re-answers the current one. */}
-      <ModelChip
-        settings={props.settings}
-        task={pickerTask(props.interviewType)}
-        onPick={(provider, id) => props.onPickModel(pickerTask(props.interviewType), provider, id)}
-      />
       <span className="flex overflow-hidden rounded-md ring-1 ring-neutral-700">
         {STYLES.map(([value, label, title]) => (
           <button
@@ -81,6 +78,19 @@ export function AnswerControls(props: {
         </button>
       )}
       <span className="flex-1" />
+      <Btn active={more} onClick={() => setMore((m) => !m)} title={more ? 'Hide extra controls' : 'More: model, history, pronunciation, clear'}>
+        <span className="text-[12px] font-semibold leading-none">⋯</span>
+      </Btn>
+      {more && (
+        <span className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 border-t border-white/5 pt-1">
+      {/* Which model answers THIS session's questions: the solver in a coding
+          interview, the live cue otherwise. Picking re-answers the current one. */}
+      <ModelChip
+        settings={props.settings}
+        task={pickerTask(props.interviewType)}
+        onPick={(provider, id) => props.onPickModel(pickerTask(props.interviewType), provider, id)}
+      />
+      <span className="flex-1" />
       <Btn
         active={props.historyEnabled}
         onClick={props.onToggleHistory}
@@ -98,6 +108,8 @@ export function AnswerControls(props: {
       <Btn onClick={props.onClear} title="Clear the answer">
         <TrashIcon className="h-3.5 w-3.5" />
       </Btn>
+        </span>
+      )}
     </div>
   );
 }

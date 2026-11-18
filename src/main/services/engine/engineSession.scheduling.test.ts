@@ -153,6 +153,24 @@ describe('EngineSession + scheduler', () => {
     expect(h.generated.at(-1)).toBe('Walk me through the payments migration. And what you would do differently.');
   });
 
+  it('a microphone echo of the interviewer does not split their question', async () => {
+    const s = session();
+    openGate();
+    void s.onTranscriptFinal('Walk me through the payments migration.');
+    await tick();
+    // Laptop speakers: the mic hears the call and transcribes the same words.
+    void s.onTranscriptFinal('Walk me through the payments migration.', 'candidate');
+    await vi.advanceTimersByTimeAsync(1600); // past the echo hold — dropped as an echo
+    void s.onTranscriptFinal('And what you would do differently.');
+    await tick();
+    h.gate!.release();
+    h.gate = null;
+    await tick();
+    await tick();
+    expect(h.questions).toHaveLength(1); // still ONE card, re-answered with the joined wording
+    expect(h.generated.at(-1)).toBe('Walk me through the payments migration. And what you would do differently.');
+  });
+
   it('pause turns waiting questions into visible missed cards', async () => {
     const s = session();
     openGate();
@@ -163,9 +181,16 @@ describe('EngineSession + scheduler', () => {
     void s.onTranscriptFinal('What is your notice period?');
     await tick();
     s.setPaused(true);
+    // Not while the first answer streams — opening a card would collapse it.
+    expect(h.questions.map((q) => q.text)).not.toContain('What is your notice period?');
+    h.gate!.release();
+    h.gate = null;
+    await tick();
+    await tick();
     expect(h.questions.map((q) => q.text)).toContain('What is your notice period?');
     expect(h.metas.find((m) => m.riskWarning?.includes('paused'))).toBeTruthy();
-    h.gate!.release();
+    // …and the streaming answer was never aborted by it.
+    expect(h.generated).toEqual(['Tell me about yourself.']);
   });
 
   it('"Answer that" answers what the interviewer just said when detection missed it', async () => {

@@ -113,6 +113,7 @@ export const IPC = {
     ask: 'session:ask',
     askActive: 'session:ask-active',
     answerLast: 'session:answer-last', // Cue Card "Answer that": answer the interviewer's latest words
+    reportCapture: 'session:report-capture', // dashboard → main: which streams were captured / ended
     // Keep a finished conversation: archive it for retrieval + extract memory
     // candidates. The user's answer to the save prompt, not an automatic step.
     remember: 'session:remember',
@@ -250,6 +251,7 @@ export const EVENTS = {
   answerPrefs: 'session:answer-prefs', // current format/length/pronunciation, for the Cue Card toggles
   audioLevel: 'session:audio-level', // throttled mic level (0-1) for the Cue Card meter
   transcriberStatus: 'session:transcriber-status', // STT socket lifecycle: reconnecting | connected
+  captureStatus: 'session:capture-status', // which audio streams are ACTUALLY flowing (Cue Card notice)
   savePrompt: 'session:save-prompt', // a session just stopped → ask the dashboard to save/discard it
   captureBuffer: 'capture:buffer', // current multi-image problem captures, for the Cue Card strip
   confirmRequest: 'ui:confirm-request', // main asks a protected window to show a confirm modal (reply via IPC.ui.confirmResponse)

@@ -28,9 +28,9 @@ describe('the start catalog — one list, not two', () => {
     expect(modes.has('practice')).toBe(false);
   });
 
-  it('leads with the daily conversations, not the interview', () => {
-    expect(START_ACTIVITIES[0].id).toBe('meeting');
-    expect(START_ACTIVITIES.findIndex((a) => a.id === 'job')).toBeGreaterThan(0);
+  it('leads with the interview — the primary feature — and keeps every other activity', () => {
+    expect(START_ACTIVITIES[0].id).toBe('job');
+    expect(START_ACTIVITIES.map((a) => a.id)).toEqual(expect.arrayContaining(['meeting', 'project', 'solo']));
   });
 });
 
@@ -38,7 +38,9 @@ describe('startBlocker — the explicit-start gate', () => {
   const ok = { profile: profile(), chatReady: true, sttReady: true, sessionLive: false };
 
   it('passes when a keyed profile is picked and nothing is live', () => {
-    expect(startBlocker(ok)).toBeNull();
+    expect(startBlocker({ ...ok, activity: 'meeting' })).toBeNull();
+    // The default activity is the interview: ready once its Space is chosen.
+    expect(startBlocker({ ...ok, spaceId: 'space-1' })).toBeNull();
   });
 
   it('blocks in priority order: live session > key > transcription > profile', () => {
@@ -101,8 +103,9 @@ describe('startBlocker — the explicit-start gate', () => {
       if (kind === 'job') continue;
       expect(startBlocker({ ...ok, profile: noResume, activity: kind }), kind).toBeNull();
     }
-    // …including when no activity is passed at all.
-    expect(startBlocker({ ...ok, profile: noResume })).toBeNull();
+    // With no activity passed, the default is now the INTERVIEW (interview-
+    // first), which genuinely answers from the résumé — so it asks.
+    expect(startBlocker({ ...ok, profile: noResume, spaceId: 'space-1' })).toMatch(/résumé/);
   });
 });
 

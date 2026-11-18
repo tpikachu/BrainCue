@@ -11,6 +11,7 @@ import type {
   ContributionOpenEvent,
   ContributionPatchEvent,
   ContributionResetEvent,
+  CaptureStatus,
   InterviewType,
 } from '@shared/types';
 import type { CloudProviderId } from '@shared/providers';
@@ -104,6 +105,19 @@ export default function Overlay() {
   // Backend session failure (transcription socket dropped, OpenAI auth, etc.).
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false); // STT socket auto-recovery in progress
+  // Which audio streams are actually flowing (reported by the dashboard).
+  const [capture, setCapture] = useState<CaptureStatus | null>(null);
+  const captureNotice = !capture
+    ? null
+    : capture.wantsSystem && !capture.system && !capture.mic
+      ? 'No audio is being captured — nothing can be heard. Stop and start again.'
+      : capture.wantsSystem && !capture.system
+        ? 'Call audio is not captured — the interviewer’s questions can’t be heard. Use “Answer that” or type them.'
+        : !capture.mic
+          ? capture.wantsSystem
+            ? 'Your microphone is not captured — answers won’t know what you actually said.'
+            : 'Your microphone is not captured — nothing can be heard.'
+          : null;
 
   const [level, setLevel] = useState(0);
   const [speaking, setSpeaking] = useState(false); // hysteresis over `level`
@@ -191,6 +205,7 @@ export default function Overlay() {
         setSessionError((p as { message?: string }).message || 'Session error.'),
       ),
       api.events.onTranscriberStatus((p) => setReconnecting(p.status === 'reconnecting')),
+      api.events.onCaptureStatus((p) => setCapture(p)),
       api.events.onSessionState((p) => {
         const s = p as { paused: boolean; status: string };
         const nowLive = s.status === 'live';
@@ -220,6 +235,7 @@ export default function Overlay() {
           setReconnecting(false);
           setCompanionStatus(null);
           setMemoryEdit(null);
+          setCapture(null);
         }
         prevLive.current = nowLive;
       }),
@@ -452,7 +468,18 @@ export default function Overlay() {
       {/* Companion sessions: live presence dial + visible cost estimate. */}
       {live && companionStatus && <CompanionBar status={companionStatus} />}
 
-      {live && companionStatus && <CompanionBar status={companionStatus} />}
+      {/* A "live" Cue Card must mean capture is working: say exactly which
+          stream is missing, and what that costs. */}
+      {live && captureNotice && (
+        <p
+          data-ct-interactive
+          className="mb-2 shrink-0 rounded-md bg-amber-900/40 px-2 py-1 text-[11px] text-amber-200"
+          style={noDrag}
+          role="status"
+        >
+          ⚠ {captureNotice}
+        </p>
+      )}
 
       {live && (
         <AnswerControls
@@ -555,36 +582,6 @@ export default function Overlay() {
       )}
 
       {live && <AskBar />}
-
-      {/* In-place memory correction (a memory card's ✎). Saves through the
-          same review-guarded update path as the Memory section. */}
-      {memoryEdit && (
-        <div data-ct-interactive className="mt-2 shrink-0 rounded-md border border-violet-500/40 bg-neutral-950 p-2" style={noDrag}>
-          <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-violet-300">
-            Correct memory
-          </p>
-          <textarea
-            value={memoryEdit.content}
-            onChange={(e) => setMemoryEdit({ ...memoryEdit, content: e.target.value })}
-            rows={3}
-            className="w-full resize-none rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-100 outline-none focus:border-violet-500"
-          />
-          <div className="mt-1 flex justify-end gap-1.5">
-            <button
-              onClick={() => setMemoryEdit(null)}
-              className="rounded-md bg-neutral-800 px-2 py-1 text-[11px] text-neutral-300 hover:bg-neutral-700"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => void saveMemoryEdit()}
-              className="rounded-md bg-violet-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-violet-500"
-            >
-              Save
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Voice is session-independent: with nothing live a summon quick-asks
           over the default Space, so the bar renders whenever the flag is on. */}
