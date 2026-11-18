@@ -280,7 +280,10 @@ export class EngineSession {
     if (own) {
       // The user's own words: kept and remembered, never answered — and held
       // briefly so the microphone's echo of the call (speakers, no headphones)
-      // is dropped instead of showing every remote turn twice.
+      // is dropped instead of showing every remote turn twice. Its place in
+      // the conversation's order is reserved NOW, when it was captured; it
+      // only counts once the echo guard confirms it.
+      const order = this.scheduler?.orderMark();
       this.echo.ownTurn(text, () => {
         if (this.stopped) return;
         this.commitTurn(text, speaker, finalAt);
@@ -288,8 +291,8 @@ export class EngineSession {
         // question rather than continue the last one. Only once the echo
         // guard has CONFIRMED the turn is theirs (on laptop speakers the
         // mic's copy of the interviewer would otherwise split a question),
-        // timed from when it was spoken. "Okay" / "mm-hmm" does not count.
-        if (assessUtterance(text).verdict !== 'not') this.scheduler?.onCandidateTurn(finalAt);
+        // ordered by when it was spoken. "Okay" / "mm-hmm" does not count.
+        if (assessUtterance(text).verdict !== 'not') this.scheduler?.onCandidateTurn(order);
       });
       return;
     }

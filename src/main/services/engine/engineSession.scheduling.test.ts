@@ -525,4 +525,38 @@ describe('EngineSession + scheduler', () => {
     for (let i = 0; i < 4; i++) await tick();
     expect(h.generated).toEqual([A, B, `${C} ${F}`]);
   });
+  // ---- M3 review round 7 ----
+  it('M3 review 7: confirmed candidate speech in the question\'s millisecond (through the echo hold) blocks the follow-up from rewriting the card', async () => {
+    const s = session();
+    await s.onTranscriptFinal('Tell me about the first project.'); // answered
+    await tick();
+    void s.onTranscriptFinal('I built the payment service and deployed it.', 'candidate'); // same millisecond
+    await vi.advanceTimersByTimeAsync(1600); // past the echo hold: confirmed as the candidate's
+    await s.onTranscriptFinal('And how you tested it.');
+    await tick();
+    expect(h.updated).toEqual([]); // q1 untouched
+    // A new question on its own card, never "first project + follow-up".
+    expect(h.questions.map((q) => q.text)).toEqual(['Tell me about the first project.', 'And how you tested it.']);
+    expect(h.generated).not.toContain('Tell me about the first project. And how you tested it.');
+  });
+
+  it('M3 review 7: an OLDER late longer copy re-answers the card but keeps the newer copy\'s window — a follow-up 4.5 s later still joins it', async () => {
+    const L = 'The thing with the queues last year and how you handled the rollback.';
+    const S = 'The thing with the queues last year.';
+    const F = 'And how you tested it.';
+    h.classify[L] = [4900, true]; // times out at 1.2 s; late yes at 4.9 s
+    h.classify[S] = [100, true];
+    const s = session();
+    void s.onTranscriptFinal(L); // t=0
+    await vi.advanceTimersByTimeAsync(4000);
+    void s.onTranscriptFinal(S); // t=4000 → answered
+    await vi.advanceTimersByTimeAsync(1000); // L's late yes lands → q1 re-answered with L
+    expect(h.updated).toEqual([{ id: 'q1', text: L }]);
+    await vi.advanceTimersByTimeAsync(3500); // t=8500
+    await s.onTranscriptFinal(F);
+    await tick();
+    expect(h.questions).toHaveLength(1); // no second card
+    expect(h.updated.at(-1)).toEqual({ id: 'q1', text: `${L} ${F}` });
+    expect(h.generated.at(-1)).toBe(`${L} ${F}`);
+  });
 });

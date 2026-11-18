@@ -60,7 +60,10 @@ import type { ClassifierTurn } from '../../openai/questions';
  *
  * Supersession, precisely: a turn REVISES an earlier question only when it
  * repeats it (§3) or continues/corrects the LAST question within
- * CONTINUATION_WINDOW_MS, before any candidate speech (§4). The LAST
+ * CONTINUATION_WINDOW_MS, before any candidate speech (§4) — "before" in
+ * ARRIVAL order: a confirmed candidate turn takes its place when it was
+ * captured (orderMark), so a tie in timestamps never hides it, and a
+ * dropped microphone echo never counts. The LAST
  * question is the NEWEST one decided — answered, waiting, streaming or
  * shown missed — by ARRIVAL order (the latest turn that contributed to
  * it; timestamps can tie), and only a newer one replaces it (setLast): a
@@ -161,6 +164,7 @@ interface Held {
   text: string;
   tcIds: string[];
   finalAt: number;
+  arrival: number;
   timer: unknown;
   resolve: () => void;
 }
@@ -171,7 +175,8 @@ export class QuestionScheduler {
   /** The most recent question decided (active, queued or answered). */
   private last: QuestionJob | null = null;
   private held: Held | null = null;
-  private lastCandidateAt = 0;
+  /** Arrival order of the latest CONFIRMED candidate turn (0: none). */
+  private lastCandidateOrder = 0;
   private seq = 0;
   /** Arrival counter for Turn.arrival. */
   private arrivals = 0;
@@ -192,10 +197,25 @@ export class QuestionScheduler {
     return this.active;
   }
 
+  /** Reserve a place in arrival order for an event confirmed LATER — the
+   *  candidate's microphone turn, held by the echo guard before it counts.
+   *  Interviewer turns take theirs on arrival (onRemoteFinal); both share
+   *  one counter, so their order never depends on timestamps, which tie. */
+  orderMark(): number {
+    return ++this.arrivals;
+  }
+
   /** The candidate spoke: the interviewer's next words are a new question,
-   *  not a continuation of the last one. */
-  onCandidateTurn(at = this.deps.now()): void {
-    this.lastCandidateAt = at;
+   *  not a continuation of the last one. `order` is the place reserved with
+   *  orderMark() when the turn was CAPTURED (default: now). A dropped echo is
+   *  never reported, so it never becomes a barrier. */
+  onCandidateTurn(order = this.orderMark()): void {
+    this.lastCandidateOrder = Math.max(this.lastCandidateOrder, order);
+  }
+
+  /** Did confirmed candidate speech come after this turn / question? */
+  private candidateSince(arrival: number): boolean {
+    return this.lastCandidateOrder > arrival;
   }
 
   /**
@@ -205,6 +225,10 @@ export class QuestionScheduler {
   async onRemoteFinal(text: string, transcriptChunkId: string, finalAt = this.deps.now()): Promise<void> {
     if (this.stopped || this.paused || !text.trim()) return;
     let tcIds = [transcriptChunkId];
+    // Arrival order is fixed HERE, in the order finals reach the scheduler —
+    // never by wall-clock time, which can tie (§7). A held fragment joined
+    // with this turn takes this turn's (the latest contributing) arrival.
+    const arrival = this.orderMark();
 
     // A held fragment and this turn are one utterance.
     if (this.held) {
@@ -223,13 +247,13 @@ export class QuestionScheduler {
           const h = this.held;
           if (!h || h.timer !== timer) return;
           this.held = null;
-          void this.evaluate(h.text, h.tcIds, h.finalAt).then(resolve, resolve);
+          void this.evaluate(h.text, h.tcIds, h.finalAt, h.arrival).then(resolve, resolve);
         }, FRAGMENT_HOLD_MS);
-        this.held = { text, tcIds, finalAt, timer, resolve };
+        this.held = { text, tcIds, finalAt, arrival, timer, resolve };
         this.note(finalAt, false, 'scheduler', 'fragment-held', 'held');
       });
     }
-    return this.evaluate(text, tcIds, finalAt);
+    return this.evaluate(text, tcIds, finalAt, arrival);
   }
 
   /** Pause: nothing is evaluated; questions still waiting become missed cards
@@ -280,11 +304,9 @@ export class QuestionScheduler {
    */
   private commitTail: Promise<void> = Promise.resolve();
 
-  private async evaluate(text: string, tcIds: string[], finalAt: number): Promise<void> {
+  private async evaluate(text: string, tcIds: string[], finalAt: number, arrival: number): Promise<void> {
     const epoch = this.epoch;
-    // Arrival order is fixed HERE, synchronously, in the order finals reach
-    // the scheduler — never by wall-clock time, which can tie (§7).
-    const t: Turn = { text, words: turnWords(text), tcIds, finalAt, arrival: ++this.arrivals };
+    const t: Turn = { text, words: turnWords(text), tcIds, finalAt, arrival };
     const prior = this.commitTail;
     let release!: () => void;
     this.commitTail = new Promise<void>((r) => (release = r));
@@ -380,17 +402,23 @@ export class QuestionScheduler {
    * correction superseding a streaming / answered / missed one, a revision
    * across Pause — refreshes the SAME metadata: wording, transcript chunks,
    * `finalAt` (the continuation window runs from the revision, not the
-   * first wording), `decidedAt` (the duplicate window likewise), `arrival`,
-   * and the continuation target. Card identity (`seq`, `questionId`) and
+   * first wording — but only from a NEWER turn: an older late copy enriches
+   * the wording without rewinding the clock), `decidedAt`, `arrival`, and
+   * the continuation target. Card identity (`seq`, `questionId`) and
    * queue position are never touched here.
    */
   private revise(target: QuestionJob, t: Turn): void {
     target.text = t.text;
     target.words = t.words;
     target.transcriptChunkIds.push(...t.tcIds);
-    target.finalAt = t.finalAt;
+    // The time anchor (continuation window) belongs to the LATEST
+    // contributing turn: an OLDER turn enriching the wording — a late longer
+    // copy — never moves it back.
+    if (t.arrival > target.arrival) {
+      target.finalAt = t.finalAt;
+      target.arrival = t.arrival;
+    }
     target.decidedAt = this.deps.now();
-    target.arrival = Math.max(target.arrival, t.arrival);
     this.setLast(target);
   }
 
@@ -495,14 +523,14 @@ export class QuestionScheduler {
     // From here `same`, if any, is a SHORTER copy: this turn's added words
     // ("…and how you handled the rollback") are a revision, never dropped.
     if (epoch !== this.epoch || this.paused) return this.missNew(t, v, 'paused');
-    if (same && same === this.last && this.lastCandidateAt <= t.finalAt) {
+    if (same && same === this.last && !this.candidateSince(t.arrival)) {
       // The newest question IS this one, worded shorter, and the candidate
       // has not replied: revise its card exactly as an on-time longer repeat
       // would (§3) — coalesce if waiting, re-answer if streaming or answered.
       const routed = this.routeKnown(t);
       if (routed) return routed;
     }
-    if ((this.last && this.last.arrival > t.arrival) || this.lastCandidateAt > t.finalAt) {
+    if ((this.last && this.last.arrival > t.arrival) || this.candidateSince(t.arrival)) {
       return this.missNew(t, v, 'late');
     }
     return this.enqueue(t, v, 'late-model');
@@ -708,7 +736,7 @@ export class QuestionScheduler {
     const candidates = [this.active, ...this.queue, this.last].filter((j): j is QuestionJob => !!j);
     for (const j of candidates) {
       if (now - j.decidedAt > DUPLICATE_WINDOW_MS) continue;
-      if (j.state === 'answered' && this.lastCandidateAt > j.decidedAt) continue; // asked again after an answer
+      if (j.state === 'answered' && this.candidateSince(j.arrival)) continue; // asked again after an answer
       if (sameWords(j.words, words)) return j;
     }
     return null;
@@ -722,7 +750,7 @@ export class QuestionScheduler {
     // wording (supersede). A dropped one may not.
     if (!p || p.state === 'dropped') return null;
     if (now - p.finalAt > CONTINUATION_WINDOW_MS) return null;
-    if (this.lastCandidateAt > p.finalAt) return null;
+    if (this.candidateSince(p.arrival)) return null;
     return p;
   }
 

@@ -178,7 +178,7 @@ describe('QuestionScheduler — duplicates, revisions, continuations, correction
     void h.s.onRemoteFinal('Tell me about the migration.', 't1');
     await settle();
     await h.finish();
-    h.s.onCandidateTurn(Date.now() + 1);
+    h.s.onCandidateTurn();
     vi.advanceTimersByTime(2000);
     void h.s.onRemoteFinal('And what was your role?', 't2');
     await settle();
@@ -1007,6 +1007,89 @@ describe('M3 acceptance — questions answered in the right order', () => {
       void h.s.onRemoteFinal(F, 't3');
       await run(10);
       expect(texts(h)).toEqual([B, `${B} ${F}`]);
+    });
+
+    // ---- round 7: candidate speech in arrival order; no clock rewind ----
+    it('TIED timestamps: candidate speech after a question blocks a continuation of it', async () => {
+      const A = 'Tell me about the first project.';
+      const F = 'And how you tested it.';
+      const T = Date.now();
+      const h = scripted({});
+      void h.s.onRemoteFinal(A, 't1', T);
+      await run(0);
+      await h.finish();
+      h.s.onCandidateTurn(); // the same millisecond — but after A
+      void h.s.onRemoteFinal(F, 't2', T);
+      await run(10);
+      expect(h.decisions).not.toContain('superseded');
+      expect(texts(h)).toEqual([A, F]); // a new card; A's card is not rewritten
+      expect(new Set(h.answered.map((x) => x.questionId)).size).toBe(2);
+    });
+
+    it('TIED timestamps: the same question asked again after candidate speech is answered again (not a duplicate)', async () => {
+      const A = 'Why did you leave Acme?';
+      const T = Date.now();
+      const h = scripted({});
+      void h.s.onRemoteFinal(A, 't1', T);
+      await run(0);
+      await h.finish();
+      h.s.onCandidateTurn();
+      void h.s.onRemoteFinal(A, 't2', T);
+      await run(0);
+      expect(texts(h)).toEqual([A, A]);
+      expect(h.decisions).not.toContain('duplicate');
+    });
+
+    it('TIED timestamps: a late yes after candidate speech is a late missed card, never an answer out of turn', async () => {
+      const X = 'The thing with the queues last year.';
+      const T = Date.now();
+      const l = late();
+      const h = scripted({ [X]: [0, l.d] }); // times out with no clock movement
+      void h.s.onRemoteFinal(X, 't1', T);
+      await run(0);
+      expect(Date.now()).toBe(T); // a genuine tie
+      h.s.onCandidateTurn(); // the candidate replied before the late verdict
+      l.resolve(verdict(true));
+      await run(10);
+      expect(h.answered).toHaveLength(0);
+      expect(h.missed).toEqual([{ text: X, why: 'late' }]);
+    });
+
+    it('a place reserved BEFORE a question (capture order) is not a barrier for it, even when confirmed after', async () => {
+      const A = 'Tell me about the first project.';
+      const F = 'And how you tested it.';
+      const h = scripted({});
+      const order = h.s.orderMark(); // the candidate spoke first…
+      void h.s.onRemoteFinal(A, 't1');
+      await run(0);
+      await h.finish();
+      h.s.onCandidateTurn(order); // …confirmed only now (echo hold)
+      void h.s.onRemoteFinal(F, 't2');
+      await run(10);
+      expect(texts(h)).toEqual([A, `${A} ${F}`]); // still a continuation of A
+    });
+
+    it('an OLDER late longer copy enriches the wording without rewinding the continuation window', async () => {
+      const L = 'The thing with the queues last year and how you handled the rollback.';
+      const S = 'The thing with the queues last year.';
+      const F = 'And how you tested it.';
+      const l = late();
+      const h = scripted({ [L]: [10, l.d], [S]: [100, verdict(true)] });
+      void h.s.onRemoteFinal(L, 't1'); // t=0: times out to "no" (late window open)
+      await run(4000);
+      void h.s.onRemoteFinal(S, 't2'); // t=4000: the shorter copy, answered
+      await run(200);
+      await h.finish();
+      await run(700);
+      l.resolve(verdict(true)); // t≈4900: the older longer copy's late yes revises S's card
+      await run(10);
+      await h.finish();
+      expect(texts(h)).toEqual([S, L]);
+      await run(8500 - 4910 - 10); // t≈8500: 4.5 s after S, 8.5 s after L
+      void h.s.onRemoteFinal(F, 't3');
+      await run(10);
+      expect(texts(h)).toEqual([S, L, `${L} ${F}`]);
+      expect(new Set(h.answered.map((x) => x.questionId)).size).toBe(1); // one card
     });
 
     it('after STOP, neither an on-time nor a late "yes" surfaces anything', async () => {

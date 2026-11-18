@@ -120,7 +120,11 @@ in arrival order.
 
 Interim transcripts never create a card (they only prefetch grounding). The
 candidate's own microphone turns are recorded and close the continuation
-window, but never trigger. The Cue Card's **Answer that** button answers the
+window, but never trigger. They are ordered against the interviewer's turns
+by when they were captured (not by timestamp, which can tie), and count only
+once the echo guard confirms them — a dropped echo never closes the window.
+The continuation window runs from the latest turn that contributed to a
+question: an older late copy can enrich its wording but never rewinds it. The Cue Card's **Answer that** button answers the
 interviewer's latest words (joining a split question) when detection missed.
 
 ## 3. In-session continuity (`conversationContext.ts`)
