@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
   metas: [] as { id: string; riskWarning: string | null }[],
   resets: [] as string[],
   generated: [] as string[],
+  aborted: [] as string[],
   gate: null as null | { release: () => void; promise: Promise<void> },
 }));
 
@@ -87,7 +88,10 @@ const mode: ModeDefinition = {
   async *generate(input) {
     h.generated.push(input.question);
     if (h.gate) await h.gate.promise; // hold the stream "in flight"
-    if (input.signal.aborted) throw new Error('aborted');
+    if (input.signal.aborted) {
+      h.aborted.push(input.question);
+      throw new Error('aborted');
+    }
     yield { type: 'delta', token: 'A cue.' };
   },
 };
@@ -108,7 +112,7 @@ const tick = () => vi.advanceTimersByTimeAsync(0);
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(5_000_000);
-  for (const k of ['questions', 'updated', 'opened', 'titles', 'metas', 'resets', 'generated'] as const) h[k].length = 0;
+  for (const k of ['questions', 'updated', 'opened', 'titles', 'metas', 'resets', 'generated', 'aborted'] as const) h[k].length = 0;
   h.gate = null;
 });
 afterEach(() => vi.useRealTimers());
@@ -208,5 +212,54 @@ describe('EngineSession + scheduler', () => {
     await s.onTranscriptFinal('Tell me about the time I led the migration?', 'candidate');
     await vi.advanceTimersByTimeAsync(2000);
     expect(h.generated).toEqual([]);
+  });
+  it('M3 review: a correction to an answered question never cancels a manual Ask — it waits, then re-answers the SAME card', async () => {
+    const s = session();
+    await s.onTranscriptFinal('Tell me about the first project.'); // answered automatically
+    await tick();
+    expect(h.questions.map((q) => q.text)).toEqual(['Tell me about the first project.']);
+
+    openGate();
+    const manual = s.answerQuestion('How should I describe my role?', { type: 'behavioral', confidence: 1, strategy: '' }, null);
+    await tick();
+    expect(s.answering).toBe(true);
+
+    // Within the continuation window, no candidate speech: a correction of q1.
+    void s.onTranscriptFinal('Sorry, I meant the second project.');
+    await tick();
+    expect(h.aborted).toEqual([]); // the manual stream was not touched
+    expect(h.generated).toEqual(['Tell me about the first project.', 'How should I describe my role?']);
+
+    h.gate!.release();
+    h.gate = null;
+    await manual;
+    await tick();
+    await tick();
+    expect(h.aborted).toEqual([]);
+    expect(h.questions.map((q) => q.text)).toEqual(['Tell me about the first project.', 'How should I describe my role?']); // no third card
+    expect(h.updated).toEqual([{ id: 'q1', text: 'Tell me about the first project. Sorry, I meant the second project.' }]);
+    expect(h.generated.at(-1)).toBe('Tell me about the first project. Sorry, I meant the second project.');
+  });
+
+  it('M3 review: a revision still waiting behind a manual Ask at Pause marks its OWN card missed — no second card', async () => {
+    const s = session();
+    await s.onTranscriptFinal('Tell me about the first project.');
+    await tick();
+    openGate();
+    const manual = s.answerQuestion('How should I describe my role?', { type: 'behavioral', confidence: 1, strategy: '' }, null);
+    await tick();
+    void s.onTranscriptFinal('Sorry, I meant the second project.');
+    await tick();
+    s.setPaused(true);
+    h.gate!.release();
+    h.gate = null;
+    await manual;
+    await tick();
+    await tick();
+    expect(h.aborted).toEqual([]);
+    expect(h.questions).toHaveLength(2); // q1 + the manual Ask, nothing new
+    expect(h.updated).toEqual([{ id: 'q1', text: 'Tell me about the first project. Sorry, I meant the second project.' }]);
+    expect(h.metas).toContainEqual({ id: 'q1', riskWarning: 'Asked while paused — not answered. Press ↻ to answer it.' });
+    expect(h.generated).toEqual(['Tell me about the first project.', 'How should I describe my role?']);
   });
 });

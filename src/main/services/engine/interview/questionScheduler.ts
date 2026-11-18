@@ -27,8 +27,11 @@ import type { ClassifierTurn } from '../../openai/questions';
  *  4. CONTINUATIONS AND CORRECTIONS SUPERSEDE. "…and how you tested it" or
  *     "Sorry, I meant the second project" within the continuation window of
  *     the last question — before the candidate has started answering —
- *     re-answers THAT question's card with the merged wording. An in-flight
- *     stream is aborted first; the stale tokens never land.
+ *     re-answers THAT question's card with the merged wording. The
+ *     scheduler's own in-flight stream of it is aborted first; the stale
+ *     tokens never land. A revision never takes the slot from anything else
+ *     — a manual Ask or regenerate keeps streaming, and the revision waits
+ *     at the head of the queue, on the same card.
  *  5. FRAGMENTS WAIT. An utterance that stops mid-thought ("walk me through
  *     the") is held briefly for its second half and joined with it; if
  *     nothing follows, it is evaluated as it is.
@@ -36,7 +39,11 @@ import type { ClassifierTurn } from '../../openai/questions';
  *     answered automatically becomes a visible "missed" card the user can
  *     answer with one tap (↻): the queue overflowed (the OLDEST waiting one),
  *     the user paused with it waiting or still being classified, or the
- *     model recognised it only after the conversation moved on (§8). Only
+ *     model recognised it only after the conversation moved on (§8). Every
+ *     outcome that lands after a Pause — on time, a late "yes" after a
+ *     timeout, or a revision routed by rule — takes the same path to a
+ *     missed card, and a copy that adds no words to a question already in
+ *     flight, waiting, answered or shown missed gets no second card. Only
  *     STOP drops work — the session is over. While paused, new finals are
  *     not evaluated at all (that is what Pause means).
  *  7. DECISIONS COMMIT IN ARRIVAL ORDER — see evaluate().
@@ -261,11 +268,13 @@ export class QuestionScheduler {
       // Paused (and maybe resumed) while this turn waited: it is not
       // answered — but a question is never dropped silently either (§6).
       if (epoch !== this.epoch) {
-        if (!detection) return void this.note(finalAt, false, 'scheduler', 'epoch-changed', 'stale');
+        if (!detection) {
+          follow = this.settlePausedRevision(text, words, tcIds, finalAt);
+          return;
+        }
         const d = await detection;
         if (this.stopped) return void this.note(finalAt, d.act, d.source, d.reason, 'stale');
-        if (d.act) follow = this.missNew(text, words, tcIds, finalAt, d, 'paused');
-        else this.note(finalAt, false, d.source, d.reason, 'stale');
+        follow = this.settlePaused(d, text, words, tcIds, finalAt, epoch);
         return;
       }
       follow = this.routeKnown(text, words, tcIds, finalAt);
@@ -277,8 +286,7 @@ export class QuestionScheduler {
         }
         if (epoch !== this.epoch) {
           // Paused while THIS turn was being classified (§6, as above).
-          if (d.act) follow = this.missNew(text, words, tcIds, finalAt, d, 'paused');
-          else this.note(finalAt, false, d.source, d.reason, 'stale');
+          follow = this.settlePaused(d, text, words, tcIds, finalAt, epoch);
           return;
         }
         // Re-check after classification too: the streaming answer may have
@@ -289,6 +297,48 @@ export class QuestionScheduler {
       release();
     }
     return follow ?? undefined;
+  }
+
+  /** The one disposition for a turn whose detection finished in a later
+   *  epoch (a pause, maybe followed by resume): never answered, never lost.
+   *  A "yes" is a missed card; a timed-out "no" may still turn into a yes
+   *  within its late window, and lateVerdict turns THAT into a missed card.
+   *  Both go through missNew, which suppresses repeats (§3) — two copies of
+   *  one question classified across a pause are one card. */
+  private settlePaused(
+    d: Detection,
+    text: string,
+    words: string[],
+    tcIds: string[],
+    finalAt: number,
+    epoch: number,
+  ): Promise<void> | null {
+    if (d.act) return this.missNew(text, words, tcIds, finalAt, d, 'paused');
+    this.note(finalAt, false, d.source, d.reason, 'stale');
+    return d.late ? this.lateVerdict(d.late, text, words, tcIds, finalAt, epoch) : null;
+  }
+
+  /** The same, for a turn the rules routed as a repeat or a continuation /
+   *  correction when it arrived (so it was never classified). A repeat is
+   *  nothing new. A revision of the last question would be lost silently if
+   *  dropped — it becomes a missed card with the revised wording instead. */
+  private settlePausedRevision(text: string, words: string[], tcIds: string[], finalAt: number): Promise<void> | null {
+    const prev = this.last;
+    if (this.findSame(words, this.deps.now()) || !prev || !(isCorrection(text) || isContinuation(text))) {
+      this.note(finalAt, false, 'scheduler', 'epoch-changed', 'stale');
+      return null;
+    }
+    const joined = `${prev.text} ${text}`;
+    const d: Detection = {
+      act: true,
+      type: prev.type as Detection['type'],
+      confidence: prev.confidence,
+      strategy: prev.strategy,
+      source: prev.detection.source,
+      reason: 'revision',
+      continuesPrevious: true,
+    };
+    return this.missNew(joined, turnWords(joined), [...prev.transcriptChunkIds, ...tcIds], finalAt, d, 'paused');
   }
 
   private continuesByRule(text: string, now: number): boolean {
@@ -374,7 +424,9 @@ export class QuestionScheduler {
 
   /** A distinct question that will not be answered automatically: a visible
    *  missed card (one tap to answer). It does not become `last` — nothing
-   *  continues or coalesces into a card that was never answered. */
+   *  continues or coalesces into a card that was never answered. A repeat of
+   *  a question already in flight, waiting, answered, or already shown as
+   *  missed (within DUPLICATE_WINDOW_MS) is not distinct: no second card. */
   private missNew(
     text: string,
     words: string[],
@@ -383,6 +435,15 @@ export class QuestionScheduler {
     detection: Detection,
     why: MissReason,
   ): Promise<void> {
+    const now = this.deps.now();
+    // A copy that adds no words. A LONGER one (a correction joined to its
+    // question) is a revision the user has not seen — it gets the card.
+    const covers = (j: QuestionJob) => sameWords(j.words, words) && words.length <= j.words.length;
+    const same = this.findSame(words, now);
+    if ((same && covers(same)) || this.recentMissed.some((m) => now - m.decidedAt <= DUPLICATE_WINDOW_MS && covers(m))) {
+      this.note(finalAt, true, detection.source, `missed-${why}-duplicate`, 'duplicate');
+      return Promise.resolve();
+    }
     const job: QuestionJob = {
       seq: ++this.seq,
       text,
@@ -431,7 +492,13 @@ export class QuestionScheduler {
     if (this.active || this.deps.slotBusy()) {
       this.queue.push(job);
       this.note(finalAt, true, detection.source, reason, 'queued');
-      while (this.queue.length > QUEUE_MAX) this.miss(this.queue.shift()!, 'queue-full');
+      while (this.queue.length > QUEUE_MAX) {
+        // The oldest waiting NEW question. A revision waiting to re-answer an
+        // existing card (supersede behind a manual Ask) is not a new card to
+        // give up on — it keeps its place.
+        const i = this.queue.findIndex((j) => !j.questionId);
+        this.miss(this.queue.splice(i < 0 ? 0 : i, 1)[0], 'queue-full');
+      }
       return this.wait(job);
     }
     this.note(finalAt, true, detection.source, reason, 'answer');
@@ -462,11 +529,14 @@ export class QuestionScheduler {
       this.deps.abortActive();
       await this.activeRun;
       this.rerunning.delete(target.seq);
+      if (this.active === target) this.active = null;
     }
     if (this.stopped) return;
-    if (this.active && this.active !== target) {
-      // Something else streams (a queued question already started): answer
-      // the revision next rather than abort an unrelated answer.
+    if (this.active || this.deps.slotBusy()) {
+      // Something else holds the slot — a queued question that already
+      // started, or a manual Ask / regenerate the scheduler does not own:
+      // answer the revision next, on the same card, rather than abort an
+      // unrelated answer.
       target.state = 'queued';
       this.queue.unshift(target);
       return this.wait(target);
@@ -502,7 +572,14 @@ export class QuestionScheduler {
     if (next) void this.run(next);
   }
 
+  /** Cards surfaced as missed, for missNew's repeat check. Pruned to the
+   *  duplicate window. */
+  private recentMissed: QuestionJob[] = [];
+
   private miss(job: QuestionJob, why: MissReason): void {
+    const now = this.deps.now();
+    this.recentMissed = this.recentMissed.filter((m) => now - m.decidedAt <= DUPLICATE_WINDOW_MS);
+    this.recentMissed.push(job);
     try {
       this.deps.missed(job, why);
     } catch {

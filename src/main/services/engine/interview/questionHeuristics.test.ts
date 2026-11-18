@@ -116,4 +116,16 @@ describe('found in the live audio run (2026-11-17)', () => {
     expect(isContinuation('And what you would do differently.')).toBe(true);
     expect(isContinuation('and how you tested it')).toBe(true);
   });
+
+  it('M3 review: the complete-question guard applies whatever the capitalisation', () => {
+    expect(isContinuation('and why are you interested in this role at Google?')).toBe(false);
+    expect(isContinuation('AND why are you interested in this role at Google?')).toBe(false);
+    expect(isContinuation('and do you have experience with Kafka?')).toBe(false);
+    expect(isContinuation('why are you interested in this role?')).toBe(false); // lower-case, no conjunction
+    // genuine continuations still continue
+    expect(isContinuation('and how you tested it.')).toBe(true);
+    expect(isContinuation('and what you would do differently')).toBe(true);
+    expect(isContinuation('or the second one.')).toBe(true);
+    expect(isContinuation('the rollout plan as well.')).toBe(true);
+  });
 });

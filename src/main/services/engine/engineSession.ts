@@ -161,7 +161,7 @@ export class EngineSession {
       detect: (text, recent) => this.detect(text, recent),
       recent: () => this.recentForClassifier(),
       answer: (job) => this.answerScheduled(job),
-      abortActive: () => this.answerAbort?.abort(),
+      abortActive: () => this.abortScheduled(),
       slotBusy: () => this.answering,
       missed: (job, why) => this.surfaceMissed(job, why),
       onDecision: (d) => {
@@ -331,8 +331,10 @@ export class EngineSession {
     // Speech end of the turn that completed the question.
     const speechEndAt = tcId ? this.speechEnds.get(tcId) : undefined;
     if (job.questionId) {
-      // A split/corrected question: same row, same card, new wording.
-      this.answerAbort?.abort();
+      // A split/corrected question: same row, same card, new wording. Only
+      // the scheduler's own stale stream is stopped — a manual Ask holding
+      // the slot is never cancelled by an automatic revision.
+      this.abortScheduled();
       persist.updateQuestionText(job.questionId, job.text, tcId);
       emitContributionReset(job.questionId);
       emitContributionTitle(job.questionId, job.text);
@@ -351,7 +353,20 @@ export class EngineSession {
       provider: route?.provider,
       model: route?.model,
     });
-    await this.generateContribution(job.questionId, job.text, job.type);
+    // generateContribution claims the slot synchronously, before its first
+    // await — remember which stream is the scheduler's.
+    const stream = this.generateContribution(job.questionId, job.text, job.type);
+    this.scheduledAbort = this.answerAbort;
+    await stream;
+  }
+
+  /** The stream the scheduler started, if it still holds the slot. */
+  private scheduledAbort: AbortController | null = null;
+
+  /** Abort the scheduler's own answer — never a manual Ask or regenerate that
+   *  holds the slot instead (M3 review: a correction cancelled a manual Ask). */
+  private abortScheduled(): void {
+    if (this.answerAbort && this.answerAbort === this.scheduledAbort) this.answerAbort.abort();
   }
 
   /** A question that will not be answered automatically still gets a card —
@@ -364,21 +379,34 @@ export class EngineSession {
       this.pendingMissed.push({ job, why });
       return;
     }
-    const questionId = this.registerQuestion(
-      job.text,
-      { type: job.type, confidence: job.confidence, strategy: job.strategy },
-      job.transcriptChunkIds[job.transcriptChunkIds.length - 1] ?? null,
-      { abortInFlight: false },
-    );
-    emitContributionMeta(questionId, {
-      questionId,
-      riskWarning:
-        why === 'paused'
-          ? 'Asked while paused — not answered. Press ↻ to answer it.'
-          : why === 'late'
-            ? 'Recognised as a question only after the conversation moved on — not answered. Press ↻ to answer it.'
-            : 'Asked while other answers were waiting — not answered. Press ↻ to answer it.',
-    });
+    const riskWarning =
+      why === 'paused'
+        ? 'Asked while paused — not answered. Press ↻ to answer it.'
+        : why === 'late'
+          ? 'Recognised as a question only after the conversation moved on — not answered. Press ↻ to answer it.'
+          : 'Asked while other answers were waiting — not answered. Press ↻ to answer it.';
+    const tcId = job.transcriptChunkIds[job.transcriptChunkIds.length - 1] ?? null;
+    let questionId: string;
+    if (job.questionId) {
+      // A revision of an existing card that never got re-answered (it waited
+      // behind a manual Ask, then Pause): mark THAT card with the revised
+      // wording, never open a second. Its old answer was to the old wording —
+      // cleared, so the card and the saved session agree.
+      questionId = job.questionId;
+      persist.updateQuestionText(questionId, job.text, tcId);
+      persist.replaceAnswer({ questionId, directAnswer: '', riskWarning, tokens: null });
+      emitContributionReset(questionId);
+      emitContributionTitle(questionId, job.text);
+      if (this.lastQuestion?.questionId === questionId) this.lastQuestion.text = job.text;
+    } else {
+      questionId = this.registerQuestion(
+        job.text,
+        { type: job.type, confidence: job.confidence, strategy: job.strategy },
+        tcId,
+        { abortInFlight: false },
+      );
+    }
+    emitContributionMeta(questionId, { questionId, riskWarning });
     emitContributionDone(questionId);
   }
 

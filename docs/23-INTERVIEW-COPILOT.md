@@ -59,14 +59,20 @@ answer was transcribed and never evaluated. The scheduler's policy:
 4. **Continuations and corrections supersede.** "…and how you tested it" or
    "Sorry, I meant the second project" within 8 s of the last question, before
    the candidate has spoken, re-answers **the same card** (same question row)
-   with the joined wording; an in-flight stream is aborted first.
+   with the joined wording; the scheduler's own in-flight stream of it is
+   aborted first. A revision never takes the slot from a manual Ask or
+   regenerate: it waits at the head of the queue, on the same card.
 5. **Fragments wait** 1.2 s for their second half.
 6. **Nothing disappears silently.** A distinct question that will not be
    answered automatically becomes a visible card with no answer and "Press ↻
    to answer it": past 3 queued questions (the oldest waiting one), when the
    user pauses with it waiting **or still being classified**, or when the
-   model recognised it only after the conversation moved on (§8). Only Stop
-   drops work. While paused, new finals are not evaluated (that is Pause).
+   model recognised it only after the conversation moved on (§8). Every
+   outcome that lands after a Pause (on time, a late "yes" after a timeout,
+   or a revision routed by rule) takes the same path to a missed card, and a
+   copy that adds no words to a question already in flight, waiting,
+   answered or shown missed gets no second card. Only Stop drops work.
+   While paused, new finals are not evaluated (that is Pause).
 7. **Decisions commit in arrival order** (M3). Detection runs concurrently —
    a slow classifier call never blocks the next turn's detection — but each
    turn's decision (queue, coalesce, supersede, drop) is applied only after
@@ -85,7 +91,8 @@ repeats it (3) or continues/corrects the LAST question within the window,
 before candidate speech (4). Never when the rules read it as not-a-question
 ("Sorry, can you hear me okay?" is logistics, not a correction), and never
 when it is a complete question after a conjunction ("And why are you
-interested in this role?" is a new card). Everything else is a new question,
+interested in this role?" is a new card, in any capitalisation — the
+transcriber often lower-cases a new turn). Everything else is a new question,
 in arrival order.
 
 Interim transcripts never create a card (they only prefetch grounding). The

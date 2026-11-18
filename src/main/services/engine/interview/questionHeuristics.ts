@@ -258,13 +258,15 @@ export function isCorrection(text: string): boolean {
 export function isContinuation(text: string): boolean {
   const t = text.trim();
   if (assessUtterance(t).verdict === 'not') return false; // logistics / backchannel never extend a question
-  if (/^[a-z]/.test(t) && !/^(i|i'm|i've|i'd)\b/.test(t)) return true; // a lower-case start resumes a sentence
   const m = /^(and|or|also|plus|specifically|particularly|especially|including|as well as|along with|in particular|like,|for example)\b[,\s]*(.*)$/i.exec(t);
-  if (!m) return false;
-  // "And why are you interested in this role?" is a complete question of its
-  // own (an inverted interrogative), not the second half of the last one —
-  // unlike "…and what you would do differently" or "and how you tested it".
-  const rest = words(m[2]);
+  const lowerStart = /^[a-z]/.test(t) && !/^(i|i'm|i've|i'd)\b/.test(t); // a lower-case start resumes a sentence…
+  if (!m && !lowerStart) return false;
+  // …unless what follows is a complete question of its own — an inverted
+  // interrogative: "And why are you interested in this role?" — not the
+  // second half of the last one, unlike "…and what you would do differently"
+  // or "and how you tested it". Checked whatever the capitalisation: the
+  // transcriber often lower-cases a new turn (M3 review).
+  const rest = words(m ? m[2] : t);
   const inverted =
     rest.length >= 4 &&
     ((WH.has(rest[0]) && AUX.has(rest[1]) && AUX_SUBJECT.has(rest[2])) || (AUX.has(rest[0]) && AUX_SUBJECT.has(rest[1])));

@@ -650,4 +650,203 @@ describe('M3 acceptance — questions answered in the right order', () => {
     expect(h.missed).toHaveLength(0);
     expect(vi.getTimerCount()).toBe(0);
   });
+  // ---- M3 review round 2 ----
+  describe('review: paused outcomes share late handling and de-duplication', () => {
+    for (const resume of [false, true]) {
+      const tag = resume ? 'pause → resume' : 'pause';
+      it(`${tag} before the classifier times out, then a late "yes": a missed card, not lost`, async () => {
+        const A = 'The thing with the queues last year.';
+        const l = late();
+        const h = scripted({ [A]: [500, l.d] }); // times out (fallback "no" + late window) at 500 ms
+        void h.s.onRemoteFinal(A, 't1');
+        await run(100);
+        h.s.pause();
+        if (resume) h.s.resume();
+        await run(500); // the timeout lands after the pause
+        expect(h.missed).toEqual([]);
+        l.resolve(verdict(true));
+        await run(10);
+        expect(h.answered).toHaveLength(0);
+        expect(h.missed).toEqual([{ text: A, why: 'paused' }]);
+      });
+
+      it(`${tag} with two identical finals both classifying, both "yes": ONE missed card`, async () => {
+        const A = 'The thing with the queues last year.';
+        const h = scripted({ [A]: [500, verdict(true)] });
+        void h.s.onRemoteFinal(A, 't1');
+        await run(50);
+        void h.s.onRemoteFinal(A, 't2');
+        await run(50);
+        h.s.pause();
+        if (resume) h.s.resume();
+        await run(600);
+        expect(h.answered).toHaveLength(0);
+        expect(h.missed).toEqual([{ text: A, why: 'paused' }]);
+        expect(h.decisions).toContain('duplicate');
+      });
+
+      it(`${tag} with two identical finals both timing out, both late "yes": ONE missed card`, async () => {
+        const A = 'The thing with the queues last year.';
+        const l1 = late();
+        const l2 = late();
+        let n = 0;
+        const h = scripted({});
+        h.deps.detect = () => new Promise((r) => setTimeout(() => r(n++ === 0 ? l1.d : l2.d), 500));
+        void h.s.onRemoteFinal(A, 't1');
+        await run(50);
+        void h.s.onRemoteFinal(A, 't2');
+        await run(50);
+        h.s.pause();
+        if (resume) h.s.resume();
+        await run(600);
+        l1.resolve(verdict(true));
+        l2.resolve(verdict(true));
+        await run(10);
+        expect(h.answered).toHaveLength(0);
+        expect(h.missed).toEqual([{ text: A, why: 'paused' }]);
+      });
+    }
+
+    it('a distinct question classified across the same pause still gets its own card', async () => {
+      const A = 'The thing with the queues last year.';
+      const B = 'The migration you mentioned earlier.';
+      const h = scripted({ [A]: [500, verdict(true)], [B]: [500, verdict(true)] });
+      void h.s.onRemoteFinal(A, 't1');
+      await run(50);
+      void h.s.onRemoteFinal(B, 't2');
+      await run(50);
+      h.s.pause();
+      await run(600);
+      expect(h.missed).toEqual([
+        { text: A, why: 'paused' },
+        { text: B, why: 'paused' },
+      ]);
+    });
+
+    it('a copy committed after Pause turned the queued original into a missed card: no second card', async () => {
+      const B = 'The thing with the queues last year.';
+      const X = 'We use Kafka quite a lot here.'; // slow, and not a question
+      const h = scripted({ [X]: [600, verdict(false)] });
+      void h.s.onRemoteFinal('Tell me about yourself.', 't0'); // streams, holding the slot
+      await run(10);
+      h.s.onCandidateTurn();
+      vi.advanceTimersByTime(CONTINUATION_WINDOW_MS + 1);
+      const detect = h.deps.detect;
+      h.deps.detect = (t, r) => (t === B ? new Promise((res) => setTimeout(() => res(verdict(true)), 10)) : detect(t, r));
+      void h.s.onRemoteFinal(B, 't1'); // decided in 10 ms → queued behind the stream
+      await run(50);
+      void h.s.onRemoteFinal(X, 't2'); // still with the classifier at Pause…
+      await run(10);
+      void h.s.onRemoteFinal(B, 't3'); // …so this copy commits after it, i.e. after Pause
+      await run(50);
+      expect(h.s.pending.map((j) => j.text)).toEqual([B]);
+      h.s.pause(); // the queued B becomes a missed card
+      await run(700);
+      expect(h.missed).toEqual([{ text: B, why: 'paused' }]);
+    });
+
+    it('a correction routed by rule, still waiting to commit at Pause: a missed card with the corrected wording, not lost', async () => {
+      const A = 'Tell me about the first project.';
+      const X = 'We use Kafka quite a lot here.'; // slow, and not a question
+      const C = 'Sorry, I meant the second project.';
+      const h = scripted({ [X]: [600, verdict(false)] });
+      void h.s.onRemoteFinal(A, 't1');
+      await run(10);
+      await h.finish(); // A answered
+      void h.s.onRemoteFinal(X, 't2');
+      await run(10);
+      void h.s.onRemoteFinal(C, 't3'); // a correction by rule — waits for X's decision
+      await run(10);
+      h.s.pause();
+      await run(700);
+      expect(texts(h)).toEqual([A]);
+
+      expect(h.missed).toEqual([{ text: `${A} ${C}`, why: 'paused' }]);
+    });
+
+    it('after STOP, neither an on-time nor a late "yes" surfaces anything', async () => {
+      const A = 'The thing with the queues last year.';
+      const l = late();
+      const h = scripted({ [A]: [500, l.d] });
+      void h.s.onRemoteFinal(A, 't1');
+      await run(100);
+      h.s.stop();
+      await run(500);
+      l.resolve(verdict(true));
+      await run(10);
+      expect(h.answered).toHaveLength(0);
+      expect(h.missed).toHaveLength(0);
+    });
+  });
+
+  describe('review: a revision never takes the slot from a manual Ask', () => {
+    it('a correction while a manual Ask streams waits for it, then re-answers the SAME card', async () => {
+      const A = 'Tell me about the first project.';
+      const C = 'Sorry, I meant the second project.';
+      const h = scripted({});
+      void h.s.onRemoteFinal(A, 't1');
+      await run(10);
+      await h.finish(); // the automatic answer finished
+      expect(texts(h)).toEqual([A]);
+      let manual = true; // the user pressed Ask: a stream the scheduler does not own
+      let manualAborted = false;
+      h.deps.slotBusy = () => manual;
+      const abort = h.deps.abortActive;
+      h.deps.abortActive = () => {
+        if (manual) manualAborted = true;
+        abort();
+      };
+      void h.s.onRemoteFinal(C, 't2'); // within the continuation window, no candidate speech
+      await run(10);
+      expect(texts(h)).toEqual([A]); // NOT re-answered over the manual Ask
+      expect(manualAborted).toBe(false);
+      expect(h.s.pending.map((j) => j.text)).toEqual([`${A} ${C}`]);
+      manual = false;
+      h.s.slotFreed();
+      await run(0);
+      expect(texts(h)).toEqual([A, `${A} ${C}`]);
+      expect(new Set(h.answered.map((a) => a.questionId)).size).toBe(1); // same card
+    });
+
+    it('a revision waiting behind a manual Ask keeps its place when new questions overflow the queue', async () => {
+      const A = 'Tell me about the first project.';
+      const C = 'Sorry, I meant the second project.';
+      const h = scripted({});
+      void h.s.onRemoteFinal(A, 't1');
+      await run(10);
+      await h.finish();
+      let manual = true;
+      h.deps.slotBusy = () => manual;
+      void h.s.onRemoteFinal(C, 't2');
+      await run(10);
+      const qs = ['Why Acme?', 'Why this role?', 'What is your notice period?'];
+      for (const [i, q] of qs.entries()) {
+        h.s.onCandidateTurn();
+        vi.advanceTimersByTime(CONTINUATION_WINDOW_MS + 1);
+        void h.s.onRemoteFinal(q, `t${i + 3}`);
+        await run(10);
+      }
+      // Four waiting; the oldest NEW question is the one given up on.
+      expect(h.missed).toEqual([{ text: qs[0], why: 'queue-full' }]);
+      expect(h.s.pending.map((j) => j.text)).toEqual([`${A} ${C}`, qs[1], qs[2]]);
+      manual = false;
+      h.s.slotFreed();
+      await run(0);
+      expect(texts(h).at(-1)).toBe(`${A} ${C}`);
+    });
+  });
+
+  it('review: a LOWER-CASE complete question after another is its own card, not a merge', async () => {
+    const A = 'Walk me through the ledger migration.';
+    const B = 'and why are you interested in this role at Google?';
+    const h = scripted({});
+    void h.s.onRemoteFinal(A, 't1');
+    await run(10);
+    void h.s.onRemoteFinal(B, 't2');
+    await run(10);
+    await h.finish();
+    expect(texts(h)).toEqual([A, B]);
+    expect(new Set(h.answered.map((a) => a.questionId)).size).toBe(2);
+    expect(h.decisions).not.toContain('superseded');
+  });
 });
