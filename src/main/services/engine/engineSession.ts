@@ -9,7 +9,14 @@ import {
   emitContributionMeta,
   emitContributionOpen,
   emitContributionReset,
+  emitContributionTitle,
 } from '../../ipc/contributionBridge';
+import { taskRoute } from '../../providers/taskRoute';
+import { QuestionScheduler, type QuestionJob } from './interview/questionScheduler';
+import { assessUtterance } from './interview/questionHeuristics';
+import type { Detection } from './interview/detector';
+import { latency } from './metrics/latencyStore';
+import type { ClassifierTurn } from '../openai/questions';
 import { normalizeProviderError } from '../../providers/normalizeError';
 import { profilesRepo } from '../../db/repositories/profiles.repo';
 import { log } from '../security/logger';
@@ -109,6 +116,15 @@ export class EngineSession {
   /** Ambient trigger state (Meeting/Companion) — per-session cooldowns/
    *  dedupe/pending questions. Null for Q&A modes (interview). */
   readonly ambientPolicy: AmbientPolicy | null;
+  /** Interview (Q&A modes): every interviewer final goes through the
+   *  scheduler — detection keeps running while an answer streams, distinct
+   *  questions queue, revisions coalesce. Null for ambient modes. */
+  readonly scheduler: QuestionScheduler | null;
+  /** Recent interviewer turns with their transcript row — what the manual
+   *  "Answer that" button answers when detection missed. */
+  private readonly remoteTurns: { text: string; tcId: string; at: number }[] = [];
+  /** Speech-end time per transcript row, for the latency record. */
+  private readonly speechEnds = new Map<string, number>();
 
   /** Set on teardown/replacement: an in-flight classify/stream/prediction that
    *  wakes up afterwards must act as if the old module-level `live` changed. */
@@ -146,6 +162,75 @@ export class EngineSession {
         budgetCents: opts.budgetCents,
         companionPresence: opts.companionPresence,
       }) ?? null;
+    this.scheduler = opts.mode.ambient ? null : this.createScheduler();
+  }
+
+  private createScheduler(): QuestionScheduler {
+    return new QuestionScheduler({
+      detect: (text, recent) => this.detect(text, recent),
+      recent: () => this.recentForClassifier(),
+      answer: (job) => this.answerScheduled(job),
+      abortActive: () => this.answerAbort?.abort(),
+      slotBusy: () => this.answering,
+      missed: (job, why) => this.surfaceMissed(job, why),
+      onDecision: (d) => {
+        latency.decision(d.finalAt, d.decidedAt);
+        // Outcome + timing only — never the words.
+        log.info(`question detection: ${d.outcome} (${d.source}/${d.reason}) in ${d.decidedAt - d.finalAt} ms`);
+      },
+      now: () => Date.now(),
+      setTimer: (fn, ms) => setTimeout(fn, ms),
+      clearTimer: (t) => clearTimeout(t as ReturnType<typeof setTimeout>),
+    });
+  }
+
+  /** The mode's trigger, as a scheduler detection. Never throws. */
+  private async detect(text: string, recent: ClassifierTurn[]): Promise<Detection> {
+    try {
+      const d = await this.mode.trigger.evaluate(text, { recent });
+      return (
+        d.detection ?? {
+          act: d.act && !!d.question,
+          type: (d.question?.type ?? 'behavioral') as Detection['type'],
+          confidence: d.question?.confidence ?? 0,
+          strategy: d.question?.strategy ?? '',
+          source: 'model',
+          reason: d.reason,
+          continuesPrevious: false,
+        }
+      );
+    } catch (e) {
+      log.error('question detection failed', e);
+      return {
+        act: false,
+        type: 'behavioral',
+        confidence: 0,
+        strategy: '',
+        source: 'fallback',
+        reason: 'detector-error',
+        continuesPrevious: false,
+      };
+    }
+  }
+
+  /** The last few turns, speaker-labelled, for the classifier. Only what was
+   *  SAID — BrainCue's own suggestions are not part of the conversation. */
+  private recentForClassifier(): ClassifierTurn[] {
+    return this.history
+      .filter((h): h is Extract<SessionHistoryItem, { role: 'heard' }> => h.role === 'heard')
+      .slice(-4)
+      .map((h) => ({
+        speaker:
+          h.speaker !== undefined && h.speaker !== this.mode.remoteSpeaker ? ('candidate' as const) : ('interviewer' as const),
+        text: h.text,
+      }));
+  }
+
+  /** Pause/resume — the scheduler turns waiting questions into missed cards. */
+  setPaused(paused: boolean): void {
+    this.paused = paused;
+    if (paused) this.scheduler?.pause();
+    else this.scheduler?.resume();
   }
 
   get isStopped(): boolean {
@@ -154,6 +239,7 @@ export class EngineSession {
 
   /** Abort in-flight work and release every transcriber. Idempotent. */
   teardown(): void {
+    this.scheduler?.stop();
     this.answerAbort?.abort();
     this.prefetch = null;
     this.echo.flush(); // held own turns are the user's last words — keep them
@@ -169,7 +255,7 @@ export class EngineSession {
   async handleEvent(ev: ContextEvent): Promise<void> {
     switch (ev.kind) {
       case 'transcript_final':
-        return this.onTranscriptFinal(ev.text, ev.speaker);
+        return this.onTranscriptFinal(ev.text, ev.speaker, ev.timing);
       case 'direct_ask':
         return this.directAsk(ev.text);
       default:
@@ -188,8 +274,13 @@ export class EngineSession {
    *  trigger / ambient policy: the user's own microphone turns are what they
    *  said, never a question to answer. `speaker` defaults to the remote one so
    *  every v1 caller keeps its behaviour. */
-  async onTranscriptFinal(text: string, speaker: Speaker = this.mode.remoteSpeaker): Promise<void> {
+  async onTranscriptFinal(
+    text: string,
+    speaker: Speaker = this.mode.remoteSpeaker,
+    timing: { speechEndAt?: number; finalAt?: number } = {},
+  ): Promise<void> {
     if (!text || this.stopped || this.paused) return;
+    const finalAt = timing.finalAt ?? Date.now();
     const own = speaker !== this.mode.remoteSpeaker;
     if (own) {
       // The user's own words: kept and remembered, never answered — and held
@@ -198,10 +289,17 @@ export class EngineSession {
       this.echo.ownTurn(text, () => {
         if (!this.stopped) this.commitTurn(text, speaker);
       });
+      // The candidate is speaking: the interviewer's next words start a new
+      // question rather than continue the last one. ("Okay" / "mm-hmm" while
+      // listening does not count — that is not an answer starting.)
+      if (assessUtterance(text).verdict !== 'not') this.scheduler?.onCandidateTurn(finalAt);
       return;
     }
     this.echo.remoteTurn(text);
     const tcId = this.commitTurn(text, speaker);
+    if (timing.speechEndAt) this.speechEnds.set(tcId, timing.speechEndAt);
+    this.remoteTurns.push({ text, tcId, at: finalAt });
+    if (this.remoteTurns.length > 12) this.remoteTurns.shift();
 
     // Ambient modes (Meeting): the turn runs the ambient trigger and may
     // become a quiet card — never a streamed auto-answer. Direct asks still
@@ -219,35 +317,77 @@ export class EngineSession {
       return;
     }
 
-    // Don't pile up overlapping answers — if one is already streaming, just keep
-    // transcribing. (The user can still ask manually.) Claim the slot
-    // SYNCHRONOUSLY here, before the trigger's classify round-trip: two finals
-    // arriving back-to-back would otherwise both pass this gate (the flag is only
-    // set deep inside generateContribution, after two awaits) and double-answer
-    // one utterance.
-    if (this.answering) return;
-    this.answering = true;
+    // Interview: the scheduler owns what happens next — detection runs on
+    // EVERY interviewer final, even while an answer streams (v1 returned
+    // early here, so a question asked during an answer was never evaluated).
+    // One stream at a time is still the rule; the scheduler queues behind it.
+    // See interview/questionScheduler.ts for the policy.
+    await this.scheduler?.onRemoteFinal(text, tcId, finalAt);
+  }
 
-    try {
-      const decision = await this.mode.trigger.evaluate(text);
-      // Re-check: the session can be stopped/replaced during classify.
-      if (this.stopped) return;
-      if (decision.act && decision.question) {
-        // answerQuestion → generateContribution re-sets `answering` and clears it
-        // in its own finally, so the slot is released when the answer
-        // completes/aborts.
-        await this.answerQuestion(text, decision.question, tcId);
-      } else {
-        // Not a question — release the slot we claimed above, unless an answer
-        // stream (manual Ask / regenerate during the classify await) has since
-        // taken ownership: answerAbort is set exclusively by generateContribution,
-        // and that stream's own finally releases the slot.
-        if (!this.answerAbort) this.answering = false;
-      }
-    } catch (e) {
-      if (!this.stopped && !this.answerAbort) this.answering = false;
-      log.error('onTranscriptFinal failed', e);
+  /** Run one scheduled question: register its row (or re-use it for a
+   *  revision) and stream the answer. */
+  private async answerScheduled(job: QuestionJob): Promise<void> {
+    const q = { type: job.type, confidence: job.confidence, strategy: job.strategy };
+    const tcId = job.transcriptChunkIds[job.transcriptChunkIds.length - 1] ?? null;
+    // Speech end of the turn that completed the question.
+    const speechEndAt = tcId ? this.speechEnds.get(tcId) : undefined;
+    if (job.questionId) {
+      // A split/corrected question: same row, same card, new wording.
+      this.answerAbort?.abort();
+      persist.updateQuestionText(job.questionId, job.text, tcId);
+      emitContributionReset(job.questionId);
+      emitContributionTitle(job.questionId, job.text);
+      if (this.lastQuestion?.questionId === job.questionId) this.lastQuestion.text = job.text;
+    } else {
+      job.questionId = this.registerQuestion(job.text, q, tcId);
     }
+    const route = taskRoute('answer');
+    latency.begin({
+      questionId: job.questionId,
+      sessionId: this.sessionId,
+      speechEndAt,
+      finalAt: job.finalAt,
+      decidedAt: job.decidedAt,
+      detection: `${job.detection.source}/${job.detection.reason}`,
+      provider: route?.provider,
+      model: route?.model,
+    });
+    await this.generateContribution(job.questionId, job.text, job.type);
+  }
+
+  /** A question that will not be answered automatically still gets a card —
+   *  no answer, and one tap (↻) to answer it. Never silently dropped. */
+  private surfaceMissed(job: QuestionJob, why: 'queue-full' | 'paused'): void {
+    if (this.stopped) return;
+    const questionId = this.registerQuestion(
+      job.text,
+      { type: job.type, confidence: job.confidence, strategy: job.strategy },
+      job.transcriptChunkIds[job.transcriptChunkIds.length - 1] ?? null,
+    );
+    emitContributionMeta(questionId, {
+      questionId,
+      riskWarning:
+        why === 'paused'
+          ? 'Asked while paused — not answered. Press ↻ to answer it.'
+          : 'Asked while other answers were waiting — not answered. Press ↻ to answer it.',
+    });
+    emitContributionDone(questionId);
+  }
+
+  /** Manual escape hatch (Cue Card "Answer that"): answer the interviewer's
+   *  latest words as a question, whatever detection decided. Joins the last
+   *  two interviewer turns when they came close together (a split question). */
+  async answerLastHeard(): Promise<{ ok: boolean }> {
+    const turns = this.remoteTurns;
+    const last = turns[turns.length - 1];
+    if (!last || this.stopped) return { ok: false };
+    const prev = turns[turns.length - 2];
+    const joined = !!prev && last.at - prev.at < 6000 && assessUtterance(prev.text).verdict !== 'not';
+    const text = joined ? `${prev.text} ${last.text}` : last.text;
+    const a = assessUtterance(text);
+    await this.answerQuestion(text, { type: a.type, confidence: 1, strategy: '' }, last.tcId);
+    return { ok: true };
   }
 
   /** Start retrieval while the speaker is still finishing the question.
@@ -355,12 +495,20 @@ export class EngineSession {
     q: { type: string; confidence: number; strategy: string },
     transcriptChunkId: string | null,
   ): Promise<{ questionId: string }> {
+    const questionId = this.registerQuestion(questionText, q, transcriptChunkId);
+    return this.generateContribution(questionId, questionText, q.type);
+  }
+
+  /** Insert the question row and open its card (synchronous). Aborts any
+   *  in-flight answer FIRST — before the broadcast that clears the Cue Card —
+   *  so a late token from the old stream can't land in the new card. */
+  private registerQuestion(
+    questionText: string,
+    q: { type: string; confidence: number; strategy: string },
+    transcriptChunkId: string | null,
+  ): string {
     const session = persist.sessionRow(this.sessionId);
     if (!session) throw new Error('Session not found');
-
-    // Cancel any in-flight answer BEFORE we broadcast the new question (which
-    // clears the Cue Card answer), so a late token from the old stream can't
-    // land in the freshly-cleared answer.
     this.answerAbort?.abort();
 
     const questionId = persist.insertQuestion({
@@ -386,8 +534,7 @@ export class EngineSession {
     // Remember this question so the Cue Card can re-generate it (length/format/
     // pronunciation toggles) by reusing THIS question row — no duplicate line.
     this.lastQuestion = { questionId, text: questionText, type: q.type };
-
-    return this.generateContribution(questionId, questionText, q.type);
+    return questionId;
   }
 
   /** Stream (or re-stream) the grounded contribution for an already-registered
@@ -429,6 +576,7 @@ export class EngineSession {
       // recall never throws). Cited separately from documents as [M1]….
       memories = await recallMemories(profile.id, questionText, session.packId);
       const tRecall = Date.now();
+      latency.mark(questionId, { groundedAt: tRecall, prefetched: !!prefetched });
       let firstToken = 0;
       // Transparency: tell the UI exactly what was sent to the provider —
       // memories included, so "data sent" always shows every memory used.
@@ -451,6 +599,7 @@ export class EngineSession {
         if (ev.type === 'delta') {
           if (!firstToken) {
             firstToken = Date.now();
+            latency.mark(questionId, { firstTokenAt: firstToken });
             // Where the wait before the first token goes (no transcript text).
             log.info(
               `answer latency: ground ${tGround - t0} ms${prefetched ? ' (prefetched on interim)' : ''}, recall ${tRecall - tGround} ms, first token ${firstToken - tRecall} ms`,
@@ -488,6 +637,9 @@ export class EngineSession {
       if (this.answerAbort === abort) {
         this.answering = false;
         this.answerAbort = null;
+        // A detected question may be waiting behind this stream (a manual
+        // Ask or regenerate held the slot) — let the scheduler start it.
+        if (this.scheduler) queueMicrotask(() => this.scheduler?.slotFreed());
       }
     }
 

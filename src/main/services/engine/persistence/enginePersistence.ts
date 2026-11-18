@@ -54,6 +54,15 @@ export const enginePersistence = {
     return row ? { text: row.text, type: row.type } : null;
   },
 
+  /** A split or corrected question re-answered on the same row. */
+  updateQuestionText(questionId: string, text: string, transcriptChunkId?: string | null): void {
+    db()
+      .update(schema.detectedQuestions)
+      .set({ text, ...(transcriptChunkId ? { transcriptChunkId } : {}) })
+      .where(eq(schema.detectedQuestions.id, questionId))
+      .run();
+  },
+
   /** Replace any prior answer for this question so a regenerate overwrites
    *  rather than appends. Both statements are synchronous + adjacent, so an
    *  aborted regenerate never deletes the existing answer without a

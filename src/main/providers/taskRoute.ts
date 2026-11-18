@@ -23,6 +23,16 @@ export function installTaskRouteResolver(fn: TaskRouteResolver): void {
   resolver = fn;
 }
 
+/** The full route (provider + model) for a task, or null before a resolver
+ *  is installed — latency records name the model that answered. */
+export function taskRoute(task: ModelKey): TaskRoute | null {
+  try {
+    return resolver ? resolver(task) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The provider a task currently routes to (`openai` until a resolver exists). */
 export function taskProvider(task: ModelKey): CloudProviderId {
   return resolver ? resolver(task).provider : 'openai';

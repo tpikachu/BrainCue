@@ -159,6 +159,8 @@ export function registerSessionIpc(): void {
     ({ questionText }) => sessionManager.askActive(questionText),
   );
 
+  handle(IPC.session.answerLast, z.void(), () => sessionManager.answerLastActive());
+
   handle(
     IPC.session.setInterviewType,
     z.object({ sessionId: z.string().min(1), interviewType }),

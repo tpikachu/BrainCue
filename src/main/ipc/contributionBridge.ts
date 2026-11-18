@@ -96,6 +96,11 @@ export function emitContributionFollowup(
   broadcast(EVENTS.contributionPatch, { contributionId, followup }, targets);
 }
 
+/** The question behind a card was revised (split/corrected question). */
+export function emitContributionTitle(contributionId: string, title: string, targets?: Targets): void {
+  broadcast(EVENTS.contributionPatch, { contributionId, title }, targets);
+}
+
 export function emitContributionDone(contributionId: string, targets?: Targets): void {
   broadcast(EVENTS.answerDone, { questionId: contributionId }, targets);
   broadcast(EVENTS.contributionDone, { contributionId }, targets);

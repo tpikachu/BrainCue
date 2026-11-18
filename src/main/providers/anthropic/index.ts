@@ -141,9 +141,10 @@ export const anthropicChat: ChatProvider = {
       req.user,
       req.maxOutputTokens,
     );
+    const opts = req.signal ? { signal: req.signal } : undefined;
     const res = isFable(modelId)
-      ? await client.beta.messages.create(withFallbacks(params))
-      : await client.messages.create(params);
+      ? await client.beta.messages.create(withFallbacks(params), opts)
+      : await client.messages.create(params, opts);
     if (res.stop_reason === 'refusal') throw new Error(REFUSED_MESSAGE);
     const text = res.content.find((b) => b.type === 'text');
     return parseJsonText<T>(text && 'text' in text ? text.text : '', 'Anthropic');

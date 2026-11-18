@@ -132,7 +132,8 @@ describe('onTranscriptFinal — whose turn it is', () => {
     const s = session();
     await s.onTranscriptFinal('Tell me about a migration you led?');
     expect(h.persisted[0].speaker).toBe('interviewer');
-    expect(trigger).toHaveBeenCalledWith('Tell me about a migration you led?');
+    // The trigger now also receives the recent turns (detection context).
+    expect(trigger).toHaveBeenCalledWith('Tell me about a migration you led?', expect.objectContaining({ recent: expect.any(Array) }));
     expect(h.generateInputs).toHaveLength(1);
   });
 

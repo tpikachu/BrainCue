@@ -122,17 +122,17 @@ export function openaiCompatibleProvider(info: CloudProviderInfo): {
       };
       let text: string;
       try {
-        const res = await client.chat.completions.create({
-          ...base,
-          response_format: { type: 'json_object' },
-        });
+        const res = await client.chat.completions.create(
+          { ...base, response_format: { type: 'json_object' } },
+          req.signal ? { signal: req.signal } : undefined,
+        );
         text = res.choices[0]?.message?.content ?? '';
       } catch (e) {
         // A model/vendor that rejects `response_format` says so with a 400 —
         // the prompt already demands strict JSON, so retry without it.
         if (!(e instanceof OpenAI.APIError && e.status === 400)) throw vendorError(info, e);
         try {
-          const res = await client.chat.completions.create(base);
+          const res = await client.chat.completions.create(base, req.signal ? { signal: req.signal } : undefined);
           text = res.choices[0]?.message?.content ?? '';
         } catch (e2) {
           throw vendorError(info, e2);

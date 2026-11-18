@@ -14,7 +14,15 @@ export type ContextEvent =
   /** `speaker` defaults to the mode's remote speaker (the trigger stream);
    *  the user's own mic turns carry the mode's local speaker and are recorded
    *  without ever running the trigger. */
-  | { kind: 'transcript_final'; sessionId: string; text: string; speaker?: Speaker }
+  | {
+      kind: 'transcript_final';
+      sessionId: string;
+      text: string;
+      speaker?: Speaker;
+      /** When the turn's speech ended and when the final arrived — the
+       *  latency record's anchors (metrics/latency.ts). */
+      timing?: { speechEndAt?: number; finalAt?: number };
+    }
   | { kind: 'transcript_delta'; sessionId: string; text: string }
   | { kind: 'direct_ask'; sessionId: string; text: string }
   | { kind: 'screen_capture'; sessionId: string; imageDataUrl: string }

@@ -84,7 +84,7 @@ export const openaiChat: ChatProvider = {
       ],
       text: { format: { type: 'json_object' } },
       ...(req.maxOutputTokens !== undefined ? { max_output_tokens: req.maxOutputTokens } : {}),
-    });
+    }, req.signal ? { signal: req.signal } : undefined);
     return JSON.parse(res.output_text) as T;
   },
 };
@@ -101,6 +101,7 @@ export const openaiRealtimeStt: RealtimeSttProvider = {
       {
         onDelta: cb.onDelta,
         onFinal: cb.onFinal,
+        onSpeechStop: cb.onSpeechStop,
         onError: cb.onError,
         onStatus: cb.onStatus,
       },

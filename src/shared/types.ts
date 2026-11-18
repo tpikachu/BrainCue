@@ -780,6 +780,9 @@ export interface ContributionDeltaEvent {
  *  carried, so cards render identically; only the fields present are patched. */
 export interface ContributionPatchEvent {
   contributionId: string;
+  /** A revised question (a split or corrected question re-answered on the
+   *  same card) — the card's title follows it. */
+  title?: string;
   /** The legacy answerMeta payload — ambient cards ride kind-specific
    *  annotations (e.g. a memory card's memoryId/why) on it as extra fields,
    *  with riskWarning null. */

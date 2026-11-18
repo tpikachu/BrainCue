@@ -504,6 +504,9 @@ describe('in-session history (question N knows about question N-1)', () => {
     await sessionManager.processFinalTranscript(session.id, 'Thanks for joining, we have a few topics today.');
     h.classify = question;
     await sessionManager.processFinalTranscript(session.id, 'Which database did you pick for the rewrite?');
+    // The candidate answers before the follow-up — which closes the window in
+    // which "And …" would continue (split) the previous question instead.
+    await sessionManager.processFinalTranscript(session.id, 'We went with Postgres.', 'candidate');
     await sessionManager.processFinalTranscript(session.id, 'And why that one?');
 
     expect(inputs[0].history).toEqual([

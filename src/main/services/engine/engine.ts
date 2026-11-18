@@ -154,12 +154,19 @@ class Engine {
         // The turn so far, from incremental deltas; the session prefetches
         // grounding on it while the speaker is still finishing the question.
         let interim = '';
+        // Speech-end anchors for the latency record: the server VAD's
+        // speech-stopped when the engine has one, else the last interim
+        // delta (the last word recognized) — the local engine has no VAD
+        // event, and its endpoint wait is exactly what follows that delta.
+        let speechStopAt = 0;
+        let lastDeltaAt = 0;
         session.transcribers[source] = createRealtimeSource(
           {
             onDelta: (text) => {
               // Ambient policies gate on "someone is (still) speaking" — feed
               // them interim activity so a decision mid-classify can defer.
-              session.ambientPolicy?.noteInterim?.(Date.now());
+              lastDeltaAt = Date.now();
+              session.ambientPolicy?.noteInterim?.(lastDeltaAt);
               // Grounding is prefetched on the CALL's interim only (its turns
               // are the questions). Interim text itself goes out for both
               // streams, tagged, so the user sees their own words appear as
@@ -172,9 +179,16 @@ class Engine {
               }
               broadcast(EVENTS.transcriptDelta, { text, isFinal: false, speaker });
             },
+            onSpeechStop: () => {
+              speechStopAt = Date.now();
+            },
             onFinal: (text) => {
               interim = '';
-              void this.processFinalTranscript(opts.sessionId, text, speaker);
+              const finalAt = Date.now();
+              const speechEndAt = speechStopAt || lastDeltaAt || undefined;
+              speechStopAt = 0;
+              lastDeltaAt = 0;
+              void this.processFinalTranscript(opts.sessionId, text, speaker, { speechEndAt, finalAt });
             },
             onError: (message) => broadcast(EVENTS.sessionError, { message }),
             // Socket lifecycle → a subtle "reconnecting audio…" pill in the Cue Card
@@ -325,10 +339,15 @@ class Engine {
   /** Persist a finalized transcript turn and run it through the mode's trigger.
    *  `speaker` defaults to the mode's remote speaker (the trigger stream); the
    *  user's own mic turns pass the mode's local speaker and are only recorded. */
-  async processFinalTranscript(sessionId: string, text: string, speaker?: Speaker): Promise<void> {
+  async processFinalTranscript(
+    sessionId: string,
+    text: string,
+    speaker?: Speaker,
+    timing?: { speechEndAt?: number; finalAt?: number },
+  ): Promise<void> {
     const s = this.current;
     if (!text || !s || s.sessionId !== sessionId || s.paused) return;
-    await s.handleEvent({ kind: 'transcript_final', sessionId, text, speaker });
+    await s.handleEvent({ kind: 'transcript_final', sessionId, text, speaker, timing });
   }
 
   /** Chunked STT fallback (used only if Realtime is unavailable). */
@@ -430,7 +449,7 @@ class Engine {
   togglePause(sessionId: string): { paused: boolean } {
     const s = this.current;
     if (!s || s.sessionId !== sessionId) return { paused: true };
-    s.paused = !s.paused;
+    s.setPaused(!s.paused);
     broadcast(EVENTS.sessionState, { status: 'live', paused: s.paused });
     return { paused: s.paused };
   }
@@ -542,6 +561,14 @@ class Engine {
   clearAnswerActive(): { cleared: boolean } {
     this.current?.answerAbort?.abort();
     return { cleared: true };
+  }
+
+  /** "Answer that" — the escape hatch when detection missed: answer the
+   *  interviewer's latest words on the live session. */
+  async answerLastActive(): Promise<{ ok: boolean }> {
+    const s = this.current;
+    if (!s || s.paused) return { ok: false };
+    return s.answerLastHeard();
   }
 
   /** Manually ask a question for the active session (Cue Card "Ask" box). */

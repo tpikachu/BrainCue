@@ -110,6 +110,7 @@ export const IPC = {
     practiceStats: 'session:practice-stats', // Practice Loop aggregates (Reports)
     ask: 'session:ask',
     askActive: 'session:ask-active',
+    answerLast: 'session:answer-last', // Cue Card "Answer that": answer the interviewer's latest words
     // Keep a finished conversation: archive it for retrieval + extract memory
     // candidates. The user's answer to the save prompt, not an automatic step.
     remember: 'session:remember',
@@ -123,6 +124,11 @@ export const IPC = {
   },
   contributions: {
     update: 'contributions:update', // review/edit a persisted contribution (title/body/meta/status)
+  },
+  // Live latency instrumentation (engine/metrics/latency.ts). No text.
+  metrics: {
+    firstVisible: 'metrics:first-visible', // overlay → main: a card's first words were painted
+    latency: 'metrics:latency', // p50/p95 per stage, cold vs warm
   },
   // Local memory (v2): candidates + items live in ONE lifecycle; only approved
   // memory is ever recalled. All review actions are explicit user actions.

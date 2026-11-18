@@ -209,6 +209,17 @@ const api = {
     ) => invoke<Story>(IPC.stories.update, { id, patch }),
     delete: (id: string) => invoke<{ deleted: true }>(IPC.stories.delete, { id }),
   },
+  /** Live latency instrumentation — ids and timestamps only. */
+  metrics: {
+    firstVisible: (contributionId: string, at: number) =>
+      invoke<{ ok: true }>(IPC.metrics.firstVisible, { contributionId, at }),
+    latency: () =>
+      invoke<{
+        summary: Record<'cold' | 'warm' | 'all', Record<string, { n: number; p50: number | null; p95: number | null }>>;
+        samples: number;
+        hardware: { cpu: string; cores: number; memoryGb: number; platform: string };
+      }>(IPC.metrics.latency),
+  },
   session: {
     start: (
       profileId: string,
@@ -246,6 +257,8 @@ const api = {
       ),
     askActive: (questionText: string) =>
       invoke<{ ok: boolean }>(IPC.session.askActive, { questionText }),
+    /** "Answer that": answer the interviewer's latest words (detection missed). */
+    answerLast: () => invoke<{ ok: boolean }>(IPC.session.answerLast),
     /** Keep this conversation: archive it for retrieval and extract memory
      *  candidates. Both stay gated by the user's own settings, so the counts
      *  can legitimately come back as zero. */

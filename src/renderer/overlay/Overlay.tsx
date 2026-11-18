@@ -119,9 +119,24 @@ export default function Overlay() {
   const prevLive = useRef(false);
 
   const cleanup = useRef<(() => void)[]>([]);
+  // Contributions whose first painted words were already reported to main
+  // (the latency record's "first visible" — measured after a frame, so it is
+  // what the user saw, not when a token arrived). Cleared on reset/regenerate.
+  const reportedVisible = useRef(new Set<string>());
   // rAF-coalesced token buffer, one lane per contribution id (see lib/streamBuffer).
   const buffer = useRef(
-    createStreamBuffer((chunks) => useOverlayStore.getState().append(chunks)),
+    createStreamBuffer((chunks) => {
+      useOverlayStore.getState().append(chunks);
+      for (const [id, chunk] of chunks) {
+        if (!chunk.trim() || reportedVisible.current.has(id)) continue;
+        reportedVisible.current.add(id);
+        // Two frames: the first runs before React commits this append, the
+        // second after the browser has painted it.
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => void api.metrics.firstVisible(id, Date.now()).catch(() => {})),
+        );
+      }
+    }),
   );
 
   useEffect(() => {
@@ -150,6 +165,7 @@ export default function Overlay() {
       // tokens don't append to the old one. Reuses the same card (routed by id);
       // only this stream's buffered tokens are dropped — concurrent streams keep theirs.
       api.events.onContributionReset((p: ContributionResetEvent) => {
+        reportedVisible.current.delete(p.contributionId);
         buf.drop(p.contributionId);
         feed().reset(p.contributionId);
       }),

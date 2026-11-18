@@ -37,6 +37,9 @@ export interface ChatJsonRequest {
   system: string;
   user: string;
   maxOutputTokens?: number;
+  /** Cancels the request (the interview classifier's timeout). Optional —
+   *  callers that never time out keep the old shape. */
+  signal?: AbortSignal;
 }
 
 export interface ChatProvider {
@@ -69,6 +72,9 @@ export interface EmbeddingProvider {
 export interface RealtimeSttCallbacks {
   onDelta: (text: string) => void;
   onFinal: (text: string) => void;
+  /** Voice activity ended (server VAD). Optional — engines without it are
+   *  timed from their last interim delta instead (metrics/latency.ts). */
+  onSpeechStop?: () => void;
   onError?: (message: string) => void;
   onStatus?: (status: 'reconnecting' | 'connected' | 'disconnected') => void;
 }

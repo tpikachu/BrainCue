@@ -132,6 +132,10 @@ export const sessionManager = {
     return engine.askActive(questionText);
   },
 
+  async answerLastActive(): Promise<{ ok: boolean }> {
+    return engine.answerLastActive();
+  },
+
   setAnsweringActive(enabled: boolean): { enabled: boolean; answered: boolean } {
     return engine.setAnsweringActive(enabled);
   },
