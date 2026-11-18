@@ -13,6 +13,45 @@ export function chatTaskReady(task: PolicyTask): boolean {
   return providerKeys.isPresent(resolveTask(task).provider);
 }
 
+/** User-facing reason a chat task can't run, naming its provider. */
+export function chatTaskProblem(task: PolicyTask, toDo: string): string {
+  const r = resolveTask(task);
+  const name = cloudProvider(r.provider)?.name ?? r.provider;
+  if (!Object.values(providerKeys.presence()).some(Boolean))
+    return `Add an API key for an AI provider in Settings → Language Models to ${toDo}.`;
+  // An override is pinned to its provider (never moved elsewhere), so the
+  // fix is that provider's key or clearing the override.
+  if (r.source === 'override')
+    return `Your ${task} model override uses ${name}, which has no API key. Add the key, or clear the override in Settings → Language Models → Advanced, to ${toDo}.`;
+  return `${name} is selected for this but has no API key. Add it, or pick a provider you have a key for, in Settings → Language Models to ${toDo}.`;
+}
+
+/**
+ * Per-FEATURE readiness for the latency-tolerant features, so the renderer
+ * gates each on what it actually needs — not on "is there an OpenAI key?",
+ * which blocked an Anthropic-only user from parsing a résumé or drafting
+ * stories that now run on Anthropic:
+ *  - parsing (résumé/JD/company, briefs, stories): the parsing task's provider;
+ *  - practice (mock, sparring): the mock task's provider AND OpenAI — the
+ *    interviewer speaks (OpenAI TTS) and sparring transcribes (OpenAI);
+ *  - tailoring: OpenAI only.
+ * Each blocked feature carries the reason, naming the fix.
+ */
+export function featureReadiness(): Readiness['features'] {
+  const openai = providerKeys.isPresent('openai');
+  const gate = (ready: boolean, problem: string) => (ready ? { ready } : { ready, problem });
+  return {
+    parsing: gate(chatTaskReady('parsing'), chatTaskProblem('parsing', 'read résumés and job descriptions')),
+    practice: gate(
+      openai && chatTaskReady('mock'),
+      !openai
+        ? 'Practice speaks and listens through OpenAI, so it needs an OpenAI key — add one in Settings → Language Models.'
+        : chatTaskProblem('mock', 'practise'),
+    ),
+    tailoring: gate(openai, 'Tailoring runs on OpenAI only for now — add an OpenAI key in Settings → Language Models.'),
+  };
+}
+
 /**
  * What a live interview can rely on, per CAPABILITY — chat, transcription,
  * retrieval — instead of the old single "is there an OpenAI key?" gate,
@@ -41,10 +80,16 @@ export function getReadiness(): Readiness {
     ...(chatReady
       ? {}
       : Object.values(keys).some(Boolean)
-        ? {
-            problem: `${providerName} is selected for answers but has no API key.`,
-            action: 'Add its key, or pick a provider you have a key for, in Settings → Language Models.',
-          }
+        ? answer.source === 'override' || classify.source === 'override'
+          ? {
+              // A pinned override: never moved to another provider.
+              problem: (answer.notice ?? classify.notice) || `${providerName} is selected for answers but has no API key.`,
+              action: 'Add that key, or clear the override, in Settings → Language Models → Advanced.',
+            }
+          : {
+              problem: `${providerName} is selected for answers but has no API key.`,
+              action: 'Add its key, or pick a provider you have a key for, in Settings → Language Models.',
+            }
         : {
             problem: 'No AI provider is set up — nothing can detect questions or write answers.',
             action: 'Add an API key for OpenAI, Anthropic, Google, Groq or OpenRouter in Settings → Language Models.',
@@ -82,5 +127,5 @@ export function getReadiness(): Readiness {
           'and re-save the profile to switch to semantic matching.',
       };
 
-  return { chat, transcription, retrieval };
+  return { chat, transcription, retrieval, features: featureReadiness() };
 }

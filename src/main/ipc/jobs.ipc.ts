@@ -1,4 +1,4 @@
-import { chatTaskReady } from '../services/readiness';
+import { chatTaskProblem, chatTaskReady } from '../services/readiness';
 import { z } from 'zod';
 import { IPC } from '@shared/ipc';
 import { isInterviewSpace } from '@shared/activities';
@@ -138,8 +138,8 @@ export function registerJobsIpc(): void {
     // It has no meaning for a standup or a project.
     if (!isInterviewSpace(job.kind))
       throw new Error('Prep briefs are for interview Spaces.');
-    if (!apiKeyStore.isPresent())
-      throw new Error('Add your OpenAI API key in Settings to generate a brief.');
+    // Runs on the parsing task's provider (any chat key), not only OpenAI.
+    if (!chatTaskReady('parsing')) throw new Error(chatTaskProblem('parsing', 'generate a brief'));
     if (!job.parsedJd)
       throw new Error('This interview needs a parsed job description first — add a JD in Detail.');
     const profile = profilesRepo.get(job.profileId);
@@ -174,7 +174,7 @@ export function registerJobsIpc(): void {
     if (!isInterviewSpace(job.kind))
       throw new Error('Tailoring a résumé only applies to interview Spaces.');
     if (!apiKeyStore.isPresent())
-      throw new Error('Add your OpenAI API key in Settings to tailor a résumé.');
+      throw new Error('Tailoring runs on OpenAI only for now — add an OpenAI key in Settings → Language Models to tailor a résumé.');
     if (!job.jdText?.trim())
       throw new Error('Add this Space’s job description first — there is nothing to tailor to.');
     const profile = profilesRepo.get(job.profileId);

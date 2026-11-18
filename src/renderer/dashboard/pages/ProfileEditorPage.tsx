@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
-import type { AppSettings, Profile, ProfileAbout } from '@shared/types';
+import type { Profile, ProfileAbout } from '@shared/types';
 import { EMPTY_PROFILE_ABOUT, PROFILE_ABOUT_FIELDS } from '@shared/types';
 import { Badge, BusyOverlay, Button, Card, Field, Page, TextArea, TextInput } from '../../components/ui';
 import { ChevronLeftIcon, UploadIcon } from '../../components/icons';
@@ -34,7 +34,8 @@ export default function ProfileEditorPage() {
     setRole(p.targetRole);
     setResumeText(p.resumeText ?? '');
     setAbout({ ...EMPTY_PROFILE_ABOUT, ...(p.about ?? {}) });
-    setKeyPresent(((await api.settings.get()) as AppSettings).apiKeyPresent);
+    // Parsing runs on the parsing task's provider (any chat key), not only OpenAI.
+    setKeyPresent(await api.settings.readiness().then((r) => r.features.parsing.ready, () => false));
     await loadStoryCount();
   }, [id, loadStoryCount]);
 

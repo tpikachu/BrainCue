@@ -755,6 +755,9 @@ export interface Readiness {
   transcription: { ready: boolean; engine: 'cloud' | 'local'; problem?: string; action?: string };
   /** Never blocks a session: lexical mode is a stated limitation. */
   retrieval: { ready: true; mode: 'embeddings' | 'lexical'; note?: string };
+  /** Per-feature gates for the latency-tolerant features (services/readiness.ts
+   *  featureReadiness): each says whether it can run and, if not, why. */
+  features: Record<'parsing' | 'practice' | 'tailoring', { ready: boolean; problem?: string }>;
 }
 
 // ---- main -> renderer push event payloads ----

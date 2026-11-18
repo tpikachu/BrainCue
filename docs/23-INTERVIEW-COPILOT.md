@@ -157,16 +157,20 @@ The installed OpenAI SDK (4.104) types only low/medium/high; one function
 `none` in live runs.
 
 **Overrides** (Advanced, per task) win while they can run. Picking a preference
-no longer wipes them. An override is corrected only when it cannot run — its
-provider has no key while another provider has one, or the account does not
-list it — and the reason is shown in Settings and the start checklist.
+no longer wipes them. An override **pins its task to its provider** (M2): a
+model the account does not list, or one that failed as unavailable, falls back
+to that provider's own plan — never to the chat provider; an override whose
+provider has no key is kept as it is, so readiness blocks with the fix ("add
+the key, or clear the override") instead of the task silently moving
+elsewhere. The reason is shown in Settings and the start checklist.
 Preferences are stored under the legacy preset names (`low_cost` / `balanced` /
 `best`), so an older build reading the same database still understands them.
 
 **Failover** is bounded: at most one retry, and only before the first visible
 token — a partly streamed answer is never replayed. An unavailable model falls
 to the next candidate **on the same provider** (no interview data goes to a
-provider the user did not choose); a network/5xx error retries once after
+provider the user did not choose — the retry is refused if the next route is
+on any other provider, override or not); a network/5xx error retries once after
 400 ms; auth and quota errors surface with the provider named. Cross-provider
 failover is deliberately not built: it needs an explicit consent setting first.
 
@@ -181,9 +185,26 @@ capabilities, each with the actual problem and the next action:
 - **retrieval** — never a blocker: `embeddings` with an OpenAI key, else
   `lexical`, with the limitation stated.
 
-Résumé and JD parsing run on whichever provider the parsing task resolves to.
-Still OpenAI-only (out of scope here): embeddings, cloud transcription, voice,
-mock/sparring rehearsals, prep briefs, résumé tailoring.
+**The latency-tolerant features follow the same routing** (M2,
+`openai/chatTask.ts`): résumé/JD/company parsing, prep briefs and story drafts
+(the parsing task), the coaching report (the answer task), mock-interview
+questions and sparring feedback (the mock task) all go through the routed
+chat provider — they used to call the OpenAI SDK with `model(task)`, which
+handed a Claude id to OpenAI once Anthropic was selected. They share the live
+path's bounded failover: a model error marks the model unavailable and retries
+once on the next candidate of the same provider, never after the first
+streamed token.
+
+**Per-feature readiness** (`readiness.features`), used by the screens that
+start them: `parsing` (the parsing task's provider has a key), `practice`
+(that AND an OpenAI key — the mock interviewer speaks through OpenAI TTS and
+sparring transcribes through OpenAI), `tailoring` (OpenAI only — its long,
+no-retry request is an OpenAI SDK option; it asks OpenAI for an OpenAI model
+via `openaiOnlyModel`, never `model(task)`). Each blocked feature carries the
+reason and the fix.
+
+Still OpenAI-only: embeddings, cloud transcription, voice (and so the spoken
+half of practice), résumé tailoring.
 
 ## 7. Interview-first UI
 

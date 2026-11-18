@@ -1,5 +1,4 @@
-import { openai } from '../openai/client';
-import { model } from '../openai/models';
+import { chatJson } from '../openai/chatTask';
 import { sessionsRepo } from '../../db/repositories/sessions.repo';
 import { buildSparringReport } from '../mock/sparringManager';
 import type { SessionReport } from '@shared/types';
@@ -27,16 +26,14 @@ export async function generateReport(sessionId: string): Promise<SessionReport> 
     .map((q) => `Q: ${q.text}\nA: ${q.answer?.directAnswer ?? '(no answer)'}`)
     .join('\n\n');
 
-  const res = await openai().responses.create({
-    model: model('answer'),
-    input: [
-      { role: 'system', content: PROMPT },
-      { role: 'user', content: `TRANSCRIPT:\n${transcript}\n\nQ/A:\n${qa}`.slice(0, 24_000) },
-    ],
-    text: { format: { type: 'json_object' } },
+  // Routed: runs on the provider the answer task resolves to — the same one
+  // that wrote this session's answers (chatTask.ts).
+  const raw = await chatJson<Partial<SessionReport>>({
+    task: 'answer',
+    system: PROMPT,
+    user: `TRANSCRIPT:\n${transcript}\n\nQ/A:\n${qa}`.slice(0, 24_000),
+    maxOutputTokens: 8192,
   });
-
-  const raw = JSON.parse(res.output_text) as Partial<SessionReport>;
   return sessionsRepo.saveReport({
     sessionId,
     summary: raw.summary ?? '',

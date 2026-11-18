@@ -77,15 +77,37 @@ describe('resolveChatTask — explicit overrides', () => {
     expect(r.notice).toMatch(/GPT-4\.1 Nano can't be used \(your account does not list it\)/);
   });
 
-  it('an override for a provider without a key yields when another provider has one', () => {
+  it('an override for a provider without a key does NOT move to another provider (M2) — it stays, with the fix named', () => {
     const r = resolveChatTask('answer', {
       provider: 'openai',
       preference: 'balanced',
       keys: openaiOnly,
       override: 'anthropic/claude-opus-5-5',
     });
-    expect(r.provider).toBe('openai');
-    expect(r.notice).toMatch(/Anthropic has no API key/);
+    expect(r).toMatchObject({ provider: 'anthropic', model: 'claude-opus-5-5', source: 'override' });
+    expect(r.notice).toMatch(/uses Anthropic, which has no API key — add the key, or clear the override/);
+  });
+
+  it('an unavailable override falls back on ITS provider, never to the chat provider (no consent to move data)', () => {
+    const ctx = {
+      provider: 'openai' as const,
+      preference: 'balanced' as const,
+      keys: { openai: true, anthropic: true },
+      override: 'anthropic/claude-opus-5-5',
+    };
+    const unavailable = new Set(['anthropic/claude-opus-5-5']);
+    const r = resolveChatTask('answer', { ...ctx, unavailable });
+    expect(r.provider).toBe('anthropic');
+    expect(r.model).not.toBe('claude-opus-5-5');
+    expect(r.notice).toMatch(/Anthropic balanced pick/);
+    // Every Anthropic candidate gone: still Anthropic (the request's own error
+    // surfaces) — not a silent switch to OpenAI.
+    const all = new Set(PROVIDER_PLANS.anthropic.balanced.answer.map((m) => `anthropic/${m}`));
+    all.add('anthropic/claude-opus-5-5');
+    expect(resolveChatTask('answer', { ...ctx, unavailable: all }).provider).toBe('anthropic');
+    // Discovery says the account lacks it: same rule.
+    const d = resolveChatTask('answer', { ...ctx, discovered: { anthropic: ['claude-haiku-5-5'] } });
+    expect(d).toMatchObject({ provider: 'anthropic', model: 'claude-haiku-5-5' });
   });
 
   it('with no key anywhere, the override is kept (its own error names the missing key)', () => {

@@ -633,7 +633,9 @@ export class EngineSession {
           if (kind === 'model') {
             const failed = reportUnavailable('answer');
             const next = taskRoute('answer');
-            if (!next || (failed && next.model === failed.model && next.provider === failed.provider)) throw e;
+            // Pinned to the provider this request went to: a retry may change
+            // the MODEL, never the provider (an override's provider included).
+            if (!next || !failed || next.provider !== failed.provider || next.model === failed.model) throw e;
             log.warn(`answer model unavailable (${failed?.provider}/${failed?.model}) — retrying on ${next.provider}/${next.model}`);
             broadcast(EVENTS.sessionError, {
               message: `${failed?.model ?? 'The answer model'} isn't available to your account — answering with ${next.model} instead. Pick another in Settings → Language Models to change it.`,

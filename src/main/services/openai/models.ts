@@ -232,4 +232,37 @@ export function reasoningParam(key: ModelKey): SdkReasoning {
   return reasoningBody(effortFor(key, provider, m));
 }
 
+// ---- OpenAI-only features ----
+
+/** Is an OpenAI key configured? The readiness gate for features that only
+ *  have an OpenAI implementation. */
+export function hasOpenAIKey(): boolean {
+  return !!keyPresence().openai;
+}
+
+/**
+ * The OpenAI model for a task, for a feature that ONLY has an OpenAI
+ * implementation (application tailoring: its long-generation timeout and
+ * no-retry policy are OpenAI SDK options). Resolved under the user's
+ * preference as if OpenAI were their provider — never another provider's
+ * id, which `model(task)` returns once the user picks Anthropic. A per-task
+ * override counts only when it names an OpenAI model.
+ */
+export function openaiOnlyModel(key: PolicyTask): string {
+  const o = overrides()[key];
+  return resolveChatTask(key, {
+    provider: 'openai',
+    preference: modelPreference(),
+    override: o && parseModelId(o).provider === 'openai' ? o : null,
+    keys: { openai: true },
+    discovered: discovered(),
+    unavailable,
+  }).model;
+}
+
+/** Reasoning param for `openaiOnlyModel(key)`. */
+export function openaiOnlyReasoning(key: PolicyTask): SdkReasoning {
+  return reasoningBody(effortFor(key, 'openai', openaiOnlyModel(key)));
+}
+
 export const EMBEDDING_DIM = 1536;

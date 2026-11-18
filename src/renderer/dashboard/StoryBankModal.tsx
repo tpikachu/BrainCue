@@ -133,7 +133,7 @@ export function StoryBankModal({
 
         {!keyPresent && (
           <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
-            Add your OpenAI API key in Settings to generate stories.
+            Add an AI provider key (OpenAI, Anthropic, Google, Groq or OpenRouter) in Settings → Language Models to generate stories.
           </p>
         )}
         {keyPresent && !profile?.parsedResume && (

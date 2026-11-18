@@ -237,13 +237,32 @@ function usable(ctx: ResolveContext, provider: CloudProviderId, model: string): 
 /** Resolve one chat task to a provider + model the account can use. */
 export function resolveChatTask(task: PolicyTask, ctx: ResolveContext): TaskResolution {
   let notice: string | undefined;
+  // An override PINS the task to its provider (M2): whatever goes wrong with
+  // it, the task never moves to ANOTHER provider — conversation data must not
+  // reach a provider the user did not pick for this task. A model that is
+  // not served falls back within that provider's own plan; a provider with
+  // no key keeps the override, so the request fails with "needs an API key"
+  // and readiness blocks the start with the fix, instead of silently sending
+  // the task elsewhere.
+  let pinned: CloudProviderId | null = null;
   if (ctx.override) {
     const { provider, model } = parseModelId(ctx.override);
     const why = usable(ctx, provider, model);
     if (!why) return { provider, model, source: 'override' };
-    notice = `Your ${task} override ${modelLabel(provider, model)} can't be used (${why}) — using the ${ctx.preference} pick instead.`;
+    const name = cloudProvider(provider)?.name ?? provider;
+    if (!ctx.keys[provider]) {
+      return {
+        provider,
+        model,
+        source: 'override',
+        notice: `Your ${task} override uses ${name}, which has no API key — add the key, or clear the override in Advanced settings.`,
+      };
+    }
+    pinned = provider;
+    notice = `Your ${task} override ${modelLabel(provider, model)} can't be used (${why}) — using the ${name} ${ctx.preference} pick instead.`;
   }
-  const provider = ctx.provider && ctx.keys[ctx.provider] ? ctx.provider : (defaultChatProvider(ctx.keys) ?? ctx.provider ?? 'openai');
+  const provider =
+    pinned ?? (ctx.provider && ctx.keys[ctx.provider] ? ctx.provider : (defaultChatProvider(ctx.keys) ?? ctx.provider ?? 'openai'));
   const candidates = PROVIDER_PLANS[provider][ctx.preference][task];
   const pick = candidates.find((m) => !usable(ctx, provider, m));
   if (pick) {

@@ -53,8 +53,17 @@ import { installTaskRouteResolver, installUnavailableMarker } from '../../provid
 import type { ModeDefinition } from './modeDefinition';
 
 // A two-candidate "policy": luna until it is marked unavailable, then nano.
+// `crossProvider` simulates a resolver that WOULD move an Anthropic
+// override to OpenAI once it is marked unavailable.
 const dead = new Set<string>();
-installTaskRouteResolver(() => ({ provider: 'openai', model: dead.has('gpt-6-luna') ? 'gpt-5-nano' : 'gpt-6-luna' }));
+let crossProvider = false;
+installTaskRouteResolver(() => {
+  if (crossProvider)
+    return dead.has('claude-opus-5-5')
+      ? { provider: 'openai', model: 'gpt-6-luna' }
+      : { provider: 'anthropic', model: 'claude-opus-5-5' };
+  return { provider: 'openai', model: dead.has('gpt-6-luna') ? 'gpt-5-nano' : 'gpt-6-luna' };
+});
 installUnavailableMarker((r) => dead.add(r.model));
 
 const fail = (o: Record<string, unknown>) => Object.assign(new Error(String(o.message)), o);
@@ -93,6 +102,7 @@ beforeEach(() => {
   h.deltas.length = 0;
   h.script.length = 0;
   dead.clear();
+  crossProvider = false;
 });
 
 describe('answer failover', () => {
@@ -107,6 +117,22 @@ describe('answer failover', () => {
     expect(h.deltas).toEqual(['Answer from the fallback model.']);
     expect(dead.has('gpt-6-luna')).toBe(true);
     expect(h.errors.join(' ')).toMatch(/gpt-6-luna isn't available to your account — answering with gpt-5-nano/);
+  });
+
+  it('never fails over to ANOTHER provider — interview data stays where the user sent it', async () => {
+    crossProvider = true;
+    attempt(async function* () {
+      throw fail({ status: 404, code: 'model_not_found', message: 'model: claude-opus-5-5 not found' });
+    });
+    attempt(async function* () {
+      yield { type: 'delta', token: 'Answer sent to OpenAI without consent' };
+    });
+    await expect(
+      session().answerQuestion('Tell me about yourself.', { type: 'resume_project', confidence: 1, strategy: '' }, null),
+    ).rejects.toThrow(/claude-opus-5-5 not found/);
+    expect(h.deltas).toEqual([]);
+    expect(h.script).toHaveLength(1); // the OpenAI attempt never ran
+    expect(h.errors.join(' ')).not.toMatch(/answering with/);
   });
 
   it('a transient network error before the first token is retried once', async () => {

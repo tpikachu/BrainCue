@@ -1,5 +1,4 @@
-import { openai } from './client';
-import { model } from './models';
+import { chatText } from './chatTask';
 import type { InterviewType, Job, Profile } from '@shared/types';
 
 export interface QaTurn {
@@ -58,12 +57,6 @@ export async function generateQuestion(
     'Ask the next question now.',
   ].join('\n');
 
-  const res = await openai().responses.create({
-    model: model('mock'),
-    input: [
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ],
-  });
-  return res.output_text.trim();
+  // Routed: runs on the provider the mock task resolves to (chatTask.ts).
+  return chatText({ task: 'mock', system, user });
 }

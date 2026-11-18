@@ -6,6 +6,7 @@ import { generateQuestion, type QaTurn } from '../openai/interviewer';
 import { speak, type TtsVoice } from '../openai/tts';
 import { sessionManager } from '../session/sessionManager';
 import { apiKeyStore } from '../security/apiKey';
+import { chatTaskProblem, chatTaskReady } from '../readiness';
 import type { InterviewType, QuestionType, Session } from '@shared/types';
 
 const MAX_QUESTIONS = 6;
@@ -78,8 +79,11 @@ export const mockManager = {
     jobId: string | null = null,
     interviewType: InterviewType = 'general',
   ) {
+    // The interviewer SPEAKS through OpenAI's voice, so a mock needs an
+    // OpenAI key; its questions run on the mock task's own provider.
     if (!apiKeyStore.isPresent())
-      throw new Error('Add your OpenAI API key in Settings to start a mock interview.');
+      throw new Error('Mock interviews speak through OpenAI’s voice, so they need an OpenAI key — add one in Settings → Language Models.');
+    if (!chatTaskReady('mock')) throw new Error(chatTaskProblem('mock', 'start a mock interview'));
     const profile = profilesRepo.get(profileId);
     if (!profile) throw new Error('Profile not found');
     const id = crypto.randomUUID();
