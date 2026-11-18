@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createSettingsFeed } from '../lib/settingsFeed';
 import { api } from '../lib/api';
 import { FLAGS } from '@shared/flags';
 import type { ClientInfo } from '@shared/ipc';
@@ -92,20 +93,26 @@ export default function Overlay() {
   // change from any window and whenever a task's route moves (a model found
   // unavailable, new discovery) — EVENTS.settingsChanged.
   const [settings, setSettings] = useState<AppSettings | null>(null);
+  // Reads and write replies can land after a newer push: the feed drops any
+  // reply older than what is shown, so a held read can no longer put the
+  // previous model back on a chip (settingsFeed.ts).
+  const [settingsFeed] = useState(() => createSettingsFeed<AppSettings>(setSettings));
   /** Main's route for the answer task — only for a card whose context event
    *  predates `sentTo`; a card names where ITS sources went. */
   const [answerProvider, setAnswerProvider] = useState<string | null>(null);
-  const loadRoute = () =>
+  const routeRead = useRef(0); // only the latest readiness read applies
+  const loadRoute = () => {
+    const at = ++routeRead.current;
     void api.settings
       .readiness()
-      .then((r) => setAnswerProvider(cloudProvider(r.routes.answer)?.name ?? r.routes.answer))
+      .then((r) => {
+        if (at === routeRead.current) setAnswerProvider(cloudProvider(r.routes.answer)?.name ?? r.routes.answer);
+      })
       .catch(() => {});
+  };
   const loadSettings = () => {
     loadRoute();
-    return api.settings
-      .get()
-      .then((s) => setSettings(s as AppSettings))
-      .catch(() => {});
+    return settingsFeed.request(api.settings.get() as Promise<AppSettings>).catch(() => {});
   };
 
   // Voice/summon runtime: dialogue state mirror, push-to-talk
@@ -270,7 +277,7 @@ export default function Overlay() {
         if (!r.stopped || r.removed === false) setSessionError(rollbackMessage(r));
       }),
       api.events.onSettingsChanged((s) => {
-        setSettings(s as AppSettings);
+        settingsFeed.push(s as AppSettings);
         loadRoute();
       }),
       api.events.onAnswerPrefs((p) => {
@@ -350,19 +357,15 @@ export default function Overlay() {
     await api.session.setAnswerPrefs({ pronunciation: next });
     if (question) await api.session.regenerate();
   };
-  // A model chip: persist the pick for THIS task (read-modify-write against
-  // FRESH settings — the dashboard may have written other tasks meanwhile;
-  // null clears the override). Main's reply carries the re-resolved routes,
-  // so the chip names what the next request will really use. Only the answer
-  // task re-answers the current question: the solver applies to the next
-  // solve, and re-running a spoken answer would not use it at all.
+  // A model chip: persist the pick for THIS task only — main merges it into
+  // the stored overrides, so nothing else is written from this window's copy
+  // (null clears it → Automatic). Main's reply carries the re-resolved
+  // routes, so the chip names what the next request will really use. Only
+  // the answer task re-answers the current question: the solver applies to
+  // the next solve, and re-running a spoken answer would not use it at all.
   const pickModel = async (task: PickerTask, value: string | null) => {
     try {
-      const fresh = (await api.settings.get()) as AppSettings;
-      const models = { ...(fresh.models ?? {}) };
-      if (value) models[task] = value;
-      else delete models[task];
-      setSettings((await api.settings.set({ models })) as AppSettings);
+      await settingsFeed.request(api.settings.set({ modelOverrides: { [task]: value } }) as Promise<AppSettings>);
     } catch (e) {
       setSessionError((e as Error).message);
       return;

@@ -39,7 +39,7 @@ validates input with zod via the `handle()` helper. Errors are returned as
 | Channel | Request | Response |
 |---|---|---|
 | `settings:get` | — | `AppSettings` (no raw key — only `apiKeyPresent`; incl. `tourDone`, `sessionArchiveEnabled`) |
-| `settings:set` | `Partial<AppSettings>` (`models`, `overlay`, `dataConsentAck`, `tourDone`, `onboardingDone`, `stt`) | `AppSettings` (`stt: { engine: 'cloud' \| 'local', localModelId }` persists the engine choice and re-runs `applySttSelection()` — `local` takes effect only once the model is installed, see [22](22-LOCAL-STT.md); `onboardingDone` marks first-run setup finished/skipped) |
+| `settings:set` | `Partial<AppSettings>` (`models`, `overlay`, `dataConsentAck`, `tourDone`, `onboardingDone`, `stt`), plus `modelOverrides` / `effortOverrides` (`{ [task]: id \| null }` — one task's override merged in main against the stored map; `null` clears it. Controls use these, so a stale renderer copy never rewrites another key) | `AppSettings` (`stt: { engine: 'cloud' \| 'local', localModelId }` persists the engine choice and re-runs `applySttSelection()` — `local` takes effect only once the model is installed, see [22](22-LOCAL-STT.md); `onboardingDone` marks first-run setup finished/skipped) |
 | `settings:set-api-key` | `{ key }` | `{ apiKeyPresent: true }` |
 | `settings:clear-api-key` | — | `{ apiKeyPresent: false }` |
 | `settings:test-api-key` | — | `{ ok, model?, error? }` |

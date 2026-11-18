@@ -21,6 +21,7 @@ import {
   resolveTaskAuto,
 } from '../services/openai/models';
 import { qualifyModel } from '@shared/providers';
+import { mergeOverrides } from '@shared/settingsOverrides';
 import { POLICY_TASKS } from '@shared/modelPolicy';
 import { clearDiscovery, refreshDiscovery, storeDiscovery } from '../services/models/discovery';
 import { getReadiness } from '../services/readiness';
@@ -119,6 +120,11 @@ const settingsPatch = z.object({
   modelPreference: z.enum(['fast', 'balanced', 'quality']).optional(),
   chatProvider: z.enum(['openai', 'anthropic', 'google', 'groq', 'openrouter']).nullable().optional(),
   reasoningEfforts: z.record(z.string()).optional(),
+  // One task's model / effort, merged HERE against the stored map (null or ''
+  // clears it). A renderer never writes back a whole map it read earlier, so
+  // a stale copy cannot restore another key (M7.2a review, AI-01).
+  modelOverrides: z.record(z.string().max(200).nullable()).optional(),
+  effortOverrides: z.record(z.string().max(40).nullable()).optional(),
   overlay: z
     .object({
       opacity: z.number().min(0).max(1),
@@ -190,6 +196,11 @@ export function registerSettingsIpc(): void {
     if (patch.activeProfileId !== undefined)
       settingsRepo.set(SETTINGS_KEYS.activeProfileId, patch.activeProfileId ?? '');
     if (patch.models) settingsRepo.setJson(SETTINGS_KEYS.models, patch.models);
+    if (patch.modelOverrides)
+      settingsRepo.setJson(
+        SETTINGS_KEYS.models,
+        mergeOverrides(settingsRepo.getJson(SETTINGS_KEYS.models, {}), patch.modelOverrides),
+      );
     if (patch.modelPreset) settingsRepo.set(SETTINGS_KEYS.modelPreset, patch.modelPreset);
     // Stored under the legacy preset names, so an older build reading this
     // database still sees a preset it understands.
@@ -204,6 +215,11 @@ export function registerSettingsIpc(): void {
     }
     if (patch.reasoningEfforts)
       settingsRepo.setJson(SETTINGS_KEYS.reasoningEfforts, patch.reasoningEfforts);
+    if (patch.effortOverrides)
+      settingsRepo.setJson(
+        SETTINGS_KEYS.reasoningEfforts,
+        mergeOverrides(settingsRepo.getJson(SETTINGS_KEYS.reasoningEfforts, {}), patch.effortOverrides),
+      );
     if (patch.overlay) {
       settingsRepo.setJson(SETTINGS_KEYS.overlayPrefs, patch.overlay);
       broadcast(EVENTS.overlayApplySettings, patch.overlay, ['overlay']);

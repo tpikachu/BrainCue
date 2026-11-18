@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createSettingsFeed } from '../../lib/settingsFeed';
 import { api } from '../../lib/api';
 import type { AppSettings, VoicePrefs } from '@shared/types';
 import { Dropdown, Modal, Switch } from '../../components/ui';
@@ -7,8 +8,8 @@ import { addKeyProvider, currentModel, modelLabel, overrideFor, taskPickerRows }
 
 /** Cue Card settings: audio device, voice output, coding-solver
  *  model/effort/language, and appearance. Owns its own persisted state —
- *  loaded fresh each time it opens, so overrides changed meanwhile from the
- *  dashboard Settings page are never silently reverted. Appearance
+ *  read fresh each time it opens and kept current by main's push, so changes
+ *  made meanwhile elsewhere are shown and never silently reverted. Appearance
  *  (opacity/text size) is window-level state and comes in via props; voice
  *  prefs live with the Overlay's voice runtime (the player must react to an
  *  output-device change immediately) and come in via props too. */
@@ -37,17 +38,27 @@ export function SettingsModal(props: {
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
   const [spaces, setSpaces] = useState<{ id: string; label: string }[]>([]);
 
-  useEffect(() => {
-    if (!props.open) return;
-    // Seed from persisted settings on every open (fresh, not a boot snapshot).
-    void api.settings.get().then((s) => {
-      const ss = s as AppSettings;
+  // Settings reach this panel from its own reads (each open), its own write
+  // replies and main's push. A reply older than what is shown — a read held
+  // past a newer push, one from before a close/reopen, or one asked for
+  // before the user's latest edit — is dropped (settingsFeed.ts): it used to
+  // put back the previous solver model, which the next save then persisted.
+  // One feed for the Cue Card's lifetime, so close/reopen is covered too.
+  const [feed] = useState(() =>
+    createSettingsFeed<AppSettings>((ss) => {
       if (ss.audio) setMicDeviceId(ss.audio.micDeviceId);
       setSnap(ss);
       setCodingModel(overrideFor(ss, 'coding'));
       setCodingEffort(ss.reasoningEfforts?.coding ?? '');
       setCodingLanguage(ss.codingLanguage ?? 'javascript');
-    });
+    }),
+  );
+  useEffect(() => api.events.onSettingsChanged((s) => feed.push(s as AppSettings)), [feed]);
+
+  useEffect(() => {
+    if (!props.open) return;
+    // Seed from persisted settings on every open (fresh, not a boot snapshot).
+    void feed.request(api.settings.get() as Promise<AppSettings>).catch(() => {});
     // Device labels only populate after a mic-permission grant — briefly probe
     // the mic to unlock them, then release it (main auto-allows 'media').
     void (async () => {
@@ -84,47 +95,34 @@ export function SettingsModal(props: {
     }
   }, [props.open, props.voicePrefs !== null]);
 
-  // While open, follow changes made elsewhere (the dashboard, a chip, a
-  // failover moving the route) — the picker never shows a stale model.
-  useEffect(() => {
-    if (!props.open) return;
-    return api.events.onSettingsChanged((s) => {
-      const ss = s as AppSettings;
-      setSnap(ss);
-      setCodingModel(overrideFor(ss, 'coding'));
-      setCodingEffort(ss.reasoningEfforts?.coding ?? '');
-    });
-  }, [props.open]);
+  /** Persist one edited field; the reply (or main's push) brings the rest. */
+  const save = (patch: Record<string, unknown>) => {
+    feed.edited();
+    // Persistence failed — the control still shows the choice; the next push
+    // or open reconciles.
+    void feed.request(api.settings.set(patch) as Promise<AppSettings>).catch(() => {});
+  };
 
   // A session hears the call AND the microphone (there is no source to pick);
   // the one audio preference left is WHICH microphone.
   const saveAudio = (device: string | null) => {
     setMicDeviceId(device);
-    void api.settings.set({ audio: { micDeviceId: device } });
+    save({ audio: { micDeviceId: device } });
   };
 
-  // Persist the coding-solver model/effort. Read-modify-write against FRESH
-  // settings (not a snapshot): the overlay window lives for the whole app
-  // session, so merging into stale maps would silently revert overrides changed
-  // later from the dashboard Settings page. '' clears the key → default.
-  const saveCoding = async (next: { model?: string; effort?: string }) => {
-    const m = next.model !== undefined ? next.model : codingModel;
-    const e = next.effort !== undefined ? next.effort : codingEffort;
-    setCodingModel(m);
-    setCodingEffort(e);
-    try {
-      const fresh = (await api.settings.get()) as AppSettings;
-      const models = { ...(fresh.models ?? {}) };
-      if (m) models.coding = m;
-      else delete models.coding;
-      const efforts = { ...(fresh.reasoningEfforts ?? {}) };
-      if (e) efforts.coding = e;
-      else delete efforts.coding;
-      // Main's reply carries the re-resolved route for the next solve.
-      setSnap((await api.settings.set({ models, reasoningEfforts: efforts })) as AppSettings);
-    } catch {
-      // Persistence failed — the pickers still show the chosen value; the next
-      // successful save (or app restart) reconciles.
+  // Persist the solver's model OR its effort — only the field edited. Main
+  // merges it into the stored map, so the other field (and every other
+  // task's override) is never written from this panel's copy: changing the
+  // effort keeps the current model, changing the model keeps the effort.
+  // '' clears it (Automatic / the default). Main's reply carries the
+  // re-resolved route for the next solve.
+  const saveCoding = (edit: { model: string } | { effort: string }) => {
+    if ('model' in edit) {
+      setCodingModel(edit.model);
+      save({ modelOverrides: { coding: edit.model || null } });
+    } else {
+      setCodingEffort(edit.effort);
+      save({ effortOverrides: { coding: edit.effort || null } });
     }
   };
 
@@ -242,7 +240,7 @@ export function SettingsModal(props: {
                 ].map((l) => ({ value: l, label: l }))}
                 onChange={(v) => {
                   setCodingLanguage(v);
-                  void api.settings.set({ codingLanguage: v });
+                  save({ codingLanguage: v });
                 }}
               />
             </div>
@@ -261,7 +259,7 @@ export function SettingsModal(props: {
                     void api.window.openDashboard('/settings/models');
                     return;
                   }
-                  void saveCoding({ model: v });
+                  saveCoding({ model: v });
                 }}
               />
               {snap?.modelNotices?.coding && (
@@ -282,7 +280,7 @@ export function SettingsModal(props: {
                   { value: 'medium', label: 'Medium — balanced' },
                   { value: 'high', label: 'High — hardest problems' },
                 ]}
-                onChange={(v) => void saveCoding({ effort: v })}
+                onChange={(v) => saveCoding({ effort: v })}
               />
             </div>
             <p className="text-xs text-neutral-500">

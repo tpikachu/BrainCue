@@ -383,8 +383,11 @@ export function Dropdown({
 }) {
   const [open, setOpen] = useState(false);
   const [openUp, setOpenUp] = useState(false);
-  /** Horizontal offset that keeps the open list inside the window (px). */
-  const [shiftX, setShiftX] = useState(0);
+  /** Where the open list sits: `x` shifts it back inside the window, `maxH`
+   *  keeps it within the room on its side (px). */
+  const [place, setPlace] = useState({ x: 0, maxH: 256 });
+  const placeRef = useRef(place);
+  placeRef.current = place;
   const listRef = useRef<HTMLUListElement>(null);
   /** The highlighted option (keyboard / pointer) while open. */
   const [active, setActive] = useState(-1);
@@ -409,7 +412,7 @@ export function Dropdown({
       const room = 240;
       setOpenUp(r.bottom + room > window.innerHeight && r.top > window.innerHeight - r.bottom);
     }
-    setShiftX(0); // measured once the list is laid out (below)
+    setPlace({ x: 0, maxH: 256 }); // measured once the list is laid out (below)
     const start =
       at === 'last'
         ? enabled[enabled.length - 1]
@@ -499,17 +502,39 @@ export function Dropdown({
     }
   };
 
-  // The list is as wide as its longest option and starts at the button's
-  // left edge: a control toward the right of a compact Cue Card would push
-  // it past the window. Measure the laid-out list and shift it back inside.
-  useLayoutEffect(() => {
-    if (!open || !listRef.current) return;
-    const r = listRef.current.getBoundingClientRect();
+  // The list starts at the button's left edge and is as wide as its longest
+  // row, but never wider than the window (its style, below): in a compact Cue
+  // Card a full provider catalog wraps its long rows instead of clipping. It
+  // is then shifted back inside the window and held to the room on its side,
+  // and placed again whenever the window or the list changes size while open
+  // (a resized Cue Card, a catalog that grew).
+  const placeList = () => {
+    const el = listRef.current;
+    const root = rootRef.current;
+    if (!el || !root) return;
     const margin = 8;
-    const left = r.left - shiftX;
-    let s = Math.min(0, window.innerWidth - margin - (left + r.width));
-    if (left + s < margin) s = margin - left;
-    if (s !== shiftX) setShiftX(s);
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const r = el.getBoundingClientRect();
+    const left = r.left - placeRef.current.x; // where it sits unshifted
+    let x = Math.min(0, vw - margin - (left + r.width));
+    if (left + x < margin) x = margin - left;
+    const b = root.getBoundingClientRect();
+    const up = b.bottom + 240 > vh && b.top > vh - b.bottom;
+    const maxH = Math.round(Math.max(96, Math.min(256, (up ? b.top : vh - b.bottom) - margin - 4)));
+    setOpenUp(up);
+    if (x !== placeRef.current.x || maxH !== placeRef.current.maxH) setPlace({ x, maxH });
+  };
+  useLayoutEffect(() => {
+    if (!open) return;
+    placeList();
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => placeList());
+    if (listRef.current) ro?.observe(listRef.current);
+    window.addEventListener('resize', placeList);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', placeList);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -597,8 +622,17 @@ export function Dropdown({
           id={listId}
           data-ct-popover
           role="listbox"
-          style={{ left: shiftX, maxWidth: 'min(22rem, calc(100vw - 16px))' }}
-          className={`absolute left-0 z-[60] max-h-64 w-full min-w-max max-w-[22rem] overflow-y-auto rounded-lg border border-neutral-700 bg-neutral-900 py-1 shadow-xl shadow-black/50 ${
+          style={{
+            left: place.x,
+            // As wide as the longest row, at least the control's width, and
+            // never wider than the window (min-width alone used to win over
+            // the cap, so a full catalog ran 495 px wide in a 360 px window).
+            width: 'max-content',
+            minWidth: 'min(100%, calc(100vw - 16px))',
+            maxWidth: 'min(22rem, calc(100vw - 16px))',
+            maxHeight: place.maxH,
+          }}
+          className={`absolute left-0 z-[60] overflow-y-auto overflow-x-hidden rounded-lg border border-neutral-700 bg-neutral-900 py-1 shadow-xl shadow-black/50 ${
             openUp ? 'bottom-full mb-1' : 'top-full mt-1'
           }`}
         >
@@ -643,9 +677,11 @@ export function Dropdown({
                       : 'text-neutral-200'
                 } ${i === active ? 'ring-1 ring-inset ring-indigo-400/60' : ''}`}
               >
-                <span className="block truncate">{o.label}</span>
+                {/* Rows wrap rather than truncate: a narrow window still shows each
+                    model's whole name and its price/latency line. */}
+                <span className="block break-words">{o.label}</span>
                 {o.description && (
-                  <span className="block truncate text-[11px] leading-snug text-neutral-500">{o.description}</span>
+                  <span className="block break-words text-[11px] leading-snug text-neutral-500">{o.description}</span>
                 )}
               </div>
             </li>

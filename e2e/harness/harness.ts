@@ -35,6 +35,7 @@ export function installFake(fx: any) {
   w.__fixture = fx;
   const held = new Set<string>();
   const pending = new Map<string, (fail: boolean) => void>();
+  const deferred = new Map<string, (v: unknown) => void>();
   const listeners: Record<string, ((p: unknown) => void)[]> = {};
   const fake = {
     /** Every bridge call, in order: "ns.method". */
@@ -43,8 +44,17 @@ export function installFake(fx: any) {
     starts: [] as (string | null)[],
     resumes: [] as string[],
     gets: [] as string[],
-    /** Scripted replies by path: a value, { throw: message }, or a queue (array). */
+    /** Scripted replies by path: a value, { throw: message }, { hold: true }
+     *  (never answers), { defer: id } (answers when settle(id, value) is
+     *  called — out-of-order replies), or a queue (array). */
     replies: {} as Record<string, unknown>,
+    settle: (id: string, value: unknown) => {
+      const r = deferred.get(id);
+      deferred.delete(id);
+      r?.(value);
+    },
+    /** Deferred replies requested and not yet settled. */
+    deferredIds: () => [...deferred.keys()],
     hold: (id: string) => held.add(id),
     release: (id: string, fail = false) => {
       const p = pending.get(id);
@@ -119,6 +129,7 @@ export function installFake(fx: any) {
       if (Array.isArray(r)) r = r.length > 1 ? r.shift() : r[0];
       if (r && typeof r === 'object' && 'throw' in (r as any)) return Promise.reject(new Error((r as any).throw));
       if (r && typeof r === 'object' && 'hold' in (r as any)) return new Promise(() => {});
+      if (r && typeof r === 'object' && 'defer' in (r as any)) return new Promise((res) => deferred.set((r as any).defer, res));
       return ok(r);
     }
     if (impl[path]) return impl[path](...args);

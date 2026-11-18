@@ -1,5 +1,6 @@
 import { test as base, expect, type Page } from '@playwright/test';
 import { launchHarness, type Harness } from './harness/harness';
+import { FIXTURE, SETTINGS } from './harness/aiFixture';
 
 // The real Cue Card (renderer harness: hidden window, fake bridge, no app
 // main, provider, audio or capture) under the AI-01 configuration: Anthropic
@@ -7,43 +8,6 @@ import { launchHarness, type Harness } from './harness/harness';
 // control must name its task and the model main resolved for the NEXT
 // request; an existing answer keeps the model that produced it.
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
-const SETTINGS = {
-  stt: { engine: 'local', localModelId: 'x' },
-  audio: { micDeviceId: null },
-  companionPrefs: null,
-  providerKeys: { openai: true, anthropic: true },
-  sttReady: true,
-  memoryEnabled: false,
-  sessionArchiveEnabled: true,
-  codingLanguage: 'javascript',
-  chatProvider: 'anthropic',
-  models: { coding: 'gpt-6.2-astra' },
-  // The OpenAI preset table: what the chip used to show for "answer".
-  modelDefaults: { answer: 'gpt-6-luna', coding: 'gpt-6.2-astra' },
-  // Main's resolution: what the next request for each task really uses.
-  effectiveModels: { answer: 'anthropic/claude-sonnet-5-5', coding: 'gpt-6.2-astra', classify: 'anthropic/claude-haiku-5-5' },
-  autoModels: { answer: 'anthropic/claude-sonnet-5-5', coding: 'anthropic/claude-opus-5-5', classify: 'anthropic/claude-haiku-5-5' },
-  modelNotices: {},
-  reasoningEfforts: {},
-  reasoningEffortDefaults: { coding: 'low' },
-};
-
-const FIXTURE = {
-  profiles: [{ id: 'pA', name: 'Alex', parsedResume: { skills: ['TS'] }, resumeText: 'Resume' }],
-  roles: [],
-  sessions: { pA: [] },
-  settings: SETTINGS,
-  readiness: {
-    chat: { ready: true, provider: 'anthropic', model: 'm', classifyModel: 'm', explanation: 'Ready' },
-    transcription: { ready: true, engine: 'local' },
-    retrieval: { ready: true, mode: 'lexical' },
-    // Deliberately NOT the answer's provider: a card must name where ITS
-    // sources went, not where the next request would go.
-    routes: { answer: 'openai', classify: 'anthropic', parsing: 'anthropic' },
-    features: {},
-  },
-};
 
 let harness: Harness;
 base.beforeAll(async () => {
@@ -110,12 +74,13 @@ test('a coding interview names both tasks; a solver pick applies to the next sol
   await expect(solver).toHaveText(/GPT-6\.2 Astra/);
   await page.evaluate(() => ((window as any).__fake.calls = []));
 
-  // Solver → Automatic: clears ONLY the coding override; nothing is re-answered.
+  // Solver → Automatic: clears ONLY the coding override (main merges the one
+  // key); nothing is re-answered.
   await reply(page, 'settings.set', { ...SETTINGS, models: {}, effectiveModels: { ...SETTINGS.effectiveModels, coding: 'anthropic/claude-opus-5-5' } });
   await solver.click();
   await page.getByRole('option', { name: /^Automatic — Claude Opus 5\.5/ }).click();
   await expect(solver).toHaveText(/Claude Opus 5\.5/);
-  expect((await setArgs(page)).at(-1)).toEqual({ models: {} });
+  expect((await setArgs(page)).at(-1)).toEqual({ modelOverrides: { coding: null } });
   expect(await calls(page)).not.toContain('session.regenerate');
 
   // Answers → Claude Haiku 5.5: stored for the answer task, and the current question re-answered.
@@ -124,7 +89,7 @@ test('a coding interview names both tasks; a solver pick applies to the next sol
   // The first row of a group also carries the group's heading in its name.
   await page.getByRole('option', { name: /^(Anthropic )?Claude Haiku 5\.5 / }).click();
   await expect(answers).toHaveText(/Claude Haiku 5\.5/);
-  expect((await setArgs(page)).at(-1)).toEqual({ models: { coding: 'gpt-6.2-astra', answer: 'anthropic/claude-haiku-5-5' } });
+  expect((await setArgs(page)).at(-1)).toEqual({ modelOverrides: { answer: 'anthropic/claude-haiku-5-5' } });
   await expect.poll(() => calls(page)).toContain('session.regenerate');
 });
 
@@ -183,7 +148,7 @@ test('Cue Card settings uses the shared solver picker — Automatic names the re
   await reply(page, 'settings.set', { ...SETTINGS, models: {}, effectiveModels: { ...SETTINGS.effectiveModels, coding: 'anthropic/claude-opus-5-5' } });
   await list.getByRole('option', { name: /^Automatic — Claude Opus 5\.5/ }).click();
   await expect(model).toHaveText(/Automatic — Claude Opus 5\.5/);
-  expect((await setArgs(page)).at(-1)).toEqual({ models: {}, reasoningEfforts: {} });
+  expect((await setArgs(page)).at(-1)).toEqual({ modelOverrides: { coding: null } }); // the effort is not rewritten
 
   // A notice pushed while open is shown with the model the next solve uses.
   await emit(page, 'onSettingsChanged', {

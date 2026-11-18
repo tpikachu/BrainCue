@@ -230,17 +230,12 @@ function ModelsCard({
   };
 
   const save = async () => {
-    // Read-modify-write against FRESH settings, touching only the keys edited in
-    // this card. Empty means "use default". A whole-map write from a stale page
-    // would silently revert overrides written elsewhere while it sat open.
-    const fresh = (await api.settings.get()) as AppSettings;
-    const merged: Record<string, string> = { ...(fresh.models ?? {}) };
-    for (const key of dirty.current) {
-      const v = (overrides[key] ?? '').trim();
-      if (v) merged[key] = v;
-      else delete merged[key];
-    }
-    await api.settings.set({ models: merged });
+    // Only the keys edited in this card, merged by main against the stored
+    // map (empty → default). A whole-map write from a stale page would
+    // silently revert overrides written elsewhere while it sat open.
+    const edits: Record<string, string | null> = {};
+    for (const key of dirty.current) edits[key] = (overrides[key] ?? '').trim() || null;
+    await api.settings.set({ modelOverrides: edits });
     await onSaved();
     setStatus('Models saved.');
   };

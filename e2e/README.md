@@ -116,6 +116,19 @@ Three tiers, kept apart:
     chip while existing answers keep "Answered by …" and their sources' provider; Cue Card
     settings uses the shared picker (Automatic names the real pick) and its mic probe is
     refused.
+  - `settings-order.spec.ts` (AI-01 correction): replies released out of order with
+    `{ defer: id }` + `__fake.settle`.
+    - A read held past a newer push does not restore the old chip model.
+    - Of two answer picks in flight, the later one stays.
+    - Cue Card settings: a read held across close/reopen does not restore the old solver.
+    - An effort-only edit writes only `effortOverrides`.
+    - A late model-save reply does not revert a later effort.
+  - `catalog-bounds.spec.ts` (UI-03): the full OpenAI + Anthropic catalog stays inside
+    467 × 462 and 360 × 462 Cue Cards, with no horizontal scroll.
+    - End and the pointer reach rows deep in the list.
+    - The list is placed again on resize while open.
+    - Positive controls: a 1100 px window keeps the 22rem cap; a control wider than the
+      cap gets a list at least as wide as itself.
 - ✅ History in the real app (`history.spec.ts`, no key): a sample conversation opens from
   the DB with no report; `session:remember` reports a failed summary as failed and keeps
   the transcript; a missing or other-profile Space is refused in main.

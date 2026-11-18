@@ -126,7 +126,7 @@ export default function App() {
   // A change from the Cue Card, a key added, or a task's route moving (a
   // model found unavailable) reaches this window too — and with it readiness.
   useEffect(
-    () => api.events.onSettingsChanged((s) => useSettingsStore.setState({ settings: s as AppSettings })),
+    () => api.events.onSettingsChanged((s) => useSettingsStore.getState().receive(s as AppSettings)),
     [],
   );
 

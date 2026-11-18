@@ -307,6 +307,34 @@ setting never reads as the answer setting.
   - after any settings write or key change;
   - whenever a route moves without a write: a model marked unavailable, a
     new discovery list (`onRoutesChanged`).
+- **Ordering (M7.2a correction).** A view hears settings in three ways: its
+  own reads, its own write replies, and main's push. Replies can land after
+  something newer. In `3557fa9` a held read put the previous model back on the
+  chip, and Cue Card settings then saved that model back.
+  - Each view (Cue Card, Cue Card settings, dashboard store) now orders what
+    it receives through `renderer/lib/settingsFeed.ts`. A push always applies.
+    A reply applies only if nothing newer has arrived since it was requested:
+    no push, no other applied reply, no user edit there.
+  - Dropping a reply loses nothing, because main pushes every change to every
+    window, in order.
+  - Cue Card settings keeps one feed for the Cue Card's lifetime, so a read
+    from before a close/reopen is covered too.
+- **Writes name one field.** A control writes only what was edited:
+  `settings.set` `{ modelOverrides: { [task]: id | null } }` or
+  `{ effortOverrides: … }`, merged by main against the stored map
+  (`shared/settingsOverrides.ts`).
+  - Changing the solver's effort keeps its model, and changing the model keeps
+    the effort. No other task's override is written from a renderer's copy.
+  - The Cue Card chips, Cue Card settings, the dashboard's per-task table and
+    the cloud speech model all write this way. Whole-map `models` writes
+    remain only for resets.
+- **Compact catalogs (UI-03).** The kit `Dropdown` list is as wide as its
+  longest row, but never wider than its window (8 px margin), and at least
+  as wide as its control. Long rows wrap rather than truncate.
+  - Before, `min-w-max` overrode the cap: the full OpenAI + Anthropic catalog
+    was 495 px wide in 360 and 467 px Cue Cards.
+  - The list is shifted inside the window and held to the room on its side.
+    It is placed again when the window or the list changes size while open.
 - **Next request versus existing answer.** The chips describe the next
   request. An existing answer is described by its own route, captured when it
   was sent:
