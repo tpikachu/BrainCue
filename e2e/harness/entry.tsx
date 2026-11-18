@@ -10,8 +10,10 @@
  *  - `savePrompt`: the Keep / Discard prompt (M6 truthful results).
  *  - `overlay`: the Cue Card, driven by fake main events.
  *  - `jobForm`: the role form (M6 drafts, keyboard).
+ *  - `modelsPanel`: Settings → Language Models, on the real settings store,
+ *    with the dashboard shell's push → store subscription (AI-02 drafts).
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { HashRouter } from 'react-router-dom';
 import { StartSessionModal } from '@app/dashboard/StartSessionModal';
@@ -22,6 +24,8 @@ import Overlay from '@app/overlay/Overlay';
 import { TooltipShield } from '@app/components/ui';
 import { useLiveSession } from '@app/store/useLiveSession';
 import { useProfileStore } from '@app/store/useProfileStore';
+import { useSettingsStore } from '@app/store/useSettingsStore';
+import { ModelsPanel } from '@app/dashboard/pages/settings/ModelsPanel';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const w = window as any;
@@ -84,6 +88,15 @@ function JobFormHarness() {
   );
 }
 
+function ModelsPanelHarness() {
+  // As dashboard/App.tsx: load once, and every settings push into the store.
+  useEffect(() => {
+    void useSettingsStore.getState().load();
+    return w.api.events.onSettingsChanged((s: any) => useSettingsStore.getState().receive(s));
+  }, []);
+  return <ModelsPanel />;
+}
+
 function Root() {
   if (view === 'sessions') {
     w.__harness = common;
@@ -98,6 +111,10 @@ function Root() {
     return <Overlay />;
   }
   if (view === 'jobForm') return <JobFormHarness />;
+  if (view === 'modelsPanel') {
+    w.__harness = common;
+    return <ModelsPanelHarness />;
+  }
   return <StartModalHarness />;
 }
 

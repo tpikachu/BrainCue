@@ -328,6 +328,14 @@ setting never reads as the answer setting.
   - The Cue Card chips, Cue Card settings, the dashboard's per-task table and
     the cloud speech model all write this way. Whole-map `models` writes
     remain only for resets.
+- **Unsaved dashboard drafts (AI-02).** Main sends a fresh `models` map with
+  every push, so the Language Models card no longer resets its draft when
+  one arrives.
+  - An incoming snapshot refreshes only the tasks not edited in the card.
+  - A task leaves "edited" only when its Save is confirmed, and only if it
+    was not edited again while that Save was in flight.
+  - Save with nothing edited writes nothing and says so.
+  - Advanced opens when overrides are active, and is never closed by a push.
 - **Compact catalogs (UI-03).** The kit `Dropdown` list is as wide as its
   longest row, but never wider than its window (8 px margin), and at least
   as wide as its control. Long rows wrap rather than truncate.

@@ -149,14 +149,25 @@ function ModelsCard({
   const [status, setStatus] = useState<string | null>(null);
   // Tasks whose picker is showing the free-text OpenRouter id field.
   const [customFor, setCustomFor] = useState<Record<string, boolean>>({});
-  // Keys the user edited in THIS card since the last sync — Save only writes these,
-  // so a stale page can't silently revert overrides written elsewhere (the Cue
-  // Card's picker persists models.answer/coding while a session runs).
-  const dirty = useRef(new Set<string>());
+  // Tasks edited in THIS card and not yet confirmed saved, each with its edit's
+  // sequence number. Save writes only these, so a stale page can't revert
+  // overrides written elsewhere (the Cue Card's chips write answer/coding
+  // while a session runs).
+  const dirty = useRef(new Map<string, number>());
+  const editSeq = useRef(0);
 
+  // Main sends a fresh map with EVERY settings push — a discovery list, a
+  // failover, another window's write — even when no override changed. Each
+  // one refreshes the tasks not edited here and leaves the edited drafts as
+  // they are; resetting the whole draft on it discarded an unsaved choice,
+  // and Save then wrote nothing while saying "saved" (M7.2a review, AI-02).
   useEffect(() => {
-    setOverrides(settings.models ?? {});
-    dirty.current.clear();
+    const stored = settings.models ?? {};
+    setOverrides((draft) => {
+      const next: Record<string, string> = { ...stored };
+      for (const key of dirty.current.keys()) next[key] = draft[key] ?? '';
+      return next;
+    });
   }, [settings.models]);
   useEffect(() => setPreset(settings.modelPreset ?? 'balanced'), [settings.modelPreset]);
 
@@ -165,6 +176,12 @@ function ModelsCard({
   const customized = Object.entries(overrides).some(
     ([k, v]) => v && v.trim() && v !== (settings.modelDefaults?.[k] ?? ''),
   );
+  // Advanced opens by itself when overrides are active, and otherwise stays
+  // as the user left it: an incoming snapshot never closes it mid-edit.
+  const [advancedOpen, setAdvancedOpen] = useState(customized);
+  useEffect(() => {
+    if (customized) setAdvancedOpen(true);
+  }, [customized]);
 
   // What the policy picked (provider-aware), and why — from main.
   const [readiness, setReadiness] = useState<Readiness | null>(null);
@@ -225,7 +242,7 @@ function ModelsCard({
   }, [keyedSignature]);
 
   const setOverride = (key: string, v: string) => {
-    dirty.current.add(key);
+    dirty.current.set(key, ++editSeq.current);
     setOverrides((o) => ({ ...o, [key]: v }));
   };
 
@@ -233,9 +250,22 @@ function ModelsCard({
     // Only the keys edited in this card, merged by main against the stored
     // map (empty → default). A whole-map write from a stale page would
     // silently revert overrides written elsewhere while it sat open.
+    const sent = new Map(dirty.current);
+    if (sent.size === 0) {
+      setStatus('No model changes to save.');
+      return;
+    }
     const edits: Record<string, string | null> = {};
-    for (const key of dirty.current) edits[key] = (overrides[key] ?? '').trim() || null;
-    await api.settings.set({ modelOverrides: edits });
+    for (const key of sent.keys()) edits[key] = (overrides[key] ?? '').trim() || null;
+    try {
+      await api.settings.set({ modelOverrides: edits });
+    } catch (e) {
+      setStatus(`Could not save models — ${(e as Error).message}`); // drafts kept, still unsaved
+      return;
+    }
+    // Confirmed: these drafts are now the stored values — unless the task was
+    // edited again while the save was in flight; that newer draft stays.
+    for (const [key, seq] of sent) if (dirty.current.get(key) === seq) dirty.current.delete(key);
     await onSaved();
     setStatus('Models saved.');
   };
@@ -339,7 +369,7 @@ function ModelsCard({
         </div>
       )}
 
-      <details className="group" open={customized}>
+      <details className="group" open={advancedOpen} onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}>
         <summary className="mb-3 cursor-pointer select-none text-sm font-medium text-neutral-300">
           Advanced — choose a model per task{customized ? ' (overrides active)' : ''}
         </summary>

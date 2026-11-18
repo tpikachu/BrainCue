@@ -129,6 +129,13 @@ Three tiers, kept apart:
     - The list is placed again on resize while open.
     - Positive controls: a 1100 px window keeps the 22rem cap; a control wider than the
       cap gets a list at least as wide as itself.
+  - `models-draft.spec.ts` (AI-02): Settings → Language Models on the real settings store
+    (harness view `modelsPanel`, with the shell's push → store subscription).
+    - An unrelated push keeps the unsaved answer choice and Advanced stays open; Save
+      writes exactly `{ modelOverrides: { answer } }`.
+    - Another task changed elsewhere refreshes, and Save doesn't rewrite it.
+    - A newer edit outlives an older save's completion.
+    - An empty Save writes nothing.
 - ✅ History in the real app (`history.spec.ts`, no key): a sample conversation opens from
   the DB with no report; `session:remember` reports a failed summary as failed and keeps
   the transcript; a missing or other-profile Space is refused in main.
