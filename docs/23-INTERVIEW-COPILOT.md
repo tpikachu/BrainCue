@@ -55,7 +55,9 @@ answer was transcribed and never evaluated. The scheduler's policy:
    and answered as soon as the slot frees.
 3. **Revisions coalesce.** A repeat of the in-flight or queued question within
    20 s (duplicate final, transcriber revision) is dropped; a longer copy
-   replaces the queued text.
+   replaces the queued text, or re-answers the streaming, answered or missed
+   card when the candidate has not spoken since — added words are never
+   dropped as a duplicate.
 4. **Continuations and corrections supersede.** "…and how you tested it" or
    "Sorry, I meant the second project" within 8 s of the last question, before
    the candidate has spoken, re-answers **the same card** (same question row)
@@ -75,7 +77,11 @@ answer was transcribed and never evaluated. The scheduler's policy:
    even after Resume; a revision is marked on its question's own card. A
    copy that adds no words to a question already in flight, waiting,
    answered or shown missed gets no second card; a longer one is a revision,
-   never discarded. Only Stop drops work.
+   never discarded. One job per card: a revision updates the question the
+   scheduler keeps routing against, so a follow-up after Resume continues
+   the wording the card shows (re-answering it), never an older one. An
+   answer still streaming its old wording finishes on that input; its card
+   shows the revision when it ends. Only Stop drops work.
    While paused, new finals are not evaluated (that is Pause).
 7. **Decisions commit in arrival order** (M3). Detection runs concurrently —
    a slow classifier call never blocks the next turn's detection — but each

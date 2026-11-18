@@ -783,9 +783,13 @@ describe('M3 acceptance — questions answered in the right order', () => {
         h.s.pause();
         if (resume) h.s.resume();
         await run(700);
-        expect(texts(h)).toEqual([A]);
+        // A is still streaming its ORIGINAL wording: that stream finishes on
+        // its own input; its card becomes the missed revision when it ends.
+        expect(h.missed).toEqual([]);
+        await h.finish();
+        expect(texts(h)).toEqual([A]); // never re-answered automatically
         expect(h.missed).toEqual([{ text: A2, why: 'paused' }]);
-        expect(h.missed.length).toBe(1);
+        expect(new Set(h.answered.map((x) => x.questionId))).toEqual(new Set(['q1'])); // on A's own card
       });
 
       it(`${tag} while a correction's cancellation settles: never answered automatically — missed on its own card`, async () => {
@@ -835,6 +839,69 @@ describe('M3 acceptance — questions answered in the right order', () => {
       expect(h.missed).toHaveLength(0);
       expect(settled).toBe(true);
       expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('after a paused correction and Resume, a follow-up continues the CORRECTED wording (one job per card)', async () => {
+      const A = 'Tell me about the first project.';
+      const X = 'We use Kafka quite a lot here.';
+      const C = 'Sorry, I meant the second project.';
+      const F = 'And how you tested it.';
+      const h = scripted({ [X]: [600, verdict(false)] });
+      void h.s.onRemoteFinal(A, 't1');
+      await run(10);
+      await h.finish();
+      void h.s.onRemoteFinal(X, 't2');
+      await run(10);
+      void h.s.onRemoteFinal(C, 't3');
+      await run(10);
+      h.s.pause();
+      await run(700);
+      expect(h.missed).toEqual([{ text: `${A} ${C}`, why: 'paused' }]);
+      h.s.resume();
+      void h.s.onRemoteFinal(F, 't4');
+      await run(10);
+      expect(texts(h)).toEqual([A, `${A} ${C} ${F}`]);
+      expect(new Set(h.answered.map((x) => x.questionId)).size).toBe(1);
+    });
+
+    for (const resume of [false, true]) {
+      it(`${resume ? 'pause → resume' : 'pause'}: a question and its longer copy classifying across it revise ONE missed card`, async () => {
+        const A = 'The thing with the queues last year.';
+        const A2 = 'The thing with the queues last year and how you handled the rollback.';
+        const h = scripted({ [A]: [500, verdict(true)], [A2]: [500, verdict(true)] });
+        const cards = new Map<string, string>();
+        let n = 0;
+        h.deps.missed = (job) => {
+          job.questionId ??= `m${++n}`;
+          cards.set(job.questionId, job.text);
+        };
+        void h.s.onRemoteFinal(A, 't1');
+        await run(50);
+        void h.s.onRemoteFinal(A2, 't2');
+        await run(50);
+        h.s.pause();
+        if (resume) h.s.resume();
+        await run(600);
+        expect([...cards.values()]).toEqual([A2]); // one card, the longer wording
+        expect(h.answered).toHaveLength(0);
+      });
+    }
+
+    it('a LONGER repeat of an ANSWERED question (no candidate speech) re-answers its card — the added words are never dropped as a duplicate', async () => {
+      const A = 'Tell me about the payments migration.';
+      const A2 = 'Tell me about the payments migration and the rollback plan.';
+      const h = scripted({});
+      void h.s.onRemoteFinal(A, 't1');
+      await run(10);
+      await h.finish();
+      void h.s.onRemoteFinal(A2, 't2');
+      await run(10);
+      expect(texts(h)).toEqual([A, A2]);
+      expect(new Set(h.answered.map((x) => x.questionId)).size).toBe(1);
+      void h.s.onRemoteFinal(A, 't3'); // a shorter copy still adds nothing
+      await run(10);
+      await h.finish();
+      expect(texts(h)).toEqual([A, A2]);
     });
 
     it('after STOP, neither an on-time nor a late "yes" surfaces anything', async () => {

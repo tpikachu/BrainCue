@@ -18,6 +18,8 @@ const h = vi.hoisted(() => ({
   metas: [] as { id: string; riskWarning: string | null }[],
   resets: [] as string[],
   generated: [] as string[],
+  /** Scripted classifier per utterance: [delayMs, isQuestion]. */
+  classify: {} as Record<string, [number, boolean]>,
   aborted: [] as string[],
   gate: null as null | { release: () => void; promise: Promise<void> },
 }));
@@ -72,7 +74,11 @@ import { reactiveQuestionPolicy } from './trigger/reactiveQuestionPolicy';
 import type { ModeDefinition } from './modeDefinition';
 
 vi.mock('../openai/questions', () => ({
-  classifyQuestion: async (text: string) => ({ isQuestion: false, text, type: 'followup', confidence: 0, strategy: '' }),
+  classifyQuestion: async (text: string) => {
+    const c = h.classify[text];
+    if (c) await new Promise((r) => setTimeout(r, c[0]));
+    return { isQuestion: !!c?.[1], text, type: 'followup', confidence: c?.[1] ? 0.9 : 0, strategy: '' };
+  },
 }));
 
 const mode: ModeDefinition = {
@@ -114,6 +120,7 @@ beforeEach(() => {
   vi.setSystemTime(5_000_000);
   for (const k of ['questions', 'updated', 'opened', 'titles', 'metas', 'resets', 'generated', 'aborted'] as const) h[k].length = 0;
   h.gate = null;
+  h.classify = {};
 });
 afterEach(() => vi.useRealTimers());
 
@@ -299,5 +306,81 @@ describe('EngineSession + scheduler', () => {
     expect(h.generated).toEqual(['Tell me about the first project.']);
     expect(h.updated).toEqual([]);
     expect(h.metas).toEqual([]);
+  });
+  // ---- M3 review round 4: one job per card ----
+  const SLOW = 'The thing with the queues last year.'; // undecided by rule → the classifier
+  const first = 'Tell me about the first project.';
+  const corrected = 'Tell me about the first project. Sorry, I meant the second project.';
+
+  it('M3 review 4: after a paused correction and Resume, a follow-up continues the CORRECTED wording on the same card', async () => {
+    h.classify[SLOW] = [600, false]; // an unrelated turn holding the commit chain
+    const s = session();
+    await s.onTranscriptFinal(first); // answered
+    await tick();
+    void s.onTranscriptFinal(SLOW);
+    await tick();
+    void s.onTranscriptFinal('Sorry, I meant the second project.'); // waits for SLOW's decision
+    await tick();
+    s.setPaused(true);
+    await vi.advanceTimersByTimeAsync(700); // SLOW settles; the correction is settled across the pause
+    expect(h.updated).toEqual([{ id: 'q1', text: corrected }]);
+    expect(h.metas).toContainEqual({ id: 'q1', riskWarning: 'Asked while paused — not answered. Press ↻ to answer it.' });
+
+    s.setPaused(false);
+    await s.onTranscriptFinal('And how you tested it.'); // within the window, no candidate speech
+    await tick();
+    const full = `${corrected} And how you tested it.`;
+    expect(h.questions).toHaveLength(1); // still ONE card
+    expect(h.updated.at(-1)).toEqual({ id: 'q1', text: full });
+    expect(h.updated.every((u) => u.text.includes('second project'))).toBe(true); // the correction is never erased
+    expect(h.generated.at(-1)).toBe(full);
+  });
+
+  for (const resume of [false, true]) {
+    for (const longerFirst of [false, true]) {
+      it(`M3 review 4: ${resume ? 'pause → resume' : 'pause'} with a question and its LONGER copy (${longerFirst ? 'longer first' : 'shorter first'}) both classifying — ONE card, the longer wording`, async () => {
+        const A = 'The thing with the queues last year.';
+        const A2 = 'The thing with the queues last year and how you handled the rollback.';
+        h.classify[A] = [500, true];
+        h.classify[A2] = [500, true];
+        const s = session();
+        void s.onTranscriptFinal(longerFirst ? A2 : A);
+        await vi.advanceTimersByTimeAsync(50);
+        void s.onTranscriptFinal(longerFirst ? A : A2);
+        await vi.advanceTimersByTimeAsync(50);
+        s.setPaused(true);
+        if (resume) s.setPaused(false);
+        await vi.advanceTimersByTimeAsync(600);
+        expect(h.questions).toHaveLength(1);
+        const id = h.questions[0].id;
+        const shown = h.updated.filter((u) => u.id === id).at(-1)?.text ?? h.questions[0].text;
+        expect(shown).toBe(A2);
+        expect(h.metas.every((m) => m.id === id)).toBe(true);
+        expect(h.generated).toEqual([]); // nothing answered automatically
+      });
+    }
+  }
+
+  it('M3 review 4: a longer copy across Pause while the original still STREAMS — the stream finishes on its own wording, then its card shows the revision', async () => {
+    h.classify[SLOW] = [600, false];
+    const s = session();
+    openGate();
+    void s.onTranscriptFinal('Tell me about the payments migration.'); // streaming, held
+    await tick();
+    void s.onTranscriptFinal(SLOW);
+    await tick();
+    void s.onTranscriptFinal('Tell me about the payments migration and the rollback plan.');
+    await tick();
+    s.setPaused(true);
+    await vi.advanceTimersByTimeAsync(700);
+    expect(h.updated).toEqual([]); // not while it streams
+    h.gate!.release();
+    h.gate = null;
+    await tick();
+    await tick();
+    expect(h.generated).toEqual(['Tell me about the payments migration.']); // the old stream's input never changed
+    expect(h.questions).toHaveLength(1);
+    expect(h.updated).toEqual([{ id: 'q1', text: 'Tell me about the payments migration and the rollback plan.' }]);
+    expect(h.metas).toContainEqual({ id: 'q1', riskWarning: 'Asked while paused — not answered. Press ↻ to answer it.' });
   });
 });

@@ -23,7 +23,9 @@ import type { ClassifierTurn } from '../../openai/questions';
  *     the order the questions were asked.
  *  3. REVISIONS COALESCE. A final that repeats the in-flight or queued
  *     question (a duplicate final, a transcriber revision) is not a new
- *     question: a longer copy replaces the queued text, an equal one drops.
+ *     question: a longer copy replaces the queued text (or re-answers the
+ *     streaming, answered or missed card — no candidate speech since),
+ *     an equal one drops.
  *  4. CONTINUATIONS AND CORRECTIONS SUPERSEDE. "…and how you tested it" or
  *     "Sorry, I meant the second project" within the continuation window of
  *     the last question — before the candidate has started answering —
@@ -47,7 +49,10 @@ import type { ClassifierTurn } from '../../openai/questions';
  *     started automatically, even after Resume. A revision is marked on
  *     its question's own card. A copy that adds no words to a question
  *     already in flight, waiting, answered or shown missed gets no second
- *     card; a longer one is a revision, never discarded. Only
+ *     card; a longer one is a revision, never discarded. ONE JOB PER
+ *     CARD: a revision updates the job the scheduler keeps routing
+ *     against (see missRevision), so a follow-up after Resume continues
+ *     the wording the card shows, never an older one. Only
  *     STOP drops work — the session is over. While paused, new finals are
  *     not evaluated at all (that is what Pause means).
  *  7. DECISIONS COMMIT IN ARRIVAL ORDER — see evaluate().
@@ -334,39 +339,50 @@ export class QuestionScheduler {
   private settlePausedRevision(text: string, words: string[], tcIds: string[], finalAt: number): Promise<void> | null {
     const same = this.findSame(words, this.deps.now());
     if (same) {
-      if (words.length > same.words.length) this.missRevision(same, text, tcIds, finalAt, 'revision');
+      if (words.length > same.words.length) this.missRevision(same, text, tcIds, finalAt, 'paused', 'revision');
       else this.note(finalAt, false, 'scheduler', 'epoch-changed', 'duplicate');
       return null;
     }
     const prev = this.last;
     if (prev && (isCorrection(text) || isContinuation(text))) {
-      this.missRevision(prev, `${prev.text} ${text}`, tcIds, finalAt, isCorrection(text) ? 'correction' : 'continuation');
+      this.missRevision(prev, `${prev.text} ${text}`, tcIds, finalAt, 'paused', isCorrection(text) ? 'correction' : 'continuation');
       return null;
     }
     this.note(finalAt, false, 'scheduler', 'epoch-changed', 'stale');
     return null;
   }
 
-  /** A revision of `target` that arrived across a Pause: shown as a missed
-   *  card with the revised wording — on `target`'s card when it has one (the
-   *  engine marks that card, never opens a second). A missed target not yet
-   *  on screen simply takes the new wording. `target` itself is untouched:
-   *  an answer still streaming for it finishes as it was. */
-  private missRevision(target: QuestionJob, text: string, tcIds: string[], finalAt: number, why: string): void {
-    const words = turnWords(text);
-    const chunks = [...target.transcriptChunkIds, ...tcIds];
-    this.note(finalAt, true, 'scheduler', `missed-paused-${why}`, 'missed');
-    if (target.state === 'missed' && !target.questionId) {
-      target.text = text;
-      target.words = words;
-      target.transcriptChunkIds = chunks;
-      return;
-    }
-    this.miss(
-      { ...target, seq: ++this.seq, text, words, transcriptChunkIds: chunks, finalAt, decidedAt: this.deps.now(), state: 'queued' },
-      'paused',
-    );
+  /**
+   * ONE JOB PER CARD. A revision that will not be answered automatically
+   * (it arrived across a Pause, or late) updates `target` IN PLACE — the
+   * job the scheduler routes later turns against IS the card, so its wording
+   * and state always match what the user sees:
+   *  - answered, or already missed on screen: the card is marked missed now,
+   *    with the revised wording;
+   *  - missed but not yet on screen (deferred while a stream holds the slot):
+   *    it will show the revised wording;
+   *  - still streaming its old wording: that stream finishes on its own
+   *    input (the engine captured the text when it started), and the card is
+   *    marked missed when it ends (`missAfterRun`);
+   *  - waiting in the queue (asked after Resume): it is answered with the
+   *    revised wording.
+   * A later continuation (after Resume) continues the CURRENT wording.
+   */
+  private missRevision(target: QuestionJob, text: string, tcIds: string[], finalAt: number, why: MissReason, label: string): void {
+    target.text = text;
+    target.words = turnWords(text);
+    target.transcriptChunkIds = [...target.transcriptChunkIds, ...tcIds];
+    target.finalAt = finalAt;
+    target.decidedAt = this.deps.now();
+    this.note(finalAt, true, 'scheduler', `missed-${why}-${label}`, 'missed');
+    if (target.state === 'answering') return void this.missAfterRun.set(target.seq, why);
+    if (target.state === 'queued') return;
+    if (target.state === 'missed' && !target.questionId) return;
+    this.miss(target, why);
   }
+
+  /** Streaming jobs whose card becomes a missed card when the stream ends. */
+  private readonly missAfterRun = new Map<number, MissReason>();
 
   private continuesByRule(text: string, now: number): boolean {
     return !!this.continuable(now) && (isCorrection(text) || isContinuation(text));
@@ -389,6 +405,12 @@ export class QuestionScheduler {
           return this.wait(same);
         }
         // A longer revision of the streaming question: re-answer it.
+        return this.supersede(same, text, tcIds, finalAt, 'revision');
+      }
+      if (words.length > same.words.length && (same.state === 'answered' || (same.state === 'missed' && same.questionId))) {
+        // A longer repeat of a question already answered (no candidate
+        // speech since) or shown missed: the added words are a revision —
+        // re-answer THAT card, never drop them as a duplicate.
         return this.supersede(same, text, tcIds, finalAt, 'revision');
       }
       this.note(finalAt, false, 'scheduler', 'duplicate-final', 'duplicate');
@@ -467,8 +489,20 @@ export class QuestionScheduler {
     // question) is a revision the user has not seen — it gets the card.
     const covers = (j: QuestionJob) => sameWords(j.words, words) && words.length <= j.words.length;
     const same = this.findSame(words, now);
-    if ((same && covers(same)) || this.recentMissed.some((m) => now - m.decidedAt <= DUPLICATE_WINDOW_MS && covers(m))) {
+    const missedRecently = this.recentMissed.filter(
+      (m) => m.state === 'missed' && now - m.decidedAt <= DUPLICATE_WINDOW_MS && sameWords(m.words, words),
+    );
+    if ((same && covers(same)) || missedRecently.some(covers)) {
       this.note(finalAt, true, detection.source, `missed-${why}-duplicate`, 'duplicate');
+      return Promise.resolve();
+    }
+    // A LONGER copy of a question already shown (or about to be shown) as
+    // missed revises THAT card — two copies classified across a Pause are
+    // one card. Across a Pause, a longer copy of a question in flight or
+    // answered revises its card the same way.
+    const prior = missedRecently[0] ?? (why === 'paused' ? same : null);
+    if (prior) {
+      this.missRevision(prior, text, tcIds, finalAt, why, 'revision');
       return Promise.resolve();
     }
     const job: QuestionJob = {
@@ -546,6 +580,7 @@ export class QuestionScheduler {
     target.finalAt = finalAt;
     target.decidedAt = this.deps.now();
     this.note(finalAt, true, 'scheduler', why, 'superseded');
+    this.missAfterRun.delete(target.seq); // it is answered with this wording instead
     if (target.state === 'queued') return this.wait(target);
     // Answering or answered: take the slot back for this question.
     if (target.state === 'answering') {
@@ -601,7 +636,10 @@ export class QuestionScheduler {
     await runPromise;
     if (this.rerunning.has(job.seq)) return; // superseded mid-stream; the supersede re-runs it
     if (this.active === job) this.active = null;
-    this.finish(job, 'answered');
+    const missWhy = this.missAfterRun.get(job.seq);
+    this.missAfterRun.delete(job.seq);
+    if (missWhy && !this.stopped) this.miss(job, missWhy); // revised while it streamed (missRevision)
+    else this.finish(job, 'answered');
     this.pump();
   }
 
@@ -657,7 +695,10 @@ export class QuestionScheduler {
   /** The last question, if a new utterance may still continue it. */
   private continuable(now: number): QuestionJob | null {
     const p = this.last;
-    if (!p || p.state === 'missed' || p.state === 'dropped') return null;
+    // A missed card on screen may be continued (after Resume, the follow-up
+    // re-answers it with the current wording); one not yet shown, or
+    // dropped, may not.
+    if (!p || p.state === 'dropped' || (p.state === 'missed' && !p.questionId)) return null;
     if (now - p.finalAt > CONTINUATION_WINDOW_MS) return null;
     if (this.lastCandidateAt > p.finalAt) return null;
     return p;
