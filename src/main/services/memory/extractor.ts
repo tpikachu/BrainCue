@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import { asc, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db, schema } from '../../db';
+import { transcriptOrder } from '../../db/transcriptOrder';
 import { memoriesRepo } from '../../db/repositories/memories.repo';
 import { contextPacksRepo } from '../../db/repositories/jobs.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
@@ -161,7 +162,7 @@ export async function extractMemoryCandidates(sessionId: string): Promise<number
     .select()
     .from(schema.transcriptChunks)
     .where(eq(schema.transcriptChunks.sessionId, sessionId))
-    .orderBy(asc(schema.transcriptChunks.createdAt))
+    .orderBy(...transcriptOrder())
     .all();
   if (turns.length < 2) return 0; // nothing durable comes out of a one-liner
 

@@ -183,12 +183,12 @@ describe('streamAnswer — request body', () => {
 
   it('embeds retrieved context tagged by source', async () => {
     await collect(streamAnswer(baseInput()));
-    expect(userPrompt()).toContain('(resume) Fixed a race condition');
+    expect(userPrompt()).toContain("(resume — the candidate's own background) Fixed a race condition");
   });
 
   it('numbers the context so answers can cite [i]', async () => {
     await collect(streamAnswer(baseInput()));
-    expect(userPrompt()).toContain('[1] (resume) Fixed a race condition');
+    expect(userPrompt()).toContain("[1] (resume — the candidate's own background) Fixed a race condition");
   });
 
   it('instructs inline [i] citations + a fabrication guard (system prompt)', async () => {
@@ -268,10 +268,17 @@ describe('answer framing', () => {
     }
   });
 
+  it('what the candidate SAID counts as grounding — not "unverified" (live run 2026-11-17)', async () => {
+    await collect(streamAnswer(baseInput({ framing: 'interview' })));
+    expect(system()).toMatch(/what the candidate said in this conversation \("You said" lines/);
+    expect(system()).toMatch(/never call it unverified/);
+  });
+
   it('the interview guard keeps the v1 rule plus the missing-detail option; the conversation guard forbids invented figures', async () => {
     await collect(streamAnswer(baseInput({ framing: 'interview' })));
     expect(system()).toContain(
-      '- FABRICATION GUARD: if the context can\'t support what\'s asked, do NOT make it up. Begin\n' +
+      '- FABRICATION GUARD: if neither the context nor what they said ("You said") can support what\'s\n' +
+        '  asked, do NOT make it up. Begin\n' +
         '  the answer with "⚠", state in one short clause that it\'s not in their background, then\n' +
         '  pivot to a grounded, cited, transferable-skills framing — or, when only they can know it\n' +
         '  (a number, a date, who did what), name the one detail they should fill in themselves\n' +

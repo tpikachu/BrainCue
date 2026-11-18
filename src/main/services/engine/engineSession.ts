@@ -73,7 +73,13 @@ export class EngineSession {
    *  BrainCue's suggestions kept apart from what was said). Per instance, so
    *  another session's conversation can never reach this one's answers.
    *  Prompt-only: the DB rows remain the record. */
-  readonly context = new ConversationContext();
+  /** Whole turns in memory (bounded); past the bound, recall searches THIS
+   *  session's persisted transcript — never another session's. */
+  readonly context = new ConversationContext(() =>
+    persist
+      .sessionTimeline(this.sessionId)
+      .turns.map((t) => ({ role: t.speaker === this.mode.remoteSpeaker ? ('interviewer' as const) : ('candidate' as const), text: t.text, at: t.at })),
+  );
   // Coding sessions default to "listen but don't auto-answer" so a generated coding
   // answer isn't replaced when the remote speaker talks. We keep transcribing and
   // remember the last utterance so toggling answering on can answer it.
@@ -466,7 +472,7 @@ export class EngineSession {
    *  conversation context at the time it was spoken. The user's own turns
    *  are the candidate's ("You said:" in the prompt). */
   private commitTurn(text: string, speaker: Speaker, at = Date.now()): string {
-    const tcId = persist.finalTranscript(this.sessionId, speaker, text);
+    const tcId = persist.finalTranscript(this.sessionId, speaker, text, at);
     broadcast(EVENTS.transcriptDelta, { text, isFinal: true, speaker });
     this.context.addTurn(speaker === this.mode.remoteSpeaker ? 'interviewer' : 'candidate', text, at);
     return tcId;

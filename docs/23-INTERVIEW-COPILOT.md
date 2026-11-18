@@ -132,17 +132,30 @@ interviewer's latest words (joining a split question) when detection missed.
 The 10-item, 300-character history buffer was the only continuity, and it
 showed BrainCue's own suggestion as "You answered:", so a short follow-up
 retrieved on wording the candidate may never have said. It is replaced by a
-bounded per-session context, rendered per answer as a **snapshot taken
-synchronously at stream start** (turns arriving mid-stream cannot change it):
+per-session context, rendered per answer as a **snapshot taken synchronously
+at stream start** (turns arriving mid-stream cannot change it).
+
+**Turns are stored whole; budgets apply when a snapshot renders** (M4). Until
+M4 every turn was clipped to 600 characters on the way IN, so the end of a
+long answer — usually the project name and the figure — was gone before
+recall could search it. Each rendered block now uses `excerpt()`: the first
+sentence, then the sentences sharing words with the question, then those with
+figures or names, in spoken order, with " … " for omissions. Memory holds up
+to 3 000 turns / 2 M characters per session; past that the oldest turns leave
+memory but not the search — recall reads them from **this session's**
+persisted transcript.
+
 
 | Block | What | Bound |
 | --- | --- | --- |
-| recent | last turns verbatim, speaker-labelled, numbered `[#n]` | 12 turns / 2 400 chars |
-| earlier | one line per earlier exchange: the question + what the candidate actually said | 12 exchanges |
-| recalled | older turns BM25-matched to this question | 3 turns |
+| recent | last turns, speaker-labelled, numbered `[#n]` | 12 turns / 3 600 chars, 1 200 per turn |
+| earlier | one line per earlier exchange: the question + what the candidate actually said | 12 exchanges, 160 + 260 chars |
+| recalled | older turns BM25-matched to this question (searched whole) | 3 turns / 500 chars each |
 | open | earlier questions the candidate never answered | 3 |
-| suggestions | BrainCue's earlier leads — labelled *not evidence* | 3 |
-| subject | for a referential follow-up only, the exchange it continues | 1 |
+| suggestions | BrainCue's earlier leads — labelled *not evidence* | 3, 180 chars |
+| subject | for a referential follow-up only, the exchange it continues | 1, 700 chars said |
+
+The whole conversation block has a tested ceiling (under 16 000 characters).
 
 No model call and no summarisation pass: deterministic, so it can never invent
 a fact, and it costs nothing on the hot path. Turns are ordered by when they
@@ -154,7 +167,11 @@ subject from **what the candidate said**; BrainCue's suggestion stands in only
 when no candidate speech was captured (no microphone).
 
 **Resume** restores the session's own turns and answers from its rows
-(`enginePersistence.sessionTimeline`, scoped by session id). Each session owns
+(`enginePersistence.sessionTimeline`, scoped by session id). Transcript rows
+now carry when each turn was **spoken** (ms) and are read back in one order
+(`db/transcriptOrder.ts`: spoken time, then insertion). Before M4 they carried
+the insert time at one-second resolution, so after resume a reply still in the
+echo hold when the next question arrived sorted after that question. Each session owns
 its context, so another session, profile or Space can never leak into an
 answer; retrieval stays scoped to the session's profile and Space. Continuity
 does not depend on long-term memory or archives (both optional and
@@ -162,11 +179,20 @@ consent-gated).
 
 ## 4. Grounding and answer behaviour (`openai/answer.ts`, `rag/retriever.ts`)
 
-- **Sources are ranked in the system prompt.** CONTEXT and MEMORY establish
-  facts; "You said" lines are the candidate's own words; "BrainCue suggested"
-  lines prove nothing. A `(jd)` chunk is labelled *employer requirement, not the
-  candidate's experience*. General knowledge may explain a concept, never become
-  a claim about the candidate.
+- **Sources are ranked in the system prompt.** Facts about the candidate come
+  only from their own material — CONTEXT chunks labelled as theirs (`resume`,
+  tailored résumé, `profile`, `story`, `note`), MEMORY — and "You said" lines.
+  `(jd)` and `(company)` chunks describe the employer and are never evidence of
+  the candidate's experience; a requirement their material does not show is a
+  gap to bridge honestly. "BrainCue suggested" lines prove nothing. General
+  knowledge may explain a concept, never become a claim about the candidate.
+- **Coaching reports coach what the candidate said** (`session/report.ts`,
+  M4). Each question is paired with the candidate's captured speech that
+  follows it; BrainCue's suggestion travels separately, labelled *not the
+  candidate's answer*. A question with no captured speech is reported as such
+  and never assessed; with no speech at all there is no model call. Input is
+  bounded per exchange (the old 24 000-character cut dropped later questions).
+  Sparring keeps its own spoken-answer feedback report.
 - **Documents and transcript are data.** The prompt says to ignore instructions
   inside them; a test pins that an injected line stays inside the data block.
 - **Missing evidence**: the fabrication guard (⚠ + honest framing) now also

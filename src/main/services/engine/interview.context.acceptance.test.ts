@@ -1,0 +1,301 @@
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+/**
+ * M4 ACCEPTANCE — conversation context at the PROMPT BOUNDARY.
+ *
+ * The real engine (sql.js db with the real migrations, real persistence,
+ * scheduler, conversation context, interview mode and answer prompt); only
+ * the provider is scripted, and it records the exact prompt each answer was
+ * generated from. What it pins:
+ *  - a fact said after character 600 of a long answer is recalled 30+
+ *    exchanges later, and again after Stop → Resume (the 600-char clip at
+ *    storage, and the insert-time ordering of persisted turns, broke these);
+ *  - a reply still in the echo hold when the next question arrives stays
+ *    attached to ITS question after resume (spoken-time persistence);
+ *  - referential follow-ups keep the subject; topic switches do not;
+ *  - nothing crosses sessions, profiles or Spaces — including recall from
+ *    the persisted transcript once turns leave memory;
+ *  - every prompt stays bounded.
+ */
+
+const h = vi.hoisted(() => ({
+  db: null as unknown as import('../../test/dbHarness').TestDb,
+  prompts: [] as { user: string; system: string }[],
+  grounds: [] as { profileId: string; query: string; packId: string | null }[],
+}));
+
+vi.mock('../../db', async () => {
+  const schema = await vi.importActual<typeof import('../../db/schema')>('../../db/schema');
+  return {
+    schema,
+    db: () => {
+      if (!h.db) throw new Error('test db not initialized');
+      return h.db;
+    },
+    initDb: () => h.db,
+    rawDb: () => {
+      throw new Error('rawDb not available in tests');
+    },
+  };
+});
+vi.mock('../../ipc/broadcast', () => ({ broadcast: vi.fn() }));
+vi.mock('../../windows/overlayWindow', () => ({ getOverlayWindow: () => null, showOverlay: vi.fn() }));
+vi.mock('../../windows/mainWindow', () => ({ getMainWindow: () => null }));
+vi.mock('../security/logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock('../openai/client', () => ({
+  normalizeOpenAIError: (e: unknown) => String(e),
+  openai: () => {
+    throw new Error('network disabled in tests');
+  },
+}));
+vi.mock('../openai/followup', () => ({ predictFollowup: vi.fn(async () => null) }));
+vi.mock('../openai/questions', () => ({
+  classifyQuestion: async (text: string) => ({ isQuestion: false, text, type: 'followup', confidence: 0, strategy: '' }),
+}));
+vi.mock('../memory/recall', () => ({ recallMemories: async () => [] }));
+// Profile/Space-scoped documents: each profile has its own résumé and JD.
+vi.mock('./grounding', () => ({
+  ground: async (profileId: string, query: string, packId: string | null) => {
+    h.grounds.push({ profileId, query, packId });
+    return [
+      { id: `r-${profileId}`, sourceType: 'resume', content: `Résumé of ${profileId}: senior engineer.`, score: 0.8 },
+      { id: `j-${packId}`, sourceType: 'jd', content: `JD of ${packId}: requires Kafka.`, score: 0.6 },
+    ];
+  },
+}));
+vi.mock('../../providers/registry', () => ({
+  providerFor: (cap: string) => {
+    if (cap === 'chat') {
+      return {
+        async *stream(req: { system: string; user: string }) {
+          h.prompts.push({ user: req.user, system: req.system });
+          yield { type: 'delta', token: 'BrainCue cue text.' };
+        },
+        json: async () => ({}),
+      };
+    }
+    if (cap === 'realtimeStt') return { open: () => ({ appendAudio: vi.fn(), stop: vi.fn() }) };
+    throw new Error(`unexpected capability: ${cap}`);
+  },
+}));
+
+import * as schema from '../../db/schema';
+import { createTestDb } from '../../test/dbHarness';
+import { engine } from './engine';
+import { LIMITS } from './interview/conversationContext';
+
+// ~1,060 characters; the project name and the figure come LAST.
+const LONG =
+  'So when I joined, the platform team was mostly firefighting, and the first thing I did was sit with each of the on-call engineers for a week to understand where the pages were coming from. ' +
+  'A lot of it was noise, alerts that fired on symptoms nobody could act on, so we spent the first month rewriting the alerting rules and deleting about a third of them. ' +
+  'That bought us room to look at the real problem, which was the way deployments touched the shared database during business hours. ' +
+  'We put together a working group with the product teams, agreed on a freeze window, and wrote down a runbook that everyone could follow without me in the room. ' +
+  'Then we did the dry runs, three of them, each one on a copy of production, and each one found something we would have missed. ' +
+  'I also made sure support knew exactly what customers would see during the window, so nobody was surprised. ' +
+  'By the time we did it for real I was fairly confident, and it went well. ' +
+  'That was the Atlas cut-over, and we finished it with 40 minutes of downtime instead of the six hours the old process needed.';
+const FACT = '40 minutes of downtime';
+const RECALL = 'Coming back to the Atlas cut-over, what was the downtime?';
+
+const T0 = 1_800_000_000_000;
+let seq = 0;
+
+function seed(): { profileId: string; packId: string } {
+  const profileId = `p${++seq}`;
+  const packId = `pack${seq}`;
+  h.db.insert(schema.profiles).values({ id: profileId, name: `User ${seq}`, targetRole: 'Engineer' }).run();
+  h.db.insert(schema.contextPacks).values({ id: packId, profileId, title: `Space ${seq}`, kind: 'job' }).run();
+  return { profileId, packId };
+}
+function extraSpace(profileId: string): string {
+  const packId = `pack${++seq}`;
+  h.db.insert(schema.contextPacks).values({ id: packId, profileId, title: `Space ${seq}`, kind: 'job' }).run();
+  return packId;
+}
+
+/** The interviewer asks; the answer streams (scripted) and completes. */
+async function ask(sid: string, q: string) {
+  void engine.processFinalTranscript(sid, q);
+  await vi.advanceTimersByTimeAsync(100);
+}
+/** The candidate speaks; the echo guard confirms it after its hold. */
+async function say(sid: string, a: string) {
+  void engine.processFinalTranscript(sid, a, 'candidate');
+  await vi.advanceTimersByTimeAsync(1700);
+}
+const promptFor = (q: string) => {
+  const p = [...h.prompts].reverse().find((x) => x.user.includes(`QUESTION: ${q}`));
+  if (!p) throw new Error(`no prompt for: ${q}`);
+  return p.user;
+};
+const conversationOf = (prompt: string) => prompt.slice(prompt.indexOf('CONVERSATION SO FAR'), prompt.indexOf('\nQUESTION: '));
+
+beforeAll(async () => {
+  h.db = (await createTestDb()).db;
+  vi.useFakeTimers();
+  vi.setSystemTime(T0);
+});
+afterAll(() => vi.useRealTimers());
+beforeEach(() => {
+  h.prompts.length = 0;
+  h.grounds.length = 0;
+});
+afterEach(() => {
+  const cur = (engine as unknown as { current: { sessionId: string } | null }).current;
+  if (cur) engine.stop(cur.sessionId);
+});
+
+describe('M4 — conversation context at the prompt boundary', () => {
+  it('recalls a fact after character 600, 30+ exchanges later, and again after Stop → Resume', async () => {
+    expect(LONG.indexOf('Atlas')).toBeGreaterThan(600);
+    const { profileId, packId } = seed();
+    const sid = engine.start(profileId, 'general', packId).id;
+
+    await ask(sid, 'Tell me about a migration you led.');
+    await say(sid, LONG);
+    for (let i = 1; i <= 31; i++) {
+      await ask(sid, `What did you work on in quarter ${i}?`);
+      await say(sid, `In quarter ${i} I worked on the reporting service, mostly on caching layer ${i}.`);
+    }
+    await ask(sid, RECALL);
+    const live = promptFor(RECALL);
+    expect(live).toContain(FACT); // what they SAID, past character 600, 32 exchanges back
+    expect(conversationOf(live)).toMatch(new RegExp(`You said: [^\\n]*${FACT}`)); // labelled as their words
+    expect(live.length).toBeLessThan(20_000); // bounded after a long session
+
+    engine.stop(sid);
+    engine.resume(sid);
+    h.prompts.length = 0;
+    await ask(sid, RECALL);
+    const resumed = promptFor(RECALL);
+    expect(resumed).toContain(FACT);
+    expect(conversationOf(resumed)).toMatch(new RegExp(`You said: [^\\n]*${FACT}`));
+    expect(resumed.length).toBeLessThan(20_000);
+  });
+
+  it('a reply still in the echo hold when the next question arrives stays with ITS question after resume', async () => {
+    const { profileId, packId } = seed();
+    const sid = engine.start(profileId, 'general', packId).id;
+    const QA = 'Which database did you choose for the ledger?';
+    const REPLY = 'We chose CockroachDB for the ledger because of multi-region writes.';
+    const QB = 'What was the hardest part of the rollout?';
+    void engine.processFinalTranscript(sid, QA);
+    await vi.advanceTimersByTimeAsync(100);
+    void engine.processFinalTranscript(sid, REPLY, 'candidate'); // spoken now, confirmed after the hold
+    await vi.advanceTimersByTimeAsync(500);
+    void engine.processFinalTranscript(sid, QB); // asked before the reply is committed
+    await vi.advanceTimersByTimeAsync(2000);
+
+    engine.stop(sid);
+    engine.resume(sid);
+    const QC = 'How long did the rollout take overall?';
+    await ask(sid, QC);
+    const conv = conversationOf(promptFor(QC));
+    const iA = conv.indexOf(QA);
+    const iReply = conv.indexOf(REPLY);
+    const iB = conv.indexOf(QB);
+    expect(iA).toBeGreaterThan(-1);
+    expect(iReply).toBeGreaterThan(iA);
+    expect(iB).toBeGreaterThan(iReply); // the reply answered QA, not QB
+  });
+
+  it('a referential follow-up keeps the subject; a topic switch does not', async () => {
+    const { profileId, packId } = seed();
+    const sid = engine.start(profileId, 'general', packId).id;
+    await ask(sid, 'Tell me about a migration you led.');
+    await say(sid, LONG);
+    const FOLLOW = 'How did you measure that?';
+    await ask(sid, FOLLOW);
+    const follow = promptFor(FOLLOW);
+    expect(follow).toMatch(/THIS QUESTION FOLLOWS UP ON \[#\d+\] "Tell me about a migration you led\."/);
+    expect(follow).toContain(FACT); // the subject carries what they said, details included
+    expect(h.grounds.at(-1)!.query).toContain('Atlas'); // retrieval follows the subject too
+    await say(sid, 'We tracked error budgets and the incident count every week.');
+
+    const SWITCH = "Let's move on. What do you know about Kubernetes operators?";
+    await ask(sid, SWITCH);
+    expect(promptFor(SWITCH)).not.toContain('THIS QUESTION FOLLOWS UP ON');
+    expect(h.grounds.at(-1)!.query).toBe(SWITCH);
+  });
+
+  it('nothing crosses sessions, profiles or Spaces — live, after resume, and from the persisted transcript', async () => {
+    const a = seed();
+    const b = seed();
+    const sidA = engine.start(a.profileId, 'general', a.packId).id;
+    await ask(sidA, 'Tell me about a migration you led.');
+    await say(sidA, LONG);
+    engine.stop(sidA);
+
+    h.grounds.length = 0;
+    const sidB = engine.start(b.profileId, 'general', b.packId).id;
+    await ask(sidB, 'Tell me about a migration you led.');
+    await say(sidB, 'That was the Borealis migration, with 25 minutes of downtime.');
+    await ask(sidB, RECALL);
+    const pB = promptFor(RECALL);
+    expect(pB).not.toContain('Atlas cut-over, and we finished');
+    expect(pB).not.toContain(FACT);
+    expect(pB).toContain(`Résumé of ${b.profileId}`);
+    expect(pB).not.toContain(`Résumé of ${a.profileId}`);
+    expect(h.grounds.every((g) => g.profileId === b.profileId && g.packId === b.packId)).toBe(true);
+    engine.stop(sidB);
+
+    // The same profile in ANOTHER Space starts with no conversation of A's.
+    const otherSpace = extraSpace(a.profileId);
+    const sidA2 = engine.start(a.profileId, 'general', otherSpace).id;
+    await ask(sidA2, RECALL);
+    expect(promptFor(RECALL)).not.toContain(FACT);
+    engine.stop(sidA2);
+
+    // Resuming A brings back A — and only A.
+    h.grounds.length = 0;
+    engine.resume(sidA);
+    await ask(sidA, RECALL);
+    const pA = promptFor(RECALL);
+    expect(pA).toContain(FACT);
+    expect(pA).not.toContain('Borealis');
+    expect(h.grounds.every((g) => g.profileId === a.profileId && g.packId === a.packId)).toBe(true);
+  });
+
+  it('past the in-memory bound, recall searches THIS session\'s persisted transcript — still bounded, still isolated', async () => {
+    const saved = { maxTurns: LIMITS.maxTurns };
+    LIMITS.maxTurns = 20; // force eviction in a short test
+    try {
+      const other = seed();
+      const sidO = engine.start(other.profileId, 'general', other.packId).id;
+      await ask(sidO, 'Tell me about a migration you led.');
+      await say(sidO, 'That was the Atlas cut-over too, but with 90 minutes of downtime.');
+      engine.stop(sidO);
+
+      const { profileId, packId } = seed();
+      const sid = engine.start(profileId, 'general', packId).id;
+      await ask(sid, 'Tell me about a migration you led.');
+      await say(sid, LONG);
+      for (let i = 1; i <= 15; i++) {
+        await ask(sid, `What did you work on in quarter ${i}?`);
+        await say(sid, `In quarter ${i} I worked on the reporting service, mostly on caching layer ${i}.`);
+      }
+      await ask(sid, RECALL); // the LONG turn left memory 20 turns ago
+      const p = promptFor(RECALL);
+      expect(p).toContain(FACT);
+      expect(p).not.toContain('90 minutes'); // another session's transcript is never searched
+      expect(p.length).toBeLessThan(20_000);
+    } finally {
+      LIMITS.maxTurns = saved.maxTurns;
+    }
+  });
+
+  it('a BrainCue suggestion is never presented as what the candidate said; JD stays an employer requirement', async () => {
+    const { profileId, packId } = seed();
+    const sid = engine.start(profileId, 'general', packId).id;
+    await ask(sid, 'Tell me about a migration you led.'); // BrainCue suggests "BrainCue cue text."
+    await say(sid, LONG);
+    const NEXT = 'Why did you choose a freeze window?';
+    await ask(sid, NEXT);
+    const p = promptFor(NEXT);
+    const conv = conversationOf(p);
+    expect(conv).toMatch(/BRAINCUE SUGGESTED EARLIER \(cue-card text — NOT evidence[^\n]*\n- for "Tell me about a migration you led\.": BrainCue cue text\./);
+    expect(conv).not.toMatch(/You said: BrainCue cue text/);
+    expect(p).toContain(`(jd — employer requirement, not the candidate's experience) JD of ${packId}`);
+    expect(p).toContain(`(resume — the candidate's own background) Résumé of ${profileId}`);
+  });
+});

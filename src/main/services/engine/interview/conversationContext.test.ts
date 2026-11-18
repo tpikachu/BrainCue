@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ConversationContext, LIMITS, leadOf } from './conversationContext';
+import { buildConversationBlock } from '../../openai/answer';
+
+// answer.ts reaches the provider registry (and through it the db); only its
+// pure renderer is used here.
+vi.mock('../../../providers/registry', () => ({ providerFor: () => ({}) }));
 
 let clock = 1_000_000;
 const at = () => (clock += 1000);
@@ -158,5 +163,122 @@ describe('resume and isolation', () => {
 describe('leadOf', () => {
   it('takes the first sentence, without markdown or citations', () => {
     expect(leadOf('**I led the migration at Acme.** It took six months [1].\n- bullet')).toBe('I led the migration at Acme.');
+  });
+});
+
+describe('long spoken answers keep their details (review finding: 600-char clip at storage)', () => {
+  // ~1,060 characters; the project name and the downtime figure come LAST,
+  // the way people actually tell a story.
+  const LONG =
+    'So when I joined, the platform team was mostly firefighting, and the first thing I did was sit with each of the on-call engineers for a week to understand where the pages were coming from. ' +
+    'A lot of it was noise, alerts that fired on symptoms nobody could act on, so we spent the first month rewriting the alerting rules and deleting about a third of them. ' +
+    'That bought us room to look at the real problem, which was the way deployments touched the shared database during business hours. ' +
+    'We put together a working group with the product teams, agreed on a freeze window, and wrote down a runbook that everyone could follow without me in the room. ' +
+    'Then we did the dry runs, three of them, each one on a copy of production, and each one found something we would have missed. ' +
+    'I also made sure support knew exactly what customers would see during the window, so nobody was surprised. ' +
+    'By the time we did it for real I was fairly confident, and it went well. ' +
+    'That was the Atlas cut-over, and we finished it with 40 minutes of downtime instead of the six hours the old process needed.';
+
+  it('the fixture really is long', () => {
+    expect(LONG.length).toBeGreaterThan(1000);
+  });
+
+  it('the next follow-up sees the project name and the figure', () => {
+    const c = new ConversationContext();
+    exchange(c, 'Tell me about a migration you led.', LONG);
+    const q = 'How did you measure that?';
+    c.addTurn('interviewer', q, at());
+    const snap = c.snapshot(q);
+    const rendered = JSON.stringify(snap);
+    expect(rendered).toContain('Atlas cut-over');
+    expect(rendered).toContain('40 minutes of downtime');
+    expect(snap.subject?.said).toContain('40 minutes');
+    expect(c.retrievalQuery(q)).toContain('Atlas');
+  });
+
+  it('a turn longer than its prompt budget keeps the first sentence and the details', () => {
+    const c = new ConversationContext();
+    const longer = `${LONG} ${LONG.replace('Atlas', 'Borealis').replace('40 minutes', '25 minutes')}`;
+    exchange(c, 'Tell me about a migration you led.', longer);
+    const q = 'What was the downtime?';
+    const snap = c.snapshot(q);
+    const said = snap.recent.find((t) => t.role === 'candidate')!.text;
+    expect(said.length).toBeLessThanOrEqual(LIMITS.turnChars + 20);
+    expect(said.startsWith('So when I joined')).toBe(true);
+    expect(said).toMatch(/downtime/);
+    expect(said).toContain('…');
+  });
+
+  it('recall searches the whole of an old long answer, many exchanges later', () => {
+    const c = new ConversationContext();
+    exchange(c, 'Tell me about a migration you led.', LONG);
+    for (let i = 1; i <= 30; i++) exchange(c, `Question number ${i} about topic ${i}?`, `Answer ${i} about topic ${i}.`);
+    const q = 'Coming back to the Atlas cut-over — what would you change?';
+    const snap = c.snapshot(q);
+    const recalled = snap.recalled.map((t) => t.text).join(' ');
+    expect(recalled).toContain('Atlas cut-over');
+    expect(recalled).toContain('40 minutes');
+    expect(recalled.length).toBeLessThanOrEqual(LIMITS.recalledChars * LIMITS.recalledTurns + 60);
+  });
+});
+
+describe('M4: whole turns in memory; the persisted transcript past the bound; bounded rendering', () => {
+  const FACT_TURN = 'That was the Atlas cut-over, and we finished it with 40 minutes of downtime instead of six hours.';
+
+  it('stores a long turn WHOLE — the 600-character clip at storage is gone', () => {
+    const c = new ConversationContext();
+    const long = `${'We spent weeks on the alerting rules and the runbook. '.repeat(90)}${FACT_TURN}`;
+    c.addTurn('candidate', long, at());
+    expect(c.recentForClassifier(1)[0].text.length).toBeLessThanOrEqual(LIMITS.classifierTurnChars + 20); // rendered: bounded
+    const snap = c.snapshot('What was the downtime on the Atlas cut-over?');
+    expect(JSON.stringify(snap)).toContain('40 minutes of downtime'); // stored: whole, so the end survives
+  });
+
+  it('past the in-memory bound, recall searches the persisted transcript — loaded once per eviction', () => {
+    let loads = 0;
+    const persisted: { role: 'interviewer' | 'candidate'; text: string; at: number }[] = [];
+    const c = new ConversationContext(() => {
+      loads++;
+      return persisted;
+    });
+    const add = (role: 'interviewer' | 'candidate', text: string) => {
+      const t = at();
+      persisted.push({ role, text, at: t });
+      c.addTurn(role, text, t);
+    };
+    add('interviewer', 'Tell me about a migration you led.');
+    add('candidate', FACT_TURN);
+    for (let i = 0; i < LIMITS.maxTurns; i++) add(i % 2 ? 'candidate' : 'interviewer', `Filler turn ${i} about caching.`);
+    expect(c.size).toBe(LIMITS.maxTurns); // memory is bounded
+    const q = 'Coming back to the Atlas cut-over — what was the downtime?';
+    const snap = c.snapshot(q);
+    expect(snap.recalled.map((t) => t.text).join(' ')).toContain('40 minutes of downtime');
+    c.snapshot(q);
+    expect(loads).toBe(1); // memoized until more turns are evicted
+  });
+
+  it('without a persisted source, an evicted turn is simply out of reach (memory is the bound)', () => {
+    const c = new ConversationContext();
+    c.addTurn('candidate', FACT_TURN, at());
+    for (let i = 0; i < LIMITS.maxTurns; i++) c.addTurn('interviewer', `Filler turn ${i}.`, at());
+    expect(JSON.stringify(c.snapshot('What was the Atlas downtime?'))).not.toContain('40 minutes');
+  });
+
+  it('the rendered conversation block has a hard ceiling, however long the session and its turns', () => {
+    const c = new ConversationContext();
+    const huge = 'We measured everything twice and wrote it all down for the team. '.repeat(120);
+    for (let i = 0; i < 60; i++) exchange(c, `${'Tell me, in detail, about project number '.repeat(8)}${i}?`, huge, `**${'Long suggested lead. '.repeat(40)}**`);
+    const q = 'And what did you learn from it?';
+    c.addTurn('interviewer', q, at());
+    const block = buildConversationBlock(c.snapshot(q));
+    const ceiling =
+      LIMITS.recentChars + LIMITS.turnChars +
+      LIMITS.earlierExchanges * (LIMITS.earlierQuestionChars + LIMITS.earlierSaidChars + 40) +
+      LIMITS.recalledTurns * (LIMITS.recalledChars + 40) +
+      LIMITS.suggestions * (LIMITS.earlierQuestionChars + LIMITS.suggestionChars + 20) +
+      LIMITS.earlierQuestionChars + LIMITS.subjectSaidChars + 200 +
+      3 * (LIMITS.earlierQuestionChars + 20) + 600;
+    expect(block.length).toBeLessThanOrEqual(ceiling);
+    expect(ceiling).toBeLessThan(16_000);
   });
 });

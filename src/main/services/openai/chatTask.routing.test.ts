@@ -64,7 +64,17 @@ vi.mock('../security/providerKeys', () => ({
 vi.mock('../stt', () => ({ readSttPrefs: () => ({ engine: 'local' }), sttReady: () => true }));
 vi.mock('../../db/repositories/sessions.repo', () => ({
   sessionsRepo: {
-    detail: () => ({ kind: 'live', transcript: [{ speaker: 'interviewer', text: 'Tell me about yourself.' }], questions: [] }),
+    // A question with a captured answer — M4: a session with no candidate
+    // speech makes no model call at all (nothing to coach), so routing is
+    // exercised on one that has some.
+    detail: () => ({
+      kind: 'live',
+      transcript: [
+        { id: 't1', speaker: 'interviewer', text: 'Tell me about yourself.', createdAt: 1 },
+        { id: 't2', speaker: 'candidate', text: 'I build payment systems.', createdAt: 2 },
+      ],
+      questions: [{ id: 'q1', text: 'Tell me about yourself.', createdAt: 1, transcriptChunkId: 't1', answer: null }],
+    }),
     saveReport: (r: unknown) => r,
   },
 }));

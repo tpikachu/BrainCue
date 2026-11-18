@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { db, schema } from '../index';
+import { transcriptOrder } from '../transcriptOrder';
 import type {
   AiAnswer,
   DetectedQuestion,
@@ -128,6 +129,7 @@ export const sessionsRepo = {
       .select()
       .from(schema.transcriptChunks)
       .where(eq(schema.transcriptChunks.sessionId, id))
+      .orderBy(...transcriptOrder())
       .all()
       .map<TranscriptChunk>((r) => ({
         id: r.id,
@@ -159,6 +161,7 @@ export const sessionsRepo = {
           confidence: q.confidence,
           strategy: q.strategy,
           createdAt: q.createdAt,
+          transcriptChunkId: q.transcriptChunkId ?? null,
         };
         return { ...question, answer: a ? toAnswer(a) : null };
       });

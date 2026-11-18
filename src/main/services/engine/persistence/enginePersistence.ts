@@ -1,5 +1,6 @@
 import { asc, eq } from 'drizzle-orm';
 import { db, schema } from '../../../db';
+import { transcriptOrder } from '../../../db/transcriptOrder';
 import type { ContributionKind, Speaker } from '@shared/types';
 
 /**
@@ -17,11 +18,14 @@ export const enginePersistence = {
     return db().select().from(schema.sessions).where(eq(schema.sessions.id, sessionId)).get();
   },
 
-  finalTranscript(sessionId: string, speaker: Speaker, text: string): string {
+  /** `at`: when the turn was SPOKEN (ms) — the order it is read back in
+   *  (transcriptOrder). A candidate turn is committed late, after the echo
+   *  guard; without it the row would sort after the next question. */
+  finalTranscript(sessionId: string, speaker: Speaker, text: string, at?: number): string {
     const id = crypto.randomUUID();
     db()
       .insert(schema.transcriptChunks)
-      .values({ id, sessionId, speaker, text, isFinal: 1 })
+      .values({ id, sessionId, speaker, text, isFinal: 1, ...(at !== undefined ? { createdAt: Math.round(at) } : {}) })
       .run();
     return id;
   },
@@ -109,10 +113,9 @@ export const enginePersistence = {
    *  turns and its answered questions. Scoped by session id — another
    *  session's rows can never be restored into this one. Bounded to the
    *  last `maxTurns` turns. */
-  sessionTimeline(
-    sessionId: string,
-    maxTurns = 3000,
-  ): {
+  /** This session's turns (ALL of them, whole — the conversation context
+   *  bounds memory itself and searches these past its bound) and answers. */
+  sessionTimeline(sessionId: string): {
     turns: { speaker: Speaker; text: string; at: number }[];
     answers: { questionId: string; question: string; answer: string; at: number }[];
   } {
@@ -120,10 +123,9 @@ export const enginePersistence = {
       .select({ speaker: schema.transcriptChunks.speaker, text: schema.transcriptChunks.text, at: schema.transcriptChunks.createdAt })
       .from(schema.transcriptChunks)
       .where(eq(schema.transcriptChunks.sessionId, sessionId))
-      .orderBy(asc(schema.transcriptChunks.createdAt))
+      .orderBy(...transcriptOrder())
       .all()
       .filter((t) => t.text.trim())
-      .slice(-maxTurns)
       .map((t) => ({ speaker: t.speaker as Speaker, text: t.text, at: t.at }));
     const answers = db()
       .select({

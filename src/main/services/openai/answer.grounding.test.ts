@@ -71,7 +71,14 @@ describe('answer prompt — sources stay distinguishable', () => {
   it('a JD chunk is labelled as an employer requirement in CONTEXT', async () => {
     await run();
     expect(h.user).toContain("[2] (jd — employer requirement, not the candidate's experience) Requires 5+ years of Kubernetes.");
-    expect(h.user).toContain('[1] (resume) Senior engineer at Acme');
+    expect(h.user).toContain("[1] (resume — the candidate's own background) Senior engineer at Acme");
+  });
+
+  it('M4: only the candidate\'s own material is evidence about them — JD and company chunks never are', async () => {
+    await run();
+    expect(h.system).toMatch(/Facts about the candidate come ONLY from their own material/);
+    expect(h.system).toMatch(/\(jd\) and \(company\) chunks describe the EMPLOYER: they are never evidence/);
+    expect(h.system).toMatch(/a requirement their own material does not show is a gap to bridge honestly, not\s+a claim/);
   });
 
   it('a prompt-injection line inside the transcript stays inside the data block', async () => {

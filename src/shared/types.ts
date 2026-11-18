@@ -579,6 +579,9 @@ export interface DetectedQuestion {
   confidence: number;
   strategy: string;
   createdAt: number;
+  /** The (last) transcript turn that asked it — where the candidate's reply
+   *  starts. Null for a typed Ask. */
+  transcriptChunkId?: string | null;
 }
 
 export interface AiAnswer {

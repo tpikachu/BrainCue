@@ -1,4 +1,4 @@
-import { bm25 } from '../../rag/lexical';
+import { bm25, tokenize } from '../../rag/lexical';
 import { assessUtterance } from './questionHeuristics';
 
 /**
@@ -16,8 +16,13 @@ import { assessUtterance } from './questionHeuristics';
  *  - every short question was attached to the previous topic, even "And what
  *    about Kubernetes?" — a topic switch.
  *
- * This keeps the whole session's turns (bounded) and renders a SNAPSHOT per
- * answer, with every source kept distinct:
+ * This keeps the whole session's turns and renders a SNAPSHOT per answer,
+ * with every source kept distinct. Turns are stored WHOLE — budgets apply
+ * only when a snapshot renders (`excerpt`), so retrieval can always search
+ * everything that was said. Past the in-memory bound (`maxTurns` /
+ * `maxStoredChars`) the oldest turns leave memory but not the search: the
+ * session's persisted transcript is the source for them (`archive`).
+ *
  *
  *   recent      the last turns verbatim, speaker-labelled
  *   earlier     one compact line per earlier exchange — the interviewer's
@@ -73,22 +78,74 @@ export interface ConversationSnapshot {
 /** Budgets — sized for the prompt. Every block is bounded on its own so a
  *  long interview never grows the prompt. */
 export const LIMITS = {
+  /** In-memory bound for one session. Past it the oldest turns are evicted
+   *  from memory and searched in the persisted transcript instead. Turns are
+   *  never shortened at storage — every budget below applies at render. */
   maxTurns: 3000,
+  maxStoredChars: 2_000_000,
   recentTurns: 12,
-  recentChars: 2400,
-  turnChars: 600,
+  recentChars: 3600,
+  turnChars: 1200,
   earlierExchanges: 12,
   earlierQuestionChars: 160,
-  earlierSaidChars: 220,
+  earlierSaidChars: 260,
   recalledTurns: 3,
-  recalledChars: 400,
+  recalledChars: 500,
   suggestions: 3,
   suggestionChars: 180,
-  subjectSaidChars: 240,
+  subjectSaidChars: 700,
+  retrievalSaidChars: 400,
+  classifierTurnChars: 600,
   referentialMaxWords: 10,
 };
 
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s);
+
+const SENTENCE = /(?<=[.!?;])\s+|\n+/;
+
+/**
+ * Fit `text` into `max` characters WITHOUT losing what a later question is
+ * most likely to need. A head-clip drops the end of a long spoken answer —
+ * which is where the project name and the figure ("…the Atlas cut-over,
+ * 40 minutes of downtime instead of six hours") usually are. Instead keep
+ * the first sentence, then the sentences that share words with the
+ * question, then the ones carrying figures or names, in spoken order, with
+ * " … " where text was left out. Deterministic, no model call.
+ */
+export function excerpt(text: string, max: number, query = ''): string {
+  const t = text.trim();
+  if (t.length <= max) return t;
+  const parts = t.split(SENTENCE).map((s) => s.trim()).filter(Boolean);
+  if (parts.length < 2) return clip(t, max);
+  const want = new Set(tokenize(query));
+  const scored = parts.map((s, i) => {
+    let score = 0;
+    for (const w of tokenize(s)) if (want.has(w)) score += 3;
+    if (/\d/.test(s)) score += 2;
+    if (names(s).size) score += 1;
+    if (i === 0) score += 2.5;
+    return { i, s, score };
+  });
+  const keep = new Set<number>();
+  let used = 0;
+  for (const p of [...scored].sort((a, b) => b.score - a.score || a.i - b.i)) {
+    const cost = p.s.length + 3;
+    if (used + cost > max) continue;
+    keep.add(p.i);
+    used += cost;
+  }
+  if (!keep.size) return clip(t, max);
+  let out = '';
+  let prev = -1;
+  for (const p of scored) {
+    if (!keep.has(p.i)) continue;
+    out += out ? (p.i === prev + 1 ? ' ' : ' … ') : p.i > 0 ? '… ' : '';
+    out += p.s;
+    prev = p.i;
+  }
+  if (prev < parts.length - 1) out += ' …';
+  return out;
+}
 
 const TOPIC_SHIFT =
   /\b(let'?s (move on|switch|change|talk about something|turn to|go to)|moving on|switch(ing)? gears|different (topic|question|area)|next (question|topic)|on another note|changing (the )?topic|new topic)\b/i;
@@ -117,6 +174,14 @@ function names(text: string): Set<string> {
 
 export class ConversationContext {
   private readonly turns: Turn[] = [];
+  /** Turns evicted from memory (the oldest, by `at`). */
+  private evicted = 0;
+  private storedChars = 0;
+  private archiveCache: { evicted: number; turns: Turn[] } | null = null;
+
+  /** `archive` loads this session's persisted turns, oldest first (by when
+   *  spoken). Only consulted once turns have been evicted from memory. */
+  constructor(private readonly archive?: () => { role: TurnRole; text: string; at: number }[]) {}
   private readonly suggestions: Suggestion[] = [];
   private nextN = 1;
 
@@ -127,11 +192,16 @@ export class ConversationContext {
   addTurn(role: TurnRole, text: string, at = Date.now()): number {
     const t = text.trim();
     if (!t) return 0;
-    const turn = { n: this.nextN++, role, text: clip(t, LIMITS.turnChars), at };
+    // Stored whole (safety cap only): budgets apply when a snapshot renders.
+    const turn = { n: this.nextN++, role, text: t, at }; // WHOLE: budgets apply at render
     let i = this.turns.length;
     while (i > 0 && this.turns[i - 1].at > at) i--;
     this.turns.splice(i, 0, turn);
-    if (this.turns.length > LIMITS.maxTurns) this.turns.splice(0, this.turns.length - LIMITS.maxTurns);
+    this.storedChars += t.length;
+    while (this.turns.length > 1 && (this.turns.length > LIMITS.maxTurns || this.storedChars > LIMITS.maxStoredChars)) {
+      this.storedChars -= this.turns.shift()!.text.length;
+      this.evicted++;
+    }
     return turn.n;
   }
 
@@ -156,7 +226,7 @@ export class ConversationContext {
 
   /** The last few turns, for the question classifier. Only what was SAID. */
   recentForClassifier(n = 4): { speaker: TurnRole; text: string }[] {
-    return this.turns.slice(-n).map((t) => ({ speaker: t.role, text: t.text }));
+    return this.turns.slice(-n).map((t) => ({ speaker: t.role, text: excerpt(t.text, LIMITS.classifierTurnChars) }));
   }
 
   /** Interviewer questions with what the candidate said after each, in order.
@@ -220,7 +290,7 @@ export class ConversationContext {
   retrievalQuery(question: string): string {
     const last = this.lastExchangeBefore(question);
     if (!last || !this.isReferential(question, last)) return question;
-    const said = clip(last.said, LIMITS.subjectSaidChars);
+    const said = excerpt(last.said, LIMITS.retrievalSaidChars, question);
     if (said) return `${last.question} ${said} ${question}`;
     const sug = [...this.suggestions].reverse().find((s) => s.question === last.question);
     return sug ? `${last.question} ${clip(sug.lead, 160)} ${question}` : `${last.question} ${question}`;
@@ -240,9 +310,10 @@ export class ConversationContext {
     for (let i = this.turns.length - 1; i >= 0 && recent.length < LIMITS.recentTurns; i--) {
       const t = this.turns[i];
       if (t.role === 'interviewer' && (t.text === q || q.endsWith(t.text))) continue;
-      if (chars + t.text.length > LIMITS.recentChars && recent.length > 0) break;
-      chars += t.text.length;
-      recent.unshift({ ...t });
+      const text = excerpt(t.text, LIMITS.turnChars, q);
+      if (chars + text.length > LIMITS.recentChars && recent.length > 0) break;
+      chars += text.length;
+      recent.unshift({ ...t, text });
     }
     const oldestRecentAt = recent[0]?.at ?? Number.POSITIVE_INFINITY;
 
@@ -254,22 +325,28 @@ export class ConversationContext {
         n: e.n,
         at: e.at,
         question: clip(e.question, LIMITS.earlierQuestionChars),
-        said: clip(e.said, LIMITS.earlierSaidChars),
+        said: excerpt(e.said, LIMITS.earlierSaidChars, q),
       }));
 
     const last = all[all.length - 1] ?? null;
-    const subject = last && this.isReferential(q, last) ? { ...last, said: clip(last.said, LIMITS.subjectSaidChars) } : null;
+    const subject =
+      last && this.isReferential(q, last)
+        ? { ...last, question: clip(last.question, LIMITS.earlierQuestionChars), said: excerpt(last.said, LIMITS.subjectSaidChars, q) }
+        : null;
 
     // Older turns this question needs (the recent window already has the rest).
-    const older = this.turns.filter((t) => t.at < oldestRecentAt);
-    const recalled = bm25(subject ? `${subject.question} ${q}` : q, older, (t) => t.text, LIMITS.recalledTurns)
-      .map((s) => ({ ...s.item, text: clip(s.item.text, LIMITS.recalledChars) }))
+    const older = [...this.archived(), ...this.turns.filter((t) => t.at < oldestRecentAt)];
+    // Searched over the FULL text of every older turn; each hit is rendered
+    // as the passage that matched, not the turn's first N characters.
+    const recallQuery = subject ? `${subject.question} ${q}` : q;
+    const recalled = bm25(recallQuery, older, (t) => t.text, LIMITS.recalledTurns)
+      .map((s) => ({ ...s.item, text: excerpt(s.item.text, LIMITS.recalledChars, recallQuery) }))
       .sort((a, b) => a.at - b.at);
 
     const suggestions = this.suggestions
       .filter((s) => s.question !== q)
       .slice(-LIMITS.suggestions)
-      .map((s) => ({ ...s }));
+      .map((s) => ({ ...s, question: clip(s.question, LIMITS.earlierQuestionChars) }));
 
     // Open questions: earlier interviewer questions with no reply captured,
     // outside the recent window (inside it, the model sees them verbatim).
@@ -279,6 +356,27 @@ export class ConversationContext {
       .map((e) => ({ ...e, question: clip(e.question, LIMITS.earlierQuestionChars) }));
 
     return { recent, earlier: earlier.filter((e) => e.said), recalled, suggestions, subject, open };
+  }
+
+  /** The turns evicted from memory, from the persisted transcript — the
+   *  first `evicted` rows by when spoken, numbered by position. Loaded once
+   *  per eviction count; a failing loader means only memory is searched. */
+  private archived(): Turn[] {
+    if (!this.evicted || !this.archive) return [];
+    if (this.archiveCache?.evicted !== this.evicted) {
+      let rows: { role: TurnRole; text: string; at: number }[] = [];
+      try {
+        rows = this.archive();
+      } catch {
+        rows = [];
+      }
+      const turns = rows
+        .filter((r) => r.text.trim())
+        .slice(0, this.evicted)
+        .map((r, i) => ({ n: i + 1, role: r.role, text: r.text.trim(), at: r.at }));
+      this.archiveCache = { evicted: this.evicted, turns };
+    }
+    return this.archiveCache.turns;
   }
 
   /** Restore a resumed session from its persisted rows (oldest first). */

@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import { asc, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db, schema } from '../../db';
+import { transcriptOrder } from '../../db/transcriptOrder';
 import { contextPacksRepo } from '../../db/repositories/jobs.repo';
 import { sessionsRepo } from '../../db/repositories/sessions.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
@@ -225,7 +226,7 @@ export async function archiveSession(sessionId: string): Promise<number> {
       .select()
       .from(schema.transcriptChunks)
       .where(eq(schema.transcriptChunks.sessionId, sessionId))
-      .orderBy(asc(schema.transcriptChunks.createdAt))
+      .orderBy(...transcriptOrder())
       .all();
     if (turns.length < MIN_TURNS) return 0;
 
