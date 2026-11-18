@@ -13,7 +13,7 @@ npm install            # pulls @playwright/test + dotenv (added to devDependenci
 > No `npx playwright install` needed — these tests don't use Playwright's bundled
 > browsers. They launch the project's own Electron and connect over CDP (see below).
 
-For the **live tier**, put your key in `.env` (already gitignored):
+For the **live tier** only, put your key in `.env` (already gitignored):
 
 ```
 OPENAI_API_KEY=sk-...
@@ -22,20 +22,49 @@ OPENAI_API_KEY=sk-...
 ## Run
 
 ```bash
-npm run test:e2e        # builds first, then runs all specs
-npm run test:e2e:only   # skip the build (use the existing out/ bundle)
-npx playwright test e2e/data-integrity.spec.ts   # one file
+npm run test:e2e        # OFFLINE tier: builds first, then every default spec
+npm run test:e2e:only   # the same, without the build (uses the existing out/ bundle)
+npx playwright test e2e/data-integrity.spec.ts   # one file (offline)
+npm run test:e2e:live   # LIVE tier: real provider calls — on purpose only (costs money)
 ```
 
-Two tiers:
-- **Default (no key):** UI smoke + data-integrity (FK cascade, settings round-trip) via
-  the real DB. Runs in CI.
-- **Live (`OPENAI_API_KEY` set):** `live-openai.spec.ts` hits real OpenAI (résumé parse
-  + embeddings + RAG). It asserts on *structure*, not exact text. Skipped without a key.
+Three tiers, kept apart:
+
+- **Offline — the default (`playwright.config.ts`).** Needs no key, no network, no
+  microphone and no screen, and is built so it cannot use them. For every real-app test
+  `fixtures.ts` strips every `*_API_KEY` from the environment (the only place the app reads
+  a key outside its own database), gives the app a fresh data dir, and loads
+  **`offline-guard.cjs`** into the app's main process (`NODE_OPTIONS=--require`):
+  - every outbound request is refused — main's `fetch`, `http`/`https` and Electron `net`,
+    and every page request to anything but loopback;
+  - capture is refused — the app's own permission and display-media handlers (which grant
+    capture, and hand Chromium the call-audio loopback with no picker) are replaced by ones
+    that refuse it, pages get a `getUserMedia`/`getDisplayMedia` that reject, and Chromium's
+    fake capture device is on as a last line;
+  - windows open on a secondary display when one exists (`E2E_KEEP_PRIMARY=1` to opt out).
+
+  Every attempt is logged (`offline-guard.jsonl` in the test's output dir, attached to the
+  report), and the fixture **fails any test in which something was granted**.
+  `offline-guard.spec.ts` proves the guard itself: no key of any kind, the microphone and
+  call audio refused, a provider call from main and a request from the page refused.
+  The renderer-harness specs need none of this — they run real components against a fake
+  bridge, with no app main, DB, provider or device.
+- **Live (`playwright.live.config.ts`, `npm run test:e2e:live`).** `live-*.spec.ts` only,
+  with the key from `.env`: real résumé parse + embeddings + retrieval, asserting on
+  *structure*, not exact text. It sends sample data to the provider. Skipped without a key.
+- **Capture (`E2E_CAPTURE=1`).** The `*.capture.spec.ts` recording rig (below) — opt-in;
+  the media and screenshot specs run in the fixture's live mode.
 
 ## What's covered / not
 
-- ✅ App launches; dashboard renders; navigation.
+- ✅ Offline guard (`offline-guard.spec.ts`) — see above.
+- ✅ Smoke (`smoke.spec.ts`): a fresh install opens first-run setup; with a profile, the
+  sidebar sections; Home's Start interview opens the start flow, whose rows say what is
+  missing (no key, no résumé) with Start disabled and the disclosure shown, and nothing
+  starts; Interviews (New role, the blocker line); Library tabs; Sessions (empty) and
+  Insights; Settings landing on Preferences, and no provider configured.
+- ✅ A failed answer with no key surfaces an error and clears the streaming state
+  (`error-handling.spec.ts`).
 - ✅ Start flow role choice (`start-flow.spec.ts`, no key, nothing captured): a role beyond
   the picker's first page stays chosen when handed in or remembered, is reachable by search,
   and a deleted or other-profile role is never the default.
@@ -66,12 +95,14 @@ Two tiers:
 - ✅ History in the real app (`history.spec.ts`, no key): a sample conversation opens from
   the DB with no report; `session:remember` reports a failed summary as failed and keeps
   the transcript; a missing or other-profile Space is refused in main.
-- ✅ Real main + SQLite via `window.api`: interview delete **FK cascade**, profile-delete
-  cascade, model preset + per-task override round-trip.
+- ✅ Real main + SQLite via `window.api` (`data-integrity.spec.ts`): interview delete
+  **FK cascade** and profile-delete cascade — each also proves no provider was even tried —
+  and the model preset + per-task override round-trip (model ids are policy data, so it
+  checks the round-trip, not a hard-coded id).
 - ✅ (live) résumé parse → embed → RAG retrieval.
-- ❌ **Live transcription / mic / screen capture / global shortcuts** — need real
-  hardware + a display; not automatable headlessly. Their pure logic is unit-tested;
-  the answer pipeline is exercised here via the no-audio sample/RAG path.
+- ❌ **Live transcription / mic / call audio / global shortcuts, and live answers** — the
+  offline tier refuses them by design; they need controlled audio, real providers and a
+  display (M7.2). Their pure logic is unit-tested.
 
 ## Capturing marketing media
 
@@ -90,7 +121,8 @@ are written:
 
 - Capture is **opt-in** — `playwright.config.ts` ignores `*.capture.spec.ts`
   unless `E2E_CAPTURE` is set, because they need a real key and write into the
-  repo. They also need a **display**; they will not run on a headless CI box.
+  repo. The media and screenshot specs set `test.use({ live: true })`, so they
+  run with the key and network the offline guard would refuse. They also need a **display**; they will not run on a headless CI box.
   `npm run media` sets the variable for you, which matters because
   `E2E_CAPTURE=1 npx …` is a bash-ism that silently does nothing in `cmd.exe`.
 
@@ -147,6 +179,9 @@ migrations (electron-builder does this when packaging; a bare `out/` run doesn't
 - Tests launch `out/main/index.js`, so a **build must exist** (`test:e2e` builds for you).
 - Each test runs against an **isolated data dir** (`E2E_USER_DATA`, honored by
   `src/main/index.ts`) so your real profiles/sessions are never touched.
+- A fresh data dir has no profile, so the app opens first-run setup. A test that needs the
+  dashboard creates a profile and sets `onboardingDone` (see `withProfile` in
+  `smoke.spec.ts`); `fixtures.ts` only marks the tour and data notice as seen.
 - Data-integrity specs use `window.api` directly rather than clicking through forms —
   robust, and they target the exact main/DB paths.
 - Privacy Mode (content protection) excludes windows from *screen capture*, not from

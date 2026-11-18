@@ -23,6 +23,7 @@
     "test": "vitest run",
     "test:e2e": "npm run build && playwright test",
     "test:e2e:only": "playwright test",
+    "test:e2e:live": "npm run build && playwright test -c playwright.live.config.ts",
     "media": "node scripts/media.mjs",
     "db:generate": "drizzle-kit generate",
     "icon": "node scripts/generate-icon.mjs",

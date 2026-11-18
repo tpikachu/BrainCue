@@ -1,5 +1,6 @@
 import { test as base, expect, chromium, type Browser, type Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 // Playwright's _electron.launch() is broken on Electron 30+ (it passes
@@ -50,17 +51,41 @@ function killTree(pid: number): void {
   }
 }
 
+/** One thing the offline guard saw (e2e/offline-guard.cjs). */
+export interface GuardEntry {
+  kind: 'net' | 'capture';
+  via: string;
+  host?: string;
+  permission?: string;
+  api?: string;
+  refused?: boolean;
+  granted?: boolean;
+}
+
 interface Fixtures {
   /** The dashboard BrowserWindow (loaded WITHOUT a ?view= param). */
   dashboard: Page;
-  /** Launch option: when true, strip OPENAI_API_KEY so the app starts with NO key
-   *  (the app resolves a dev env key first — see env.ts). Use to test no-key paths. */
+  /** Launch option: the LIVE tier. Off by default — every test is OFFLINE:
+   *  no provider key of any kind (env keys stripped; the per-test database
+   *  starts empty), every outbound request refused, capture refused, all by
+   *  e2e/offline-guard.cjs. Only playwright.live.config.ts (and the opt-in
+   *  capture specs) turn this on. */
+  live: boolean;
+  /** Launch option: strip OPENAI_API_KEY even in the live tier (no-key paths). */
   noApiKey: boolean;
+  /** What the offline guard recorded in this test (empty in the live tier). */
+  guardLog: () => GuardEntry[];
 }
 
 export const test = base.extend<Fixtures>({
+  live: [false, { option: true }],
   noApiKey: [false, { option: true }],
-  dashboard: async ({ noApiKey }, use, testInfo) => {
+  guardLog: async ({}, use, testInfo) => {
+    const file = resolve(testInfo.outputDir, 'offline-guard.jsonl');
+    await use(() => readGuardLog(file));
+  },
+  dashboard: async ({ live, noApiKey }, use, testInfo) => {
+    const guardFile = resolve(testInfo.outputDir, 'offline-guard.jsonl');
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       BRAINCUE_E2E: '1',
@@ -71,7 +96,18 @@ export const test = base.extend<Fixtures>({
     // Electron run as plain Node (electron.app === undefined). Strip it so it boots
     // as a real Electron app.
     delete env.ELECTRON_RUN_AS_NODE;
-    if (noApiKey) delete env.OPENAI_API_KEY;
+    if (!live) {
+      // OFFLINE: no key from the environment (the only place the app reads one
+      // outside its own database — env.ts), and the guard in main.
+      for (const k of Object.keys(env)) if (/_API_KEY$/.test(k)) delete env[k];
+      mkdirSync(testInfo.outputDir, { recursive: true });
+      rmSync(guardFile, { force: true });
+      env.E2E_GUARD_LOG = guardFile;
+      const guard = resolve(__dirname, 'offline-guard.cjs').split('\\').join('/');
+      env.NODE_OPTIONS = `${env.NODE_OPTIONS ? `${env.NODE_OPTIONS} ` : ''}--require "${guard}"`;
+    } else if (noApiKey) {
+      delete env.OPENAI_API_KEY;
+    }
 
     const proc = spawn(electronBin, [APP_DIR], { env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';
@@ -126,8 +162,23 @@ export const test = base.extend<Fixtures>({
         await Promise.race([exited, new Promise<void>((r) => setTimeout(r, 5000))]);
       }
     }
+    if (!live) {
+      // Evidence, and a hard rule: in the offline tier nothing is ever granted.
+      const entries = readGuardLog(guardFile);
+      await testInfo.attach('offline-guard', { body: JSON.stringify(entries, null, 2), contentType: 'application/json' });
+      const granted = entries.filter((e) => e.granted === true || (e.kind === 'net' && e.refused !== true));
+      if (granted.length) throw new Error(`offline guard: capture or network was GRANTED: ${JSON.stringify(granted)}`);
+    }
   },
 });
+
+function readGuardLog(file: string): GuardEntry[] {
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l) as GuardEntry);
+}
 
 /**
  * Turn Privacy Mode OFF for a capture run, and prove it went off.
@@ -218,3 +269,4 @@ export async function setApiKey(dashboard: Page): Promise<void> {
 }
 
 export { expect };
+export type { Page } from '@playwright/test';
