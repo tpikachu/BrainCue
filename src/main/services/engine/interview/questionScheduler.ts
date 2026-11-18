@@ -41,9 +41,13 @@ import type { ClassifierTurn } from '../../openai/questions';
  *     the user paused with it waiting or still being classified, or the
  *     model recognised it only after the conversation moved on (§8). Every
  *     outcome that lands after a Pause — on time, a late "yes" after a
- *     timeout, or a revision routed by rule — takes the same path to a
- *     missed card, and a copy that adds no words to a question already in
- *     flight, waiting, answered or shown missed gets no second card. Only
+ *     timeout, a revision routed by rule (a longer repeat, a continuation
+ *     or correction), or a revision whose stale answer was still being
+ *     cancelled — takes the same path to a missed card, and is never
+ *     started automatically, even after Resume. A revision is marked on
+ *     its question's own card. A copy that adds no words to a question
+ *     already in flight, waiting, answered or shown missed gets no second
+ *     card; a longer one is a revision, never discarded. Only
  *     STOP drops work — the session is over. While paused, new finals are
  *     not evaluated at all (that is what Pause means).
  *  7. DECISIONS COMMIT IN ARRIVAL ORDER — see evaluate().
@@ -110,7 +114,10 @@ export interface SchedulerDeps {
   abortActive(): void;
   /** Is an answer stream (any — manual Ask, regenerate) holding the slot? */
   slotBusy(): boolean;
-  /** Surface a question that will not be answered automatically. */
+  /** Surface a question that will not be answered automatically. With
+   *  `job.questionId`, mark THAT card; otherwise open one and set
+   *  `job.questionId` once it is on screen (may be deferred while a stream
+   *  holds the slot — until then a revision may still change `job.text`). */
   missed(job: QuestionJob, why: MissReason): void;
   /** Observability: one record per evaluated final (no text). */
   onDecision?(d: {
@@ -319,26 +326,46 @@ export class QuestionScheduler {
   }
 
   /** The same, for a turn the rules routed as a repeat or a continuation /
-   *  correction when it arrived (so it was never classified). A repeat is
-   *  nothing new. A revision of the last question would be lost silently if
-   *  dropped — it becomes a missed card with the revised wording instead. */
+   *  correction when it arrived (so it was never classified). A copy that
+   *  adds no words is nothing new. Anything else revises a question — a
+   *  LONGER repeat ("…and the rollback plan") or a continuation/correction of
+   *  the last one — and would be lost silently if dropped: it becomes a
+   *  missed card with the revised wording, on that question's own card. */
   private settlePausedRevision(text: string, words: string[], tcIds: string[], finalAt: number): Promise<void> | null {
-    const prev = this.last;
-    if (this.findSame(words, this.deps.now()) || !prev || !(isCorrection(text) || isContinuation(text))) {
-      this.note(finalAt, false, 'scheduler', 'epoch-changed', 'stale');
+    const same = this.findSame(words, this.deps.now());
+    if (same) {
+      if (words.length > same.words.length) this.missRevision(same, text, tcIds, finalAt, 'revision');
+      else this.note(finalAt, false, 'scheduler', 'epoch-changed', 'duplicate');
       return null;
     }
-    const joined = `${prev.text} ${text}`;
-    const d: Detection = {
-      act: true,
-      type: prev.type as Detection['type'],
-      confidence: prev.confidence,
-      strategy: prev.strategy,
-      source: prev.detection.source,
-      reason: 'revision',
-      continuesPrevious: true,
-    };
-    return this.missNew(joined, turnWords(joined), [...prev.transcriptChunkIds, ...tcIds], finalAt, d, 'paused');
+    const prev = this.last;
+    if (prev && (isCorrection(text) || isContinuation(text))) {
+      this.missRevision(prev, `${prev.text} ${text}`, tcIds, finalAt, isCorrection(text) ? 'correction' : 'continuation');
+      return null;
+    }
+    this.note(finalAt, false, 'scheduler', 'epoch-changed', 'stale');
+    return null;
+  }
+
+  /** A revision of `target` that arrived across a Pause: shown as a missed
+   *  card with the revised wording — on `target`'s card when it has one (the
+   *  engine marks that card, never opens a second). A missed target not yet
+   *  on screen simply takes the new wording. `target` itself is untouched:
+   *  an answer still streaming for it finishes as it was. */
+  private missRevision(target: QuestionJob, text: string, tcIds: string[], finalAt: number, why: string): void {
+    const words = turnWords(text);
+    const chunks = [...target.transcriptChunkIds, ...tcIds];
+    this.note(finalAt, true, 'scheduler', `missed-paused-${why}`, 'missed');
+    if (target.state === 'missed' && !target.questionId) {
+      target.text = text;
+      target.words = words;
+      target.transcriptChunkIds = chunks;
+      return;
+    }
+    this.miss(
+      { ...target, seq: ++this.seq, text, words, transcriptChunkIds: chunks, finalAt, decidedAt: this.deps.now(), state: 'queued' },
+      'paused',
+    );
   }
 
   private continuesByRule(text: string, now: number): boolean {
@@ -523,15 +550,27 @@ export class QuestionScheduler {
     // Answering or answered: take the slot back for this question.
     if (target.state === 'answering') {
       // The aborted run resolves and must NOT finish the job or pump —
-      // `rerun` marks it, then the job runs again below.
+      // `rerun` marks it, then the job runs again below. While the abort
+      // settles the job is in neither the queue nor the slot, so Pause and
+      // Stop cannot see it: the epoch is re-checked after the await.
+      const epoch = this.epoch;
       target.state = 'queued';
       this.rerunning.add(target.seq);
       this.deps.abortActive();
       await this.activeRun;
       this.rerunning.delete(target.seq);
       if (this.active === target) this.active = null;
+      if (this.stopped) return void this.finish(target, 'dropped');
+      if (epoch !== this.epoch) {
+        // Paused (maybe resumed) meanwhile: never started automatically —
+        // a missed card with the revised wording, on its own card (§6).
+        this.note(finalAt, true, 'scheduler', `missed-paused-${why}`, 'missed');
+        this.miss(target, 'paused');
+        this.pump();
+        return;
+      }
     }
-    if (this.stopped) return;
+    if (this.stopped) return void this.finish(target, 'dropped');
     if (this.active || this.deps.slotBusy()) {
       // Something else holds the slot — a queued question that already
       // started, or a manual Ask / regenerate the scheduler does not own:

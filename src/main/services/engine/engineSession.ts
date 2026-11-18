@@ -405,6 +405,8 @@ export class EngineSession {
         tcId,
         { abortInFlight: false },
       );
+      // On screen now: a later revision of it marks this card, not a new one.
+      job.questionId = questionId;
     }
     emitContributionMeta(questionId, { questionId, riskWarning });
     emitContributionDone(questionId);

@@ -262,4 +262,42 @@ describe('EngineSession + scheduler', () => {
     expect(h.metas).toContainEqual({ id: 'q1', riskWarning: 'Asked while paused — not answered. Press ↻ to answer it.' });
     expect(h.generated).toEqual(['Tell me about the first project.', 'How should I describe my role?']);
   });
+  for (const resume of [false, true]) {
+    it(`M3 review 3: ${resume ? 'pause → resume' : 'pause'} while a correction cancels the streaming answer — its OWN card is marked missed, nothing restarts`, async () => {
+      const s = session();
+      openGate();
+      void s.onTranscriptFinal('Tell me about the first project.'); // streaming, held
+      await tick();
+      void s.onTranscriptFinal('Sorry, I meant the second project.'); // abort requested; the stream has not stopped yet
+      await tick();
+      s.setPaused(true);
+      if (resume) s.setPaused(false);
+      h.gate!.release(); // now the aborted stream settles
+      h.gate = null;
+      await tick();
+      await tick();
+      expect(h.generated).toEqual(['Tell me about the first project.']); // the revision never started
+      expect(h.questions).toHaveLength(1); // no second card
+      expect(h.updated).toEqual([{ id: 'q1', text: 'Tell me about the first project. Sorry, I meant the second project.' }]);
+      expect(h.metas).toContainEqual({ id: 'q1', riskWarning: 'Asked while paused — not answered. Press ↻ to answer it.' });
+      expect(s.answering).toBe(false);
+    });
+  }
+
+  it('M3 review 3: Stop while a correction cancels the streaming answer — nothing restarts or surfaces', async () => {
+    const s = session();
+    openGate();
+    void s.onTranscriptFinal('Tell me about the first project.');
+    await tick();
+    void s.onTranscriptFinal('Sorry, I meant the second project.');
+    await tick();
+    s.teardown();
+    h.gate!.release();
+    h.gate = null;
+    await tick();
+    await tick();
+    expect(h.generated).toEqual(['Tell me about the first project.']);
+    expect(h.updated).toEqual([]);
+    expect(h.metas).toEqual([]);
+  });
 });

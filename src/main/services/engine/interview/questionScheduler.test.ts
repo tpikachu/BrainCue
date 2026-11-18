@@ -47,7 +47,10 @@ function harness(opts: { classifierSays?: boolean } = {}) {
     },
     abortActive: () => release?.(),
     slotBusy: () => busy,
-    missed: (job, why) => missed.push({ text: job.text, why }),
+    missed: (job, why) => {
+      job.questionId ??= `q${++qid}`; // the engine contract: the card is on screen
+      missed.push({ text: job.text, why });
+    },
     onDecision: (d) => decisions.push(d.outcome),
     now: () => Date.now(),
     setTimer: (fn, ms) => setTimeout(fn, ms),
@@ -762,6 +765,76 @@ describe('M3 acceptance — questions answered in the right order', () => {
       expect(texts(h)).toEqual([A]);
 
       expect(h.missed).toEqual([{ text: `${A} ${C}`, why: 'paused' }]);
+    });
+
+    for (const resume of [false, true]) {
+      const tag = resume ? 'pause → resume' : 'pause';
+      it(`${tag}: a LONGER repeat waiting to commit is kept as a missed card with the added words`, async () => {
+        const A = 'Tell me about the payments migration.';
+        const A2 = 'Tell me about the payments migration and the rollback plan.';
+        const X = 'We use Kafka quite a lot here.'; // slow, and not a question
+        const h = scripted({ [X]: [600, verdict(false)] });
+        void h.s.onRemoteFinal(A, 't1'); // answering
+        await run(10);
+        void h.s.onRemoteFinal(X, 't2'); // holds the commit chain
+        await run(10);
+        void h.s.onRemoteFinal(A2, 't3'); // a longer repeat of A, by rule — waits for X
+        await run(10);
+        h.s.pause();
+        if (resume) h.s.resume();
+        await run(700);
+        expect(texts(h)).toEqual([A]);
+        expect(h.missed).toEqual([{ text: A2, why: 'paused' }]);
+        expect(h.missed.length).toBe(1);
+      });
+
+      it(`${tag} while a correction's cancellation settles: never answered automatically — missed on its own card`, async () => {
+        const A = 'Tell me about the first project.';
+        const C = 'Sorry, I meant the second project.';
+        const h = scripted({});
+        const abortNow = h.deps.abortActive;
+        h.deps.abortActive = () => void setTimeout(abortNow, 50); // the stream takes 50 ms to stop
+        void h.s.onRemoteFinal(A, 't1');
+        await run(10);
+        let settled = false;
+        void h.s.onRemoteFinal(C, 't2').then(() => (settled = true));
+        await run(10); // supersede: abort requested, not settled yet
+        h.s.pause();
+        if (resume) h.s.resume();
+        await run(100);
+        expect(texts(h)).toEqual([A]); // the revision did NOT start
+        expect(h.missed).toEqual([{ text: `${A} ${C}`, why: 'paused' }]);
+        expect(settled).toBe(true); // its waiter was released
+        expect(h.s.current).toBeNull(); // the slot is free…
+        expect(h.s.pending).toHaveLength(0);
+        if (resume) {
+          // …and the next question after Resume is answered normally.
+          h.s.onCandidateTurn();
+          vi.advanceTimersByTime(CONTINUATION_WINDOW_MS + 1);
+          void h.s.onRemoteFinal('Why did you leave Acme?', 't3');
+          await run(10);
+          expect(texts(h)).toEqual([A, 'Why did you leave Acme?']);
+        }
+      });
+    }
+
+    it('stop while a correction\'s cancellation settles: nothing answered or surfaced, waiter released, no timers', async () => {
+      const A = 'Tell me about the first project.';
+      const C = 'Sorry, I meant the second project.';
+      const h = scripted({});
+      const abortNow = h.deps.abortActive;
+      h.deps.abortActive = () => void setTimeout(abortNow, 50);
+      void h.s.onRemoteFinal(A, 't1');
+      await run(10);
+      let settled = false;
+      void h.s.onRemoteFinal(C, 't2').then(() => (settled = true));
+      await run(10);
+      h.s.stop();
+      await run(100);
+      expect(texts(h)).toEqual([A]);
+      expect(h.missed).toHaveLength(0);
+      expect(settled).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
     });
 
     it('after STOP, neither an on-time nor a late "yes" surfaces anything', async () => {

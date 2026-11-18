@@ -69,9 +69,13 @@ answer was transcribed and never evaluated. The scheduler's policy:
    user pauses with it waiting **or still being classified**, or when the
    model recognised it only after the conversation moved on (§8). Every
    outcome that lands after a Pause (on time, a late "yes" after a timeout,
-   or a revision routed by rule) takes the same path to a missed card, and a
+   a revision routed by rule — a longer repeat, a continuation or a
+   correction — or a revision whose stale answer was still being cancelled)
+   takes the same path to a missed card and is never started automatically,
+   even after Resume; a revision is marked on its question's own card. A
    copy that adds no words to a question already in flight, waiting,
-   answered or shown missed gets no second card. Only Stop drops work.
+   answered or shown missed gets no second card; a longer one is a revision,
+   never discarded. Only Stop drops work.
    While paused, new finals are not evaluated (that is Pause).
 7. **Decisions commit in arrival order** (M3). Detection runs concurrently —
    a slow classifier call never blocks the next turn's detection — but each
