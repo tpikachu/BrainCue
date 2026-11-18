@@ -39,6 +39,11 @@ Two tiers:
 - ✅ Start flow role choice (`start-flow.spec.ts`, no key, nothing captured): a role beyond
   the picker's first page stays chosen when handed in or remembered, is reachable by search,
   and a deleted or other-profile role is never the default.
+- ✅ Start flow under controlled timing (`startModal.race.spec.ts`): the real
+  StartSessionModal, bundled with esbuild, in the project's Electron with one HIDDEN window
+  (`harness/main.cjs` — no app code, DB, audio or network); a fake bridge holds/releases
+  role lookups and a stubbed `startNew` records the submitted job id. Covers a late lookup
+  after reopen, after a newer pick, after a profile switch, and a stale failure.
 - ✅ Real main + SQLite via `window.api`: interview delete **FK cascade**, profile-delete
   cascade, model preset + per-task override round-trip.
 - ✅ (live) résumé parse → embed → RAG retrieval.

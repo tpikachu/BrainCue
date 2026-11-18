@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useActiveProfile } from '../store/useProfileStore';
@@ -41,6 +41,12 @@ const PAGE = 100;
  * page of options: a role handed in, or remembered from last time, is read by
  * id from main and checked against this profile and activity — never replaced
  * because it is not on the first page. Older roles are found by search.
+ *
+ * Every lookup that can set the choice carries the CHOICE GENERATION it began
+ * in; closing, reopening, a profile or activity change and any newer choice
+ * start a new generation, so a late reply (success, failure or finalisation)
+ * from an earlier one is ignored — it can never put back a role the user has
+ * since moved away from.
  *
  * Every other conversation starts here too ("Other conversation" on Home, or a
  * Space in the Library): then the activity is asked, because it is the
@@ -95,17 +101,38 @@ export function StartSessionModal(props: {
   const scopeKey = `${profileId}|${activity}`;
   const pageKey = `${scopeKey}|${debounced}`;
 
+  /** The current choice generation (see above). */
+  const choiceGen = useRef(0);
+  /** Start a new generation: every lookup begun before it is now stale, and
+   *  none of them may finish "resolving" for this one. */
+  const invalidate = () => {
+    choiceGen.current += 1;
+    setResolving(false);
+    return choiceGen.current;
+  };
   const clearChoice = () => {
     setSelected(null);
     setChosen(false);
     setDefaultedFor(null);
+  };
+  /** The user picked (or created) this Space: it supersedes any lookup. */
+  const choose = (s: Job | null) => {
+    invalidate();
+    setSelected(s);
+    setChosen(true);
   };
 
   // Reset on open. A Space handed in (Library, Interview page) is read by id
   // and kept as the choice if it is this profile's — it answers the activity
   // too, since lists are per activity.
   useEffect(() => {
-    if (!props.open) return;
+    // Closing ends the opening: whatever it was still looking up is stale.
+    if (!props.open) {
+      invalidate();
+      return;
+    }
+    const gen = invalidate();
+    const current = () => gen === choiceGen.current;
     void loadSettings();
     void refreshReadiness();
     const initial = props.initialActivity ?? DEFAULT_ACTIVITY;
@@ -122,6 +149,7 @@ export function StartSessionModal(props: {
       void api.jobs
         .get(props.initialSpaceId)
         .then((raw) => {
+          if (!current()) return; // reopened, switched, or a newer choice since
           const j = raw as Job | null;
           if (!j) return;
           const a = activityOf(j.kind);
@@ -133,13 +161,21 @@ export function StartSessionModal(props: {
           }
         })
         .catch(() => {})
-        .finally(() => setResolving(false));
+        // Only this opening's own lookup ends its "resolving".
+        .finally(() => current() && setResolving(false));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.open, props.initialSpaceId, props.initialActivity, loadSettings, refreshReadiness]);
 
-  // A profile switch makes every choice stale: start over from its default.
+  // A profile switch makes every choice stale — and every lookup in flight:
+  // start over from the new profile's default.
+  const lastProfile = useRef(profileId);
   useEffect(() => {
+    // Only a real change (not mount — the opening's own reset covers that,
+    // and invalidating here would orphan that opening's lookup).
+    if (lastProfile.current === profileId) return;
+    lastProfile.current = profileId;
+    invalidate();
     clearChoice();
     setQuery('');
     setDebounced('');
@@ -201,6 +237,7 @@ export function StartSessionModal(props: {
     if (defaultedFor === scopeKey) return;
     let alive = true;
     const forKey = scopeKey;
+    const gen = choiceGen.current;
     void resolveDefaultSpace({
       activity,
       profileId,
@@ -208,7 +245,7 @@ export function StartSessionModal(props: {
       page: current,
       get: async (id) => (await api.jobs.get(id)) as Job | null,
     }).then((s) => {
-      if (!alive) return;
+      if (!alive || gen !== choiceGen.current) return;
       setSelected(s);
       setDefaultedFor(forKey);
     });
@@ -260,6 +297,7 @@ export function StartSessionModal(props: {
       if (space) {
         const fresh = (await api.jobs.get(space.id).catch(() => null)) as Job | null;
         if (!spaceFits(fresh, { profileId, activity })) {
+          invalidate();
           clearChoice();
           setReloads((n) => n + 1);
           setError(interview ? 'That role no longer exists — choose another.' : 'That Space no longer exists — choose another.');
@@ -316,13 +354,15 @@ export function StartSessionModal(props: {
   /** A Space created or edited here is the one about to be used. Closing the
    *  form is its own call: it stays open to report a link it could not read. */
   const spaceSaved = (saved: Job) => {
-    setSelected(saved);
-    setChosen(true);
+    choose(saved);
     setReloads((n) => n + 1);
   };
   /** Deleted from its form here: it can no longer be the choice. */
   const spaceDeleted = (id: string) => {
-    if (selected?.id === id) clearChoice();
+    if (selected?.id === id) {
+      invalidate();
+      clearChoice();
+    }
     setReloads((n) => n + 1);
   };
 
@@ -361,6 +401,7 @@ export function StartSessionModal(props: {
                   setActivity(v as ContextPackKind);
                   // A Space of the previous activity is not offered for this
                   // one; its own default applies instead.
+                  invalidate();
                   clearChoice();
                   setQuery('');
                   setDebounced('');
@@ -375,10 +416,7 @@ export function StartSessionModal(props: {
             <div className="flex gap-2">
               <Select
                 value={space?.id ?? ''}
-                onChange={(e) => {
-                  setSelected(options.find((s) => s.id === e.target.value) ?? null);
-                  setChosen(true);
-                }}
+                onChange={(e) => choose(options.find((s) => s.id === e.target.value) ?? null)}
                 disabled={!profileId || (!current && !space)}
                 className="flex-1"
               >

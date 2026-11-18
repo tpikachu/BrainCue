@@ -362,7 +362,10 @@ parsing task's provider, so the sample interview can start on any provider.
   that page (`pickerOptions` keeps it listed); older roles are found by
   search. A profile switch clears the choice; a deleted role is dropped from
   the default, and the role is re-read before Start, so a deleted one is
-  never started against. Home → Start interview → Start
+  never started against. Every lookup that can set the choice carries a
+  choice generation; closing, reopening, a profile or activity change and any
+  newer choice start a new one, so a late reply — success, failure or
+  finalisation — never puts back a role the user has moved away from. Home → Start interview → Start
   interview. On Windows the call audio needs no OS picker (loopback); the
   first microphone use may show the OS permission prompt.
 - **Interview-only lists.** `jobs.page` takes an `activity` filter
