@@ -36,6 +36,8 @@ export interface RowState {
   text: string;
   /** Hover detail — the long explanation, kept off the form. */
   detail?: string;
+  /** The concrete fix, shown UNDER a blocked row — never only on hover. */
+  fix?: string;
   action?: { label: string; to: string };
 }
 
@@ -43,13 +45,14 @@ function Row(props: RowState & { label: string; onGo: (p: string) => void }) {
   const mark = props.tone === 'ok' ? '✓' : props.tone === 'warn' ? '!' : '✕';
   const color = props.tone === 'ok' ? 'text-green-400' : props.tone === 'warn' ? 'text-amber-400' : 'text-red-400';
   return (
-    <li className="flex items-center gap-2 py-1.5" title={props.detail}>
+    <li className="flex items-start gap-2 py-1.5" title={props.detail}>
       <span className={`w-3 shrink-0 text-center font-semibold ${color}`} aria-hidden>
         {mark}
       </span>
       <span className="w-20 shrink-0 font-medium text-neutral-200">{props.label}</span>
-      <span className={`min-w-0 flex-1 truncate ${props.tone === 'ok' ? 'text-neutral-400' : 'text-neutral-300'}`}>
-        {props.text}
+      <span className="min-w-0 flex-1">
+        <span className={`block truncate ${props.tone === 'ok' ? 'text-neutral-400' : 'text-neutral-300'}`}>{props.text}</span>
+        {props.fix && <span className="mt-0.5 block text-[11px] leading-snug text-neutral-500">{props.fix}</span>}
       </span>
       {props.action && (
         <button
@@ -62,6 +65,18 @@ function Row(props: RowState & { label: string; onGo: (p: string) => void }) {
       )}
     </li>
   );
+}
+
+/** The AI row's few words when it is blocked, from main's `blocked` list:
+ *  the provider that is ACTUALLY missing its key and what it would do. With
+ *  no key at all, there is no provider to name. */
+export function blockedText(blocked: Readiness['chat']['blocked']): string {
+  if (!blocked?.length) return 'no AI provider key yet';
+  const nameOf = (p: string) => cloudProvider(p)?.name ?? p;
+  const what = (t: 'answer' | 'classify') => (t === 'answer' ? 'answers' : 'question detection');
+  const byProvider = new Map<string, string[]>();
+  for (const b of blocked) byProvider.set(b.provider, [...(byProvider.get(b.provider) ?? []), what(b.task)]);
+  return [...byProvider].map(([p, tasks]) => `no ${nameOf(p)} key (${tasks.join(', ')})`).join('; ');
 }
 
 /** Pure: the row states, exported for tests. */
@@ -124,7 +139,8 @@ export function checklistRows(
               readiness.transcription.engine === 'local'
                 ? 'on-device model not downloaded'
                 : 'cloud transcription needs an OpenAI key',
-            detail: [readiness.transcription.problem, readiness.transcription.action].filter(Boolean).join(' '),
+            detail: readiness.transcription.problem,
+            fix: readiness.transcription.action,
             action: { label: 'Set up', to: '/settings/speech' },
           }
         : hasMic === false
@@ -150,10 +166,9 @@ export function checklistRows(
       : !readiness.chat.ready
         ? {
             tone: 'block',
-            text: readiness.chat.problem?.startsWith('No AI provider')
-              ? 'no AI provider key yet'
-              : `${cloudProvider(readiness.chat.provider)?.name ?? readiness.chat.provider} has no API key`,
-            detail: [readiness.chat.problem, readiness.chat.action].filter(Boolean).join(' '),
+            text: blockedText(readiness.chat.blocked),
+            detail: readiness.chat.problem,
+            fix: readiness.chat.action,
             action: { label: 'Set up', to: '/settings/models' },
           }
         : readiness.chat.notice

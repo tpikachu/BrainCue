@@ -35,6 +35,7 @@ const readiness = (o: { chat?: boolean; stt?: boolean; engine?: 'cloud' | 'local
   },
   transcription: { ready: o.stt ?? false, engine: o.engine ?? 'cloud' },
   retrieval: { ready: true, mode: 'lexical' },
+  routes: { answer: 'anthropic', classify: 'anthropic', parsing: 'anthropic' },
   features: {
     parsing: { ready: true },
     mock: { ready: false },

@@ -754,7 +754,16 @@ export interface Readiness {
     notice?: string;
     problem?: string;
     action?: string;
+    /** Which live task cannot run, and on which provider — so a surface names
+     *  the provider that is actually missing its key (a keyless classify
+     *  override is not "OpenAI has no key" when OpenAI answers fine). */
+    blocked?: { task: 'answer' | 'classify'; provider: CloudProviderId; override: boolean }[];
   };
+  /** Where each kind of request goes, as routed now — for the start flow's
+   *  disclosure of what is sent to whom. `answer`: the answer and its
+   *  context; `classify`: question detection and follow-up prediction;
+   *  `parsing`: the summary and memory suggestions when a session is kept. */
+  routes: { answer: CloudProviderId; classify: CloudProviderId; parsing: CloudProviderId };
   transcription: { ready: boolean; engine: 'cloud' | 'local'; problem?: string; action?: string };
   /** Never blocks a session: lexical mode is a stated limitation. */
   retrieval: { ready: true; mode: 'embeddings' | 'lexical'; note?: string };

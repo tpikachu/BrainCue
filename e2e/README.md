@@ -36,6 +36,9 @@ Two tiers:
 ## What's covered / not
 
 - ✅ App launches; dashboard renders; navigation.
+- ✅ Start flow role choice (`start-flow.spec.ts`, no key, nothing captured): a role beyond
+  the picker's first page stays chosen when handed in or remembered, is reachable by search,
+  and a deleted or other-profile role is never the default.
 - ✅ Real main + SQLite via `window.api`: interview delete **FK cascade**, profile-delete
   cascade, model preset + per-task override round-trip.
 - ✅ (live) résumé parse → embed → RAG retrieval.

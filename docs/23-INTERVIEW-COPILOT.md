@@ -338,16 +338,31 @@ parsing task's provider, so the sample interview can start on any provider.
   nothing but the **role**, then shows four one-line rows — Résumé, Role & JD,
   Audio (what is heard + which engine), AI (provider · model; keyword
   matching noted, not blocking) — each gap with its fix (a missing JD opens
-  that role's form in place). The activity question appears only for Other
-  conversation or a Space of another kind. Practice is one quiet link. What
-  is captured and sent — naming the engine and the provider that will
-  actually run — is a collapsed disclosure above Start; nothing is recorded
-  before Start. A gap is said once (on its row), not again under the form.
+  that role's form in place). A blocked row shows its fix as text under it,
+  not only on hover; the AI row names the task and provider that is actually
+  blocked (`readiness.chat.blocked` — a keyless classify override reads "no
+  Anthropic key (question detection)", not the healthy answer provider). The
+  activity question appears only for Other conversation or a Space of another
+  kind. Practice is one quiet link. A gap is said once (on its row).
+- **Disclosure** (collapsed, above Start; nothing is recorded before Start):
+  what is captured, and what is sent **to whom** from `readiness.routes` —
+  to the answer provider: each question, matching passages, recent and
+  earlier conversation (both sides), earlier suggestions and matching
+  approved memories; to the classify provider: unsettled interviewer turns
+  with the last few turns, and each question with BrainCue's answer for
+  follow-up prediction; to OpenAI when documents are matched by meaning; to
+  the parsing provider, if kept, the transcript for the summary and memory
+  suggestions.
 - **Returning user: two actions.** The role defaults to the one this
-  profile last interviewed for (`defaultSpaceFor`; the only role if there is
-  one; never a guess among several), derived each time from the active
-  profile's Spaces and sessions — a deleted role or a profile switch can't
-  leave a stale default (`nextSpaceChoice`). Home → Start interview → Start
+  profile last interviewed for, read by id from main wherever it sits
+  (`resolveDefaultSpace`; the only role if there is exactly one; never a
+  guess among several). The chosen role is held as its own validated record
+  (`spaceFits`: this profile, this activity), apart from the picker's page of
+  100 — a role handed in or remembered is never replaced because it is not on
+  that page (`pickerOptions` keeps it listed); older roles are found by
+  search. A profile switch clears the choice; a deleted role is dropped from
+  the default, and the role is re-read before Start, so a deleted one is
+  never started against. Home → Start interview → Start
   interview. On Windows the call audio needs no OS picker (loopback); the
   first microphone use may show the OS permission prompt.
 - **Interview-only lists.** `jobs.page` takes an `activity` filter

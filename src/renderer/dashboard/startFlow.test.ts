@@ -4,10 +4,12 @@ import { ACTIVITIES, ACTIVITY_ORDER } from '@shared/activities';
 import {
   START_ACTIVITIES,
   captureSummary,
-  defaultSpaceFor,
   isResumableInterview,
   lastOtherActivity,
-  nextSpaceChoice,
+  lastUsedSpaceIds,
+  pickerOptions,
+  resolveDefaultSpace,
+  spaceFits,
   spacesFor,
   startBlocker,
 } from './startFlow';
@@ -199,7 +201,7 @@ describe('captureSummary — the transparency contract', () => {
     expect(captureSummary({ listensTo: 'system', spaceTitle: null, activity: 'meeting' }).sent.join(' '))
       .toMatch(/salience scoring/);
     expect(captureSummary({ listensTo: 'system', spaceTitle: null, activity: 'job' }).sent.join(' '))
-      .toMatch(/Per detected question/);
+      .toMatch(/each detected question/);
   });
 
   it('solo: mic-only capture bounded to the session, and the no-model-call promise', () => {
@@ -235,63 +237,67 @@ describe('isResumableInterview — only real interviews are offered for Resume',
   });
 });
 
-describe('defaultSpaceFor — the role a returning user does not have to choose again', () => {
-  it('opens on the role of the most recent interview (sessions are newest first)', () => {
-    const spaces = [role('r1'), role('r2'), role('r3')];
-    expect(defaultSpaceFor('job', spaces, [sess({ jobId: 'r2' }), sess({ jobId: 'r1' })])).toBe('r2');
-  });
-  it('skips sessions that are not interviews when finding it', () => {
-    const spaces = [role('r1'), role('r2'), { id: 'm1', kind: 'meeting' }];
-    const history = [sess({ mode: 'meeting', activity: 'meeting', jobId: 'm1' }), sess({ kind: 'mock', mode: 'practice', jobId: 'r1' }), sess({ jobId: 'r2' })];
-    expect(defaultSpaceFor('job', spaces, history)).toBe('r2');
-  });
-  it('with no history: the only role there is, but never a guess among several', () => {
-    expect(defaultSpaceFor('job', [role('r1')], [])).toBe('r1');
-    expect(defaultSpaceFor('job', [role('r1'), role('r2')], [])).toBe('');
-    expect(defaultSpaceFor('job', [], [])).toBe('');
-  });
-  it('a role that no longer exists is never the default', () => {
-    expect(defaultSpaceFor('job', [role('r1'), role('r2')], [sess({ jobId: 'gone' }), sess({ jobId: 'r1' })])).toBe('r1');
-  });
-  it('other activities default to their last-used Space, and to none rather than the only one', () => {
-    const meetings = [{ id: 'm1', kind: 'meeting' }, { id: 'm2', kind: 'meeting' }];
-    expect(defaultSpaceFor('meeting', meetings, [sess({ mode: 'meeting', activity: 'meeting', jobId: 'm2' })])).toBe('m2');
-    expect(defaultSpaceFor('meeting', [{ id: 'm1', kind: 'meeting' }], [])).toBe('');
+// A role as main returns it.
+type R = { id: string; profileId: string; kind: string; title: string };
+const r = (id: string, over: Partial<R> = {}): R => ({ id, profileId: 'pA', kind: 'job', title: id, ...over });
+/** 101 roles, newest first like the page query: the first page holds 100. */
+const all = Array.from({ length: 101 }, (_, i) => r(`role-${101 - i}`));
+const firstPage = { items: all.slice(0, 100), total: 101 };
+/** main's jobs.get: by id, wherever the role sits; null once deleted. */
+const getter = (rows: R[]) => async (id: string) => rows.find((x) => x.id === id) ?? null;
+
+describe('spaceFits — a chosen Space must be this profile’s and this activity’s', () => {
+  it('accepts its own role; refuses a deleted one, another profile’s, another activity’s', () => {
+    const at = { profileId: 'pA', activity: 'job' as const };
+    expect(spaceFits(r('role-1'), at)).toBe(true);
+    expect(spaceFits(null, at)).toBe(false);
+    expect(spaceFits(r('role-1', { profileId: 'pB' }), at)).toBe(false);
+    expect(spaceFits(r('m1', { kind: 'meeting' }), at)).toBe(false);
   });
 });
 
-describe('nextSpaceChoice — the start flow keeps a real choice and drops a stale one', () => {
-  const spaces = [role('r1'), role('r2')];
-  const history = [sess({ jobId: 'r2' })];
-  it('decides nothing while either list is loading or belongs to another profile', () => {
-    expect(nextSpaceChoice({ activity: 'job', spaces: null, sessions: history, spaceId: '', chosen: false })).toBeNull();
-    expect(nextSpaceChoice({ activity: 'job', spaces, sessions: null, spaceId: '', chosen: false })).toBeNull();
+describe('the default role is found wherever it sits — never only on the first page', () => {
+  it('lastUsedSpaceIds: newest first, distinct, interviews only, bounded', () => {
+    const history = [sess({ jobId: 'role-1' }), sess({ mode: 'meeting', activity: 'meeting', jobId: 'm1' }), sess({ jobId: 'role-1' }), sess({ jobId: 'role-7' })];
+    expect(lastUsedSpaceIds('job', history)).toEqual(['role-1', 'role-7']);
+    const many = Array.from({ length: 9 }, (_, i) => sess({ jobId: `x${i}` }));
+    expect(lastUsedSpaceIds('job', many)).toHaveLength(5);
   });
-  it('applies the default once both are loaded', () => {
-    expect(nextSpaceChoice({ activity: 'job', spaces, sessions: history, spaceId: '', chosen: false })).toEqual({ spaceId: 'r2', chosen: false });
+  it('the last-used role OUTSIDE the first 100 is the default (read by id)', async () => {
+    expect(firstPage.items.some((x) => x.id === 'role-1')).toBe(false); // really not on the page
+    const s = await resolveDefaultSpace({ activity: 'job', profileId: 'pA', sessions: [sess({ jobId: 'role-1' })], page: firstPage, get: getter(all) });
+    expect(s?.id).toBe('role-1');
   });
-  it("keeps the user's own pick while it exists", () => {
-    expect(nextSpaceChoice({ activity: 'job', spaces, sessions: history, spaceId: 'r1', chosen: true })).toBeNull();
+  it('a deleted last-used role falls back to the one used before it, then to none', async () => {
+    const history = [sess({ jobId: 'gone' }), sess({ jobId: 'role-2' })];
+    expect((await resolveDefaultSpace({ activity: 'job', profileId: 'pA', sessions: history, page: firstPage, get: getter(all) }))?.id).toBe('role-2');
+    expect(await resolveDefaultSpace({ activity: 'job', profileId: 'pA', sessions: [sess({ jobId: 'gone' })], page: firstPage, get: getter(all) })).toBeNull();
   });
-  it('drops a pick that was deleted, back to the default', () => {
-    expect(nextSpaceChoice({ activity: 'job', spaces: [role('r2')], sessions: history, spaceId: 'r1', chosen: true })).toEqual({
-      spaceId: 'r2',
-      chosen: false,
-    });
+  it('a role that is now another profile’s, or a get that fails, is never the default', async () => {
+    const moved = [r('role-1', { profileId: 'pB' })];
+    expect(await resolveDefaultSpace({ activity: 'job', profileId: 'pA', sessions: [sess({ jobId: 'role-1' })], page: firstPage, get: getter(moved) })).toBeNull();
+    const failing = async () => {
+      throw new Error('ipc');
+    };
+    expect(await resolveDefaultSpace({ activity: 'job', profileId: 'pA', sessions: [sess({ jobId: 'role-1' })], page: firstPage, get: failing })).toBeNull();
   });
-  it("after a profile switch, the other profile's role is never kept", () => {
-    // Profile B's lists: none of A's roles, and its own history.
-    const bSpaces = [role('b1'), role('b2')];
-    const bHistory = [sess({ jobId: 'b1' })];
-    expect(nextSpaceChoice({ activity: 'job', spaces: bSpaces, sessions: bHistory, spaceId: 'r1', chosen: true })).toEqual({
-      spaceId: 'b1',
-      chosen: false,
-    });
-    // …and a stale default (not chosen) is replaced the same way.
-    expect(nextSpaceChoice({ activity: 'job', spaces: bSpaces, sessions: [], spaceId: 'r2', chosen: false })).toEqual({
-      spaceId: '',
-      chosen: false,
-    });
+  it('with no history: the only role there is (by TOTAL), never a guess among several', async () => {
+    const one = { items: [r('only')], total: 1 };
+    expect((await resolveDefaultSpace({ activity: 'job', profileId: 'pA', sessions: [], page: one, get: getter([]) }))?.id).toBe('only');
+    expect(await resolveDefaultSpace({ activity: 'job', profileId: 'pA', sessions: [], page: firstPage, get: getter(all) })).toBeNull();
+    // A meeting needs no Space: none rather than the only one.
+    expect(await resolveDefaultSpace({ activity: 'meeting', profileId: 'pA', sessions: [], page: { items: [r('m', { kind: 'meeting' })], total: 1 }, get: getter([]) })).toBeNull();
+  });
+});
+
+describe('pickerOptions — a selection is never dropped because of where it sits', () => {
+  it('keeps a chosen role that is not on the loaded page (older, or filtered by a search)', () => {
+    const chosen = r('role-1');
+    const opts = pickerOptions(firstPage.items, chosen);
+    expect(opts[0]).toBe(chosen);
+    expect(opts).toHaveLength(101);
+    expect(pickerOptions(firstPage.items, firstPage.items[3])).toHaveLength(100); // already there: not doubled
+    expect(pickerOptions(firstPage.items, null)).toHaveLength(100);
   });
 });
 
@@ -303,16 +309,42 @@ describe('lastOtherActivity — "Other conversation" opens on what this profile 
   });
 });
 
-describe('captureSummary — names the engine and provider that will actually run', () => {
+describe('captureSummary — what is sent, and to which provider', () => {
+  const split = { answer: 'Anthropic', classify: 'OpenAI', parsing: 'Anthropic' };
+  const job = (over: Partial<Parameters<typeof captureSummary>[0]> = {}) =>
+    captureSummary({ listensTo: 'system', spaceTitle: 'Stripe', activity: 'job', sttEngine: 'local', routes: split, retrieval: 'lexical', ...over });
+
   it('on-device transcription: no audio leaves the machine, said plainly', () => {
-    const s = captureSummary({ listensTo: 'system', spaceTitle: null, activity: 'job', sttEngine: 'local', chatProvider: 'Anthropic' });
-    expect(s.sent[0]).toBe('No audio — it is transcribed on this device.');
-    expect(s.sent.join(' ')).toMatch(/question text \+ the top-5 matching chunks from your profile, to Anthropic\./);
-    expect(s.sent.join(' ')).not.toMatch(/OpenAI/);
+    expect(job().sent[0]).toBe('No audio — it is transcribed on this device.');
   });
   it('cloud transcription names OpenAI Realtime and both streams', () => {
-    expect(captureSummary({ listensTo: 'system', spaceTitle: null, activity: 'job', sttEngine: 'cloud' }).sent[0]).toBe(
-      'Audio — both streams — to OpenAI Realtime, for transcription.',
-    );
+    expect(job({ sttEngine: 'cloud' }).sent[0]).toBe('Audio — both streams — to OpenAI Realtime, for transcription.');
+  });
+  it('the answer request: question, passages, BOTH sides of the conversation, earlier suggestions, approved memories — to the answer provider', () => {
+    const line = job().sent.find((l) => l.startsWith('To Anthropic:'))!;
+    expect(line).toMatch(/each detected question/);
+    expect(line).toMatch(/matching passages from your profile and the “Stripe” Space/);
+    expect(line).toMatch(/recent and earlier conversation — what they and you said/);
+    expect(line).toMatch(/earlier suggestions/);
+    expect(line).toMatch(/approved memories/);
+  });
+  it('split routing: question detection is named with ITS provider', () => {
+    const line = job().sent.find((l) => l.startsWith('To OpenAI:'))!;
+    expect(line).toMatch(/interviewer turns the rules can’t settle, with the last few turns/);
+    expect(line).toMatch(/predict a follow-up/);
+    expect(job().sent.join(' ')).not.toMatch(/To Anthropic: interviewer turns/);
+  });
+  it('document matching by meaning sends the question to OpenAI; keyword matching sends nothing extra', () => {
+    expect(job({ retrieval: 'embeddings' }).sent.join(' ')).toMatch(/To OpenAI: the question .*to find matching passages/);
+    expect(job({ retrieval: 'lexical' }).sent.join(' ')).not.toMatch(/to find matching passages/);
+  });
+  it('a kept session’s transcript goes to the summary provider — only when there is a Space to keep it in', () => {
+    expect(job().sent.join(' ')).toMatch(/To Anthropic: if you keep it afterwards, the transcript/);
+    expect(job({ spaceTitle: null }).sent.join(' ')).not.toMatch(/if you keep it afterwards/);
+  });
+  it('meetings name the scoring provider and the card provider separately', () => {
+    const m = captureSummary({ listensTo: 'system', spaceTitle: null, activity: 'meeting', routes: split });
+    expect(m.sent.join(' ')).toMatch(/To OpenAI: ambiguous turns/);
+    expect(m.sent.join(' ')).toMatch(/To Anthropic: when it answers or makes a card.*approved memories/);
   });
 });

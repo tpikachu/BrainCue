@@ -145,9 +145,23 @@ export function startBlocker(a: {
   return null;
 }
 
+/** Where each kind of request goes, by provider NAME (main's
+ *  `readiness.routes`, named for display). */
+export interface SummaryRoutes {
+  /** The answer and its context. */
+  answer: string;
+  /** Question detection (and follow-up prediction). */
+  classify: string;
+  /** The summary and memory suggestions when a session is kept. */
+  parsing: string;
+}
+
 /** The transparency summary shown before Start: exactly what is captured
- *  locally and what leaves the machine. Mirrors the PRD privacy contract —
- *  keep the strings honest when the pipeline changes. */
+ *  locally and what leaves the machine, and to WHOM — each kind of request
+ *  names the provider it is routed to (answers and question detection can
+ *  go to different providers). Mirrors the pipeline: keep the strings honest
+ *  when it changes (engineSession.ts answer(), questions.ts, followup.ts,
+ *  trigger/salience.ts, sessionArchive.ts, memory/extractor.ts). */
 export function captureSummary(a: {
   /** The activity's `listensTo`: a call ('system') is heard on BOTH sides —
    *  the call's audio and the microphone; 'mic' is the microphone alone. */
@@ -156,13 +170,15 @@ export function captureSummary(a: {
   activity?: ContextPackKind;
   /** The transcription engine that will run, when known (readiness). */
   sttEngine?: 'cloud' | 'local';
-  /** The AI provider answers go to, by name, when known (readiness). */
-  chatProvider?: string;
+  /** Recipients per request kind, when known (readiness.routes). */
+  routes?: SummaryRoutes;
+  /** Document matching: embeddings send the question to OpenAI. */
+  retrieval?: 'embeddings' | 'lexical';
 }): { captured: string[]; sent: string[]; neverSent: string[] } {
   const scope = a.spaceTitle
     ? `your profile and the “${a.spaceTitle}” Space`
     : 'your profile';
-  const to = a.chatProvider ? `, to ${a.chatProvider}` : '';
+  const to = (p: string | undefined) => (p ? `To ${p}` : 'To the AI provider');
   // The pipeline differs by MODE, not by activity — a project call and a
   // standup send exactly the same things.
   const mode: SessionMode = a.activity ? activity(a.activity).mode : 'interview';
@@ -194,19 +210,35 @@ export function captureSummary(a: {
             : 'Audio to the transcription engine (OpenAI Realtime with your key, or nothing at all with the local engine).',
       ...(mode === 'meeting'
         ? [
-            'Ambiguous turns: the turn + a few recent turns, for salience scoring (deterministic rules filter greetings/small talk first).',
-            `When a card is made: the turn + the top-5 matching chunks from ${scope}.`,
+            `${to(a.routes?.classify)}: ambiguous turns with a few recent turns, for salience scoring (rules filter greetings and small talk first).`,
+            // A question asked in the room is answered through the interview's
+            // answer path (engineSession.answerQuestion) — memories included.
+            `${to(a.routes?.answer)}: when it answers or makes a card, the turn with recent conversation and the top-5 matching chunks from ${scope} — and, for an answer, any matching approved memories.`,
           ]
         : mode === 'companion'
           ? [
-              'Ambiguous turns: the turn + a few recent turns, for salience scoring (silence, small talk, mute, DND, and cooldowns never spend a model call).',
-              `When a card is made: the turn + the top-5 matching chunks from ${scope}, plus any APPROVED memories that matched.`,
+              `${to(a.routes?.classify)}: ambiguous turns with a few recent turns, for salience scoring (silence, small talk, mute, DND and cooldowns never spend a model call).`,
+              `${to(a.routes?.answer)}: when a card is made, the turn with the top-5 matching chunks from ${scope}, plus any APPROVED memories that matched.`,
             ]
-          : [`Per detected question: the question text + the top-5 matching chunks from ${scope}${to}.`]),
+          : [
+              // The answer request carries more than the question: the
+              // bounded conversation (both sides), earlier suggestions and
+              // approved memories (engineSession.ts answer()).
+              `${to(a.routes?.answer)}: each detected question with the best-matching passages from ${scope}, plus recent and earlier conversation — what they and you said — BrainCue’s earlier suggestions, and any matching approved memories.`,
+              `${to(a.routes?.classify)}: interviewer turns the rules can’t settle, with the last few turns (to tell whether they are questions), and each question with BrainCue’s answer (to predict a follow-up).`,
+            ]),
+      // Document matching by meaning embeds the question on OpenAI.
+      ...(a.retrieval === 'embeddings'
+        ? ['To OpenAI: the question (with the previous exchange, for a follow-up), to find matching passages.']
+        : []),
+      // Kept sessions are summarised and mined for memory suggestions.
+      ...(a.spaceTitle
+        ? [`${to(a.routes?.parsing)}: if you keep it afterwards, the transcript — for the summary and memory suggestions.`]
+        : []),
     ],
     neverSent: [
       'Your API key (main process only).',
-      'Your full résumé or documents — only the retrieved chunks above.',
+      'Your full résumé or documents — only the matching passages above.',
       'Your screen (unless you explicitly capture a region to solve).',
     ],
   };
@@ -224,30 +256,62 @@ export function isResumableInterview(s: Pick<Session, 'kind' | 'mode' | 'activit
   return s.kind === 'live' && s.mode === 'interview' && (s.activity == null || s.activity === 'job') && !!s.jobId;
 }
 
+/** A Space as the start flow needs it: whose it is and what it is. */
+export type SpaceRef = { id: string; profileId: string; kind?: string | null };
+
+/** Can this Space be used for this start — this profile's, this activity? A
+ *  Space handed in, remembered, or re-read before Start must still pass: a
+ *  deleted one is null, another profile's or another activity's is refused. */
+export function spaceFits(s: SpaceRef | null | undefined, a: { profileId: string; activity: ContextPackKind }): boolean {
+  return !!s && s.profileId === a.profileId && activityOf(s.kind) === a.activity;
+}
+
+/** The Spaces this profile last used for this activity, newest first,
+ *  distinct — the candidates for the default (at most `max`, so a run of
+ *  deleted roles costs a bounded number of reads). */
+export function lastUsedSpaceIds(
+  act: ContextPackKind,
+  sessions: Pick<Session, 'kind' | 'mode' | 'activity' | 'jobId'>[],
+  max = 5,
+): string[] {
+  const ids: string[] = [];
+  for (const s of sessions) {
+    const used = act === 'job' ? isResumableInterview(s) : s.kind === 'live' && !!s.jobId && activityOf(s.activity) === act;
+    if (used && s.jobId && !ids.includes(s.jobId)) ids.push(s.jobId);
+    if (ids.length >= max) break;
+  }
+  return ids;
+}
+
 /**
  * The Space a start flow opens on, so a returning user does not choose again:
- *  1. the Space of the most recent session of this activity (newest first)
- *     — what the user actually chose last time;
+ *  1. the Space this profile most recently used for this activity — read by
+ *     id from main, so it is found wherever it sits (the picker only holds a
+ *     page) — if it still exists and still fits;
  *  2. for an activity that needs a Space, the only one there is;
  *  3. otherwise none — never a guess among several.
- *
- * Derived from the CURRENT profile's Spaces and sessions every time, so it
- * cannot go stale: a deleted Space is no longer in `spaces`, and a profile
- * switch replaces both lists.
  */
-export function defaultSpaceFor(
-  act: ContextPackKind,
-  spaces: { id: string; kind?: string | null }[],
-  sessions: Pick<Session, 'kind' | 'mode' | 'activity' | 'jobId'>[],
-): string {
-  const ofActivity = spacesFor(spaces, act);
-  const ids = new Set(ofActivity.map((s) => s.id));
-  const used = sessions.find((s) =>
-    act === 'job' ? isResumableInterview(s) && ids.has(s.jobId!) : s.kind === 'live' && !!s.jobId && ids.has(s.jobId) && activityOf(s.activity) === act,
-  );
-  if (used?.jobId) return used.jobId;
-  if (ACTIVITIES[act]?.needsSpace && ofActivity.length === 1) return ofActivity[0].id;
-  return '';
+export async function resolveDefaultSpace<T extends SpaceRef>(a: {
+  activity: ContextPackKind;
+  profileId: string;
+  sessions: Pick<Session, 'kind' | 'mode' | 'activity' | 'jobId'>[];
+  /** The first page of this activity's Spaces (unfiltered) and its total. */
+  page: { items: T[]; total: number };
+  get: (id: string) => Promise<T | null>;
+}): Promise<T | null> {
+  for (const id of lastUsedSpaceIds(a.activity, a.sessions)) {
+    const s = await a.get(id).catch(() => null);
+    if (spaceFits(s, a)) return s;
+  }
+  if (ACTIVITIES[a.activity]?.needsSpace && a.page.total === 1 && a.page.items.length === 1) return a.page.items[0];
+  return null;
+}
+
+/** The picker's options: the loaded page, with the chosen Space kept in it
+ *  even when it is not on that page (older than the page, or filtered out by
+ *  a search) — a selection is never dropped because of where it sits. */
+export function pickerOptions<T extends { id: string }>(items: T[], selected: T | null): T[] {
+  return selected && !items.some((s) => s.id === selected.id) ? [selected, ...items] : items;
 }
 
 /** The activity "Other conversation" opens on: the last non-interview
@@ -255,26 +319,4 @@ export function defaultSpaceFor(
 export function lastOtherActivity(sessions: Pick<Session, 'kind' | 'activity'>[]): ContextPackKind {
   const s = sessions.find((x) => x.kind === 'live' && x.activity && x.activity !== 'job' && startableActivities().includes(x.activity));
   return s?.activity ?? 'meeting';
-}
-
-/**
- * The start flow's Space choice, one step at a time — what the modal does
- * whenever its lists change. `null` = leave the choice as it is.
- *  - Nothing decided until BOTH lists belong to the current profile and
- *    activity (`spaces`/`sessions` null while loading or stale).
- *  - A choice the user made stands while it is still in the list.
- *  - A choice that is gone (deleted, or another profile's after a switch) is
- *    dropped, and the default applies — never started against.
- */
-export function nextSpaceChoice(a: {
-  activity: ContextPackKind;
-  spaces: { id: string; kind?: string | null }[] | null;
-  sessions: Pick<Session, 'kind' | 'mode' | 'activity' | 'jobId'>[] | null;
-  spaceId: string;
-  chosen: boolean;
-}): { spaceId: string; chosen: boolean } | null {
-  if (!a.spaces || !a.sessions) return null;
-  if (a.chosen && a.spaces.some((s) => s.id === a.spaceId)) return null;
-  const next = { spaceId: defaultSpaceFor(a.activity, a.spaces, a.sessions), chosen: false };
-  return next.spaceId === a.spaceId && next.chosen === a.chosen ? null : next;
 }

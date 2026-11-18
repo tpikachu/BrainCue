@@ -13,6 +13,7 @@ const ready: Readiness = {
   },
   transcription: { ready: true, engine: 'local' },
   retrieval: { ready: true, mode: 'embeddings' },
+  routes: { answer: 'anthropic', classify: 'anthropic', parsing: 'anthropic' },
   features: { parsing: { ready: true }, mock: { ready: false }, sparring: { ready: false }, tailoring: { ready: false } },
 };
 const profile = { id: 'p1', name: 'Jordan Lee', parsedResume: { skills: [] }, resumeText: 'x' } as unknown as Profile;
@@ -41,7 +42,13 @@ describe('the interview setup summary', () => {
       space: undefined,
       readiness: {
         ...ready,
-        chat: { ...ready.chat, ready: false, problem: 'Anthropic is selected for answers but has no API key.', action: 'Add its key…' },
+        chat: {
+          ...ready.chat,
+          ready: false,
+          problem: 'Anthropic is selected for answers but has no API key.',
+          action: 'Add its key…',
+          blocked: [{ task: 'answer', provider: 'anthropic', override: false }],
+        },
         transcription: { ready: false, engine: 'cloud', problem: 'Cloud transcription needs an OpenAI key, and none is stored.' },
       },
     });
@@ -51,8 +58,10 @@ describe('the interview setup summary', () => {
     // A few words on the row (it must fit), main's full sentence and fix on hover.
     expect(r[2].state).toMatchObject({ text: 'cloud transcription needs an OpenAI key', action: { to: '/settings/speech' } });
     expect(r[2].state.detail).toMatch(/none is stored/);
-    expect(r[3].state).toMatchObject({ text: 'Anthropic has no API key', action: { to: '/settings/models' } });
-    expect(r[3].state.detail).toBe('Anthropic is selected for answers but has no API key. Add its key…');
+    expect(r[3].state).toMatchObject({ text: 'no Anthropic key (answers)', action: { to: '/settings/models' } });
+    // The fix is on the form itself, not only in a hover title.
+    expect(r[2].state.fix).toBeUndefined(); // (this fixture's transcription has no action)
+    expect(r[3].state.fix).toBe('Add its key…');
     for (const x of r) expect(x.state.text.length).toBeLessThan(45);
   });
 
@@ -66,6 +75,27 @@ describe('the interview setup summary', () => {
     });
     expect(r[2].state.text).toBe('on-device model not downloaded');
     expect(r[3].state.text).toBe('no AI provider key yet');
+  });
+
+  it('a keyless CLASSIFY override names that provider and task — not the healthy answer provider', () => {
+    // As main reports it: OpenAI answers fine; question detection is pinned
+    // to Anthropic, which has no key.
+    const r = rows({
+      readiness: {
+        ...ready,
+        chat: {
+          ...ready.chat,
+          ready: false,
+          provider: 'openai',
+          problem: 'Your question detection override uses Anthropic, which has no API key.',
+          action: 'Add that key, or clear the override, in Settings → Language Models → Advanced.',
+          blocked: [{ task: 'classify', provider: 'anthropic', override: true }],
+        },
+      },
+    });
+    expect(r[3].state.text).toBe('no Anthropic key (question detection)');
+    expect(r[3].state.text).not.toMatch(/OpenAI/);
+    expect(r[3].state.fix).toBe('Add that key, or clear the override, in Settings → Language Models → Advanced.');
   });
 
   it('a role without a job description opens that role in place to add one', () => {

@@ -90,7 +90,7 @@ import { evaluateAnswer } from './feedback';
 import { openaiOnlyModel, resetRuntimeAvailability } from './models';
 import { tailorApplication } from './tailor';
 import { classifyQuestion } from './questions';
-import { featureReadiness } from '../readiness';
+import { featureReadiness, getReadiness } from '../readiness';
 import { PROVIDER_PLANS } from '@shared/modelPolicy';
 import type { Profile } from '@shared/types';
 
@@ -349,5 +349,41 @@ describe('review: failures are attributed to the route the request was SENT on',
     const candidates = PROVIDER_PLANS.openai.balanced.classify;
     expect(first).toBe(candidates[0]);
     expect(taskRoute('classify')?.model).toBe(candidates[1]); // not candidates[2]
+  });
+});
+
+describe('live readiness names the task and provider that is actually blocked (real policy)', () => {
+  it('a keyless Anthropic CLASSIFY override with a working OpenAI answer key', () => {
+    configure(['openai'], 'openai');
+    state.models = { classify: 'anthropic/claude-haiku-5-5' };
+    const r = getReadiness();
+    expect(r.chat.ready).toBe(false);
+    expect(r.chat.provider).toBe('openai'); // answers still route to OpenAI
+    expect(r.chat.blocked).toEqual([{ task: 'classify', provider: 'anthropic', override: true }]);
+    expect(r.chat.problem).toBe('Your question detection override uses Anthropic, which has no API key.');
+    expect(r.chat.problem).not.toMatch(/OpenAI/);
+    expect(r.chat.action).toMatch(/clear the override/);
+  });
+
+  it('a keyless Anthropic ANSWER override with a working OpenAI key', () => {
+    configure(['openai'], 'openai');
+    state.models = { answer: 'anthropic/claude-sonnet-5-5' };
+    const r = getReadiness();
+    expect(r.chat.blocked).toEqual([{ task: 'answer', provider: 'anthropic', override: true }]);
+    expect(r.chat.problem).toBe('Your answers override uses Anthropic, which has no API key.');
+  });
+
+  it('no key at all: no provider is blamed', () => {
+    configure([], null);
+    const r = getReadiness();
+    expect(r.chat.problem).toMatch(/No AI provider is set up/);
+  });
+
+  it('routes: split providers are reported per task, for the start disclosure', () => {
+    configure(['openai', 'anthropic'], 'anthropic');
+    state.models = { classify: 'openai/gpt-5-nano' };
+    const r = getReadiness();
+    expect(r.chat.ready).toBe(true);
+    expect(r.routes).toEqual({ answer: 'anthropic', classify: 'openai', parsing: 'anthropic' });
   });
 });

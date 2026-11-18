@@ -79,8 +79,23 @@ export function getReadiness(): Readiness {
   // ---- chat (detection + answers) ----
   const answer = resolveTask('answer');
   const classify = resolveTask('classify');
-  const providerName = cloudProvider(answer.provider)?.name ?? answer.provider;
+  const nameOf = (p: string) => cloudProvider(p)?.name ?? p;
   const chatReady = !!keys[answer.provider] && !!keys[classify.provider];
+  // Each live task that cannot run, on ITS provider: answers and question
+  // detection can resolve to different providers (an override pins one).
+  const blocked = (
+    [
+      ['answer', answer],
+      ['classify', classify],
+    ] as const
+  )
+    .filter(([, r]) => !keys[r.provider])
+    .map(([task, r]) => ({ task, provider: r.provider, override: r.source === 'override' }));
+  const what = (t: 'answer' | 'classify') => (t === 'answer' ? 'answers' : 'question detection');
+  const sentence = (b: (typeof blocked)[number]) =>
+    b.override
+      ? `Your ${what(b.task)} override uses ${nameOf(b.provider)}, which has no API key.`
+      : `${nameOf(b.provider)} is selected for ${what(b.task)} but has no API key.`;
   const chat: Readiness['chat'] = {
     ready: chatReady,
     provider: answer.provider,
@@ -91,17 +106,17 @@ export function getReadiness(): Readiness {
     ...(chatReady
       ? {}
       : Object.values(keys).some(Boolean)
-        ? answer.source === 'override' || classify.source === 'override'
-          ? {
-              // A pinned override: never moved to another provider.
-              problem: (answer.notice ?? classify.notice) || `${providerName} is selected for answers but has no API key.`,
-              action: 'Add that key, or clear the override, in Settings → Language Models → Advanced.',
-            }
-          : {
-              problem: `${providerName} is selected for answers but has no API key.`,
-              action: 'Add its key, or pick a provider you have a key for, in Settings → Language Models.',
-            }
+        ? {
+            blocked,
+            // Named per blocked task and provider; a pinned override is never
+            // moved to another provider, so its fix is the key or clearing it.
+            problem: [...new Set(blocked.map(sentence))].join(' '),
+            action: blocked.some((b) => b.override)
+              ? 'Add that key, or clear the override, in Settings → Language Models → Advanced.'
+              : 'Add its key, or pick a provider you have a key for, in Settings → Language Models.',
+          }
         : {
+            blocked,
             problem: 'No AI provider is set up — nothing can detect questions or write answers.',
             action: 'Add an API key for OpenAI, Anthropic, Google, Groq or OpenRouter in Settings → Language Models.',
           }),
@@ -138,5 +153,11 @@ export function getReadiness(): Readiness {
           'and re-save the profile to switch to semantic matching.',
       };
 
-  return { chat, transcription, retrieval, features: featureReadiness() };
+  const routes: Readiness['routes'] = {
+    answer: answer.provider,
+    classify: classify.provider,
+    parsing: resolveTask('parsing').provider,
+  };
+
+  return { chat, transcription, retrieval, routes, features: featureReadiness() };
 }
