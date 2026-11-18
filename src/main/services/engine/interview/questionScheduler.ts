@@ -60,7 +60,10 @@ import type { ClassifierTurn } from '../../openai/questions';
  *
  * Supersession, precisely: a turn REVISES an earlier question only when it
  * repeats it (§3) or continues/corrects the LAST question within
- * CONTINUATION_WINDOW_MS, before any candidate speech (§4). It never does
+ * CONTINUATION_WINDOW_MS, before any candidate speech (§4). The LAST
+ * question is the NEWEST one decided — answered, waiting, streaming or
+ * shown missed — and only a newer one replaces it (setLast): a queued
+ * question starting later, or an older late verdict, never does. It never does
  * when the rules read it as not-a-question (call logistics, backchannel —
  * "Sorry, can you hear me?" is not a correction), nor when it is a complete
  * question of its own after a conjunction ("And why are you interested in
@@ -374,6 +377,7 @@ export class QuestionScheduler {
     target.transcriptChunkIds = [...target.transcriptChunkIds, ...tcIds];
     target.finalAt = finalAt;
     target.decidedAt = this.deps.now();
+    this.setLast(target);
     this.note(finalAt, true, 'scheduler', `missed-${why}-${label}`, 'missed');
     if (target.state === 'answering') return void this.missAfterRun.set(target.seq, why);
     if (target.state === 'queued') return;
@@ -407,7 +411,7 @@ export class QuestionScheduler {
         // A longer revision of the streaming question: re-answer it.
         return this.supersede(same, text, tcIds, finalAt, 'revision');
       }
-      if (words.length > same.words.length && (same.state === 'answered' || (same.state === 'missed' && same.questionId))) {
+      if (words.length > same.words.length && (same.state === 'answered' || same.state === 'missed')) {
         // A longer repeat of a question already answered (no candidate
         // speech since) or shown missed: the added words are a revision —
         // re-answer THAT card, never drop them as a duplicate.
@@ -449,7 +453,10 @@ export class QuestionScheduler {
    *  it is answered — unless the conversation has moved on (a newer
    *  interviewer question, or the candidate already replying) or the session
    *  was paused since: then it becomes a visible missed card, never an
-   *  answer arriving out of turn and never silently dropped. */
+   *  answer arriving out of turn and never silently dropped. "Asked again"
+   *  means a copy that adds nothing: a late LONGER copy revises the newest
+   *  question's card when that is its shorter copy (no reply yet), and is
+   *  otherwise a missed card carrying the added words. */
   private async lateVerdict(
     late: NonNullable<Detection['late']>,
     text: string,
@@ -460,11 +467,22 @@ export class QuestionScheduler {
   ): Promise<void> {
     const v = await late;
     if (!v?.act || this.stopped) return;
-    if (this.findSame(words, this.deps.now())) {
+    const same = this.findSame(words, this.deps.now());
+    if (same && words.length <= same.words.length) {
+      // A copy that adds nothing to a question meanwhile handled.
       this.note(finalAt, true, 'model', 'late-verdict-duplicate', 'duplicate');
       return;
     }
+    // From here `same`, if any, is a SHORTER copy: this turn's added words
+    // ("…and how you handled the rollback") are a revision, never dropped.
     if (epoch !== this.epoch || this.paused) return this.missNew(text, words, tcIds, finalAt, v, 'paused');
+    if (same && same === this.last && this.lastCandidateAt <= finalAt) {
+      // The newest question IS this one, worded shorter, and the candidate
+      // has not replied: revise its card exactly as an on-time longer repeat
+      // would (§3) — coalesce if waiting, re-answer if streaming or answered.
+      const routed = this.routeKnown(text, words, tcIds, finalAt);
+      if (routed) return routed;
+    }
     if ((this.last && this.last.finalAt > finalAt) || this.lastCandidateAt > finalAt) {
       return this.missNew(text, words, tcIds, finalAt, v, 'late');
     }
@@ -472,8 +490,10 @@ export class QuestionScheduler {
   }
 
   /** A distinct question that will not be answered automatically: a visible
-   *  missed card (one tap to answer). It does not become `last` — nothing
-   *  continues or coalesces into a card that was never answered. A repeat of
+   *  missed card (one tap to answer). When it is the newest question it
+   *  becomes `last` — the continuation target (after Resume, "And how you
+   *  tested it" continues THIS card, not an older one); an older late result
+   *  never takes that from a newer question (setLast). A repeat of
    *  a question already in flight, waiting, answered, or already shown as
    *  missed (within DUPLICATE_WINDOW_MS) is not distinct: no second card. */
   private missNew(
@@ -519,6 +539,7 @@ export class QuestionScheduler {
       state: 'queued',
     };
     this.note(finalAt, true, detection.source, `missed-${why}`, 'missed');
+    this.setLast(job);
     this.miss(job, why);
     return Promise.resolve();
   }
@@ -547,7 +568,7 @@ export class QuestionScheduler {
       detection: { source: detection.source, reason },
       state: 'queued',
     };
-    this.last = job;
+    this.setLast(job);
 
     // 2. One stream at a time — queue behind whatever holds the slot.
     if (this.active || this.deps.slotBusy()) {
@@ -579,9 +600,14 @@ export class QuestionScheduler {
     target.transcriptChunkIds.push(...tcIds);
     target.finalAt = finalAt;
     target.decidedAt = this.deps.now();
+    this.setLast(target);
     this.note(finalAt, true, 'scheduler', why, 'superseded');
     this.missAfterRun.delete(target.seq); // it is answered with this wording instead
     if (target.state === 'queued') return this.wait(target);
+    // A missed card not on screen yet (deferred while a stream holds the
+    // slot): it will appear with this wording, one tap to answer. Starting
+    // it now would race the deferred surfacing for the same card.
+    if (target.state === 'missed' && !target.questionId) return Promise.resolve();
     // Answering or answered: take the slot back for this question.
     if (target.state === 'answering') {
       // The aborted run resolves and must NOT finish the job or pump —
@@ -624,7 +650,7 @@ export class QuestionScheduler {
   private async run(job: QuestionJob): Promise<void> {
     this.active = job;
     job.state = 'answering';
-    this.last = job;
+    this.setLast(job);
     const runPromise = (async () => {
       try {
         await this.deps.answer(job);
@@ -641,6 +667,14 @@ export class QuestionScheduler {
     if (missWhy && !this.stopped) this.miss(job, missWhy); // revised while it streamed (missRevision)
     else this.finish(job, 'answered');
     this.pump();
+  }
+
+  /** `last` is the NEWEST question — the continuation target and the
+   *  "has the conversation moved on" reference. Only a question at least as
+   *  new as the current one replaces it: a queued question starting late, or
+   *  an older late verdict, never takes it from a newer one. */
+  private setLast(job: QuestionJob): void {
+    if (!this.last || this.last === job || job.finalAt >= this.last.finalAt) this.last = job;
   }
 
   private pump(): void {
@@ -695,10 +729,10 @@ export class QuestionScheduler {
   /** The last question, if a new utterance may still continue it. */
   private continuable(now: number): QuestionJob | null {
     const p = this.last;
-    // A missed card on screen may be continued (after Resume, the follow-up
-    // re-answers it with the current wording); one not yet shown, or
-    // dropped, may not.
-    if (!p || p.state === 'dropped' || (p.state === 'missed' && !p.questionId)) return null;
+    // A missed card may be continued: on screen, the follow-up re-answers
+    // it with the current wording; not yet shown, it takes the joined
+    // wording (supersede). A dropped one may not.
+    if (!p || p.state === 'dropped') return null;
     if (now - p.finalAt > CONTINUATION_WINDOW_MS) return null;
     if (this.lastCandidateAt > p.finalAt) return null;
     return p;

@@ -904,6 +904,27 @@ describe('M3 acceptance — questions answered in the right order', () => {
       expect(texts(h)).toEqual([A, A2]);
     });
 
+    it('a queued OLDER question starting later never takes the continuation target from the newest one', async () => {
+      const A = 'Tell me about yourself.';
+      const B = 'Why did you leave Acme?';
+      const C = 'Why are you interested in this role?';
+      const F = 'And how you tested it.';
+      const h = scripted({});
+      void h.s.onRemoteFinal(A, 't1'); // streaming
+      await run(10);
+      void h.s.onRemoteFinal(B, 't2'); // queued
+      await run(10);
+      void h.s.onRemoteFinal(C, 't3'); // queued — the newest question
+      await run(10);
+      await h.finish(); // A done → B starts
+      expect(texts(h)).toEqual([A, B]);
+      void h.s.onRemoteFinal(F, 't4');
+      await run(10);
+      expect(h.s.pending.map((j) => j.text)).toEqual([`${C} ${F}`]); // continues C, not B
+      await h.finish();
+      expect(texts(h)).toEqual([A, B, `${C} ${F}`]);
+    });
+
     it('after STOP, neither an on-time nor a late "yes" surfaces anything', async () => {
       const A = 'The thing with the queues last year.';
       const l = late();

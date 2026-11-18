@@ -95,10 +95,17 @@ answer was transcribed and never evaluated. The scheduler's policy:
    interviewer question was asked, the candidate has started replying, or
    the session was paused since, in which case it becomes a missed card
    ("Recognised as a question only after the conversation moved on").
+   "Asked again" means a copy that adds nothing: a late LONGER copy revises
+   the newest question's card when that is its shorter copy and the
+   candidate has not replied, and is otherwise a missed card carrying the
+   added words.
 
 **Supersession, precisely.** A turn revises an earlier question only when it
 repeats it (3) or continues/corrects the LAST question within the window,
-before candidate speech (4). Never when the rules read it as not-a-question
+before candidate speech (4). The LAST question is the newest one decided —
+answered, waiting, streaming or shown missed (a question missed across a
+Pause is continued after Resume) — and only a newer one replaces it: a
+queued question starting later, or an older late verdict, never does. Never when the rules read it as not-a-question
 ("Sorry, can you hear me okay?" is logistics, not a correction), and never
 when it is a complete question after a conjunction ("And why are you
 interested in this role?" is a new card, in any capitalisation — the

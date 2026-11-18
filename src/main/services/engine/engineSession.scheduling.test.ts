@@ -383,4 +383,99 @@ describe('EngineSession + scheduler', () => {
     expect(h.updated).toEqual([{ id: 'q1', text: 'Tell me about the payments migration and the rollback plan.' }]);
     expect(h.metas).toContainEqual({ id: 'q1', riskWarning: 'Asked while paused — not answered. Press ↻ to answer it.' });
   });
+  // ---- M3 review round 5: the newest question is the continuation target;
+  //      late verdicts tell covered copies from revisions ----
+  const adv = (ms: number) => vi.advanceTimersByTimeAsync(ms);
+  const PAUSED = 'Asked while paused — not answered. Press ↻ to answer it.';
+  const F = 'And how you tested it.';
+
+  for (const withEarlier of [true, false]) {
+    it(`M3 review 5: a question classified across Pause becomes the continuation target${withEarlier ? ' (an earlier question was answered)' : ' (it is the first question)'}`, async () => {
+      const A = 'Walk me through the payments migration.';
+      const B = 'The thing with the queues last year.';
+      h.classify[B] = [500, true];
+      const s = session();
+      if (withEarlier) {
+        await s.onTranscriptFinal(A); // answered → q1
+        await tick();
+      }
+      void s.onTranscriptFinal(B);
+      await adv(100);
+      s.setPaused(true);
+      await adv(500); // B's yes lands after Pause → a missed card
+      const bId = h.questions.find((q) => q.text === B)!.id;
+      expect(h.metas).toContainEqual({ id: bId, riskWarning: PAUSED });
+      s.setPaused(false);
+      await s.onTranscriptFinal(F); // within the window, no candidate speech
+      await tick();
+      expect(h.questions).toHaveLength(withEarlier ? 2 : 1); // no new card
+      expect(h.updated).toEqual([{ id: bId, text: `${B} ${F}` }]); // B's card — never A's
+      expect(h.generated.at(-1)).toBe(`${B} ${F}`);
+      if (withEarlier) expect(h.generated).not.toContain(`${A} ${F}`);
+    });
+  }
+
+  it('M3 review 5: an OLDER late result never takes the continuation target from a newer question', async () => {
+    const X = 'The thing with the queues last year.';
+    const B = 'Why did you leave Acme?'; // decided by rule
+    h.classify[X] = [2000, true]; // times out at 1.2 s; its late yes lands at 2 s
+    const s = session();
+    void s.onTranscriptFinal(X);
+    await adv(50);
+    void s.onTranscriptFinal(B); // waits for X's decision, then answered
+    await adv(2100);
+    const bId = h.questions.find((q) => q.text === B)!.id;
+    const xId = h.questions.find((q) => q.text === X)!.id;
+    expect(h.metas.find((m) => m.id === xId)?.riskWarning).toMatch(/moved on/); // X: a 'late' missed card
+    await s.onTranscriptFinal(F);
+    await tick();
+    expect(h.updated).toEqual([{ id: bId, text: `${B} ${F}` }]); // continues B, the newest
+    expect(h.generated.at(-1)).toBe(`${B} ${F}`);
+  });
+
+  for (const paused of [false, true]) {
+    it(`M3 review 5: a late yes for a LONGER copy keeps its added words${paused ? ' (Pause before it lands)' : ' (running)'}`, async () => {
+      const L = 'The thing with the queues last year and how you handled the rollback.';
+      const S = 'The thing with the queues last year.';
+      h.classify[L] = [2000, true]; // times out to "no" at 1.2 s; late yes at 2 s
+      h.classify[S] = [500, true];
+      const s = session();
+      void s.onTranscriptFinal(L);
+      await adv(50);
+      openGate();
+      void s.onTranscriptFinal(S);
+      await adv(1200); // L times out; S commits and starts streaming (held)
+      expect(h.generated).toEqual([S]);
+      if (paused) s.setPaused(true);
+      await adv(800); // L's late yes lands
+      h.gate!.release();
+      h.gate = null;
+      await adv(10);
+      await tick();
+      expect(h.questions).toHaveLength(1); // one card…
+      expect(h.updated).toEqual([{ id: 'q1', text: L }]); // …carrying the rollback request
+      if (paused) {
+        expect(h.generated).toEqual([S]); // the old stream finished on its own wording; nothing restarted
+        expect(h.metas).toContainEqual({ id: 'q1', riskWarning: PAUSED });
+      } else {
+        expect(h.aborted).toEqual([S]); // the stale shorter answer is replaced…
+        expect(h.generated.at(-1)).toBe(L); // …by the full question, same card
+      }
+    });
+  }
+
+  it('M3 review 5: a late yes for a SHORTER copy of a question already answered is still dropped', async () => {
+    const S = 'The thing with the queues last year.';
+    const L = 'The thing with the queues last year and how you handled the rollback.';
+    h.classify[S] = [2000, true];
+    h.classify[L] = [500, true];
+    const s = session();
+    void s.onTranscriptFinal(S);
+    await adv(50);
+    void s.onTranscriptFinal(L);
+    await adv(2100);
+    expect(h.questions.map((q) => q.text)).toEqual([L]); // no card for the covered copy
+    expect(h.metas).toEqual([]);
+    expect(h.generated).toEqual([L]);
+  });
 });
