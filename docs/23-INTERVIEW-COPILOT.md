@@ -211,9 +211,15 @@ mock/sparring rehearsals, prep briefs, résumé tailoring.
     device): no session is created.
   - `start` — the session IPC failed: every acquired track is stopped.
   - `audio` — the AudioContext/pump failed to attach: the tracks are
-    stopped, the session is stopped (a new one is also deleted — it heard
-    nothing; a resumed one keeps its earlier content), and its save prompt
-    is suppressed.
+    stopped, then the session is rolled back — stopped, and a new one also
+    deleted (it heard nothing; a resumed one keeps its earlier content).
+    The rollback's own save prompt is suppressed ONE-SHOT (only during its
+    stop), so a later successful run of the same session prompts normally.
+    Only what was confirmed is claimed: a rejected stop leaves the session
+    in the store, visibly live, with "may still be running" and
+    `cleanup: 'failed'`, and Stop retries the same rollback; nothing is
+    deleted before the stop is confirmed. A stop that succeeds with a
+    failed delete says so and names the record to remove from Sessions.
 
   The start modal stays open on any failure and shows the reason. Capture
   status is reported only AFTER the pipeline is attached, and a track that

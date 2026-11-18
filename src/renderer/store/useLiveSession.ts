@@ -13,7 +13,14 @@ export type { AudioSource };
  *  looks like success. `stage` says where it failed. */
 export type StartResult =
   | { ok: true; sessionId: string }
-  | { ok: false; stage: 'capture' | 'start' | 'audio'; error: string };
+  | {
+      ok: false;
+      stage: 'capture' | 'start' | 'audio';
+      error: string;
+      /** `audio` stage only: the rollback could not be confirmed — the session
+       *  may still be live in main and stays in the store, so Stop retries it. */
+      cleanup?: 'failed';
+    };
 
 export interface Line {
   id: number;
@@ -95,8 +102,15 @@ interface Pump {
 let ctx: AudioContext | null = null;
 let pumps: Pump[] = [];
 let lineId = 0;
-/** Sessions whose start failed after they were created (see begin()). */
-const abandoned = new Set<string>();
+/** Session ids whose save prompt is suppressed — ONLY while the rollback of
+ *  a failed start is stopping them (see rollback()). Cleared when that stop
+ *  settles, so a later successful resume of the same session, stopped
+ *  normally, is offered for saving as usual. */
+const suppressSavePrompt = new Set<string>();
+/** A failed start whose rollback could not be confirmed. The session stays
+ *  in the store (visibly live), and Stop retries the SAME rollback — stop,
+ *  then delete when it was new — instead of a plain stop. */
+let pendingRollback: { sessionId: string; discard: boolean } | null = null;
 /** Latest RMS per stream — `speaking` follows whichever is louder. */
 const levels: Record<AudioSource, number> = { system: 0, mic: 0 };
 const SPEAKING_RMS = 0.012;
@@ -191,10 +205,11 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
       ].slice(-MAX_TRANSCRIPT),
     }));
   });
-  // A session abandoned at start (its audio never attached) is not offered for
-  // saving — it heard nothing, and a new one was already deleted.
+  // The stop that rolls back a failed start is not offered for saving — the
+  // attempt heard nothing (and a new session is deleted next). Main broadcasts
+  // the prompt before the stop call returns, so the one-shot mark is still set.
   api.events.onSavePrompt((p) => {
-    if (!abandoned.has((p as SavePrompt).sessionId)) set({ pendingSave: p });
+    if (!suppressSavePrompt.has((p as SavePrompt).sessionId)) set({ pendingSave: p });
   });
   // Surface backend session failures (transcription socket dropped, OpenAI auth,
   // etc.) — otherwise the UI shows a happy "listening" state forever.
@@ -313,18 +328,63 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
     set({ session: s, transcript: prior, interim: '', interims: {}, paused: false, micError: null, sessionError: null });
     try {
       await attachCapture(s.id, capture, wantsSystem);
+      if (pendingRollback?.sessionId === s.id) pendingRollback = null;
       return { ok: true, sessionId: s.id };
     } catch (e) {
       stopCapture();
       releaseStreams(capture);
-      const reason = (e as Error).message || String(e);
-      abandoned.add(s.id);
-      await api.session.stop(s.id).catch(() => {});
-      if (discardOnFailure) await api.session.delete(s.id).catch(() => {});
-      const error = `Audio capture couldn't start (${reason}). The session was stopped — nothing was recorded.`;
-      set({ session: null, transcript: [], pendingSave: null, micError: error });
-      return { ok: false, stage: 'audio', error };
+      const reason = `Audio capture couldn't start (${(e as Error).message || String(e)}).`;
+      const r = await rollback(s.id, discardOnFailure);
+      const error = `${reason} ${r.message}`;
+      if (!r.stopped) {
+        // NOT confirmed: say so, keep the session in the store (it may still
+        // be live in main), and let Stop retry this same rollback.
+        set({ micError: error });
+        return { ok: false, stage: 'audio', error, cleanup: 'failed' };
+      }
+      set({ session: null, transcript: [], micError: error });
+      return { ok: false, stage: 'audio', error, ...(r.removed === false ? { cleanup: 'failed' as const } : {}) };
     }
+  }
+
+  /**
+   * Undo a session created by a start whose audio never attached: stop it,
+   * then (a new one) delete it. Claims only what was CONFIRMED — a rejected
+   * stop or delete is reported, and the rollback stays pending so Stop can
+   * retry it.
+   */
+  async function rollback(
+    sessionId: string,
+    discard: boolean,
+  ): Promise<{ stopped: boolean; removed?: boolean; message: string }> {
+    pendingRollback = { sessionId, discard };
+    suppressSavePrompt.add(sessionId);
+    try {
+      await api.session.stop(sessionId);
+    } catch (e) {
+      return {
+        stopped: false,
+        message: `Stopping the session failed (${(e as Error).message || String(e)}) — it may still be running. Press Stop to try again.`,
+      };
+    } finally {
+      // One-shot: covers this stop's prompt only, never a later session run.
+      suppressSavePrompt.delete(sessionId);
+    }
+    // Stopped is confirmed from here on; nothing is pending in main.
+    pendingRollback = null;
+    if (!discard) return { stopped: true, message: 'The session was stopped; its earlier content is kept.' };
+    try {
+      await api.session.delete(sessionId);
+    } catch (e) {
+      // The stop's broadcast already cleared the live state, so there is no
+      // Stop to press — the empty record is named for removal in Sessions.
+      return {
+        stopped: true,
+        removed: false,
+        message: `The session was stopped, but its empty record couldn't be removed (${(e as Error).message || String(e)}) — delete it from Sessions.`,
+      };
+    }
+    return { stopped: true, removed: true, message: 'The session was stopped and removed — nothing was recorded.' };
   }
 
   function stopCapture(): void {
@@ -411,6 +471,18 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
       const s = get().session;
       if (!s) return;
       stopCapture();
+      // A failed start whose rollback was not confirmed: Stop retries THAT
+      // rollback (no save prompt for the failed attempt; a new session is
+      // also removed), and says what it confirmed.
+      if (pendingRollback?.sessionId === s.id) {
+        const r = await rollback(s.id, pendingRollback.discard);
+        if (!r.stopped) {
+          set({ micError: r.message });
+          throw new Error(r.message);
+        }
+        set({ session: null, transcript: [], interim: '', interims: {}, micError: r.removed === false ? r.message : null });
+        return;
+      }
       await api.session.stop(s.id);
       set({ session: null, interim: '', interims: {} });
     },

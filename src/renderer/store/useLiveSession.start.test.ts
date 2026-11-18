@@ -11,6 +11,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const h = vi.hoisted(() => ({
   calls: [] as string[],
   savePrompt: null as null | ((p: unknown) => void),
+  sessionState: null as null | ((p: unknown) => void),
+  stopFails: 0, // how many stop calls reject before one succeeds
+  deleteFails: false,
   startFails: false,
   ctxFails: false,
   displayFails: false,
@@ -28,7 +31,10 @@ vi.mock('../lib/api', () => ({
         return () => {};
       },
       onSessionError: () => () => {},
-      onSessionState: () => () => {},
+      onSessionState: (cb: (p: unknown) => void) => {
+        h.sessionState = cb;
+        return () => {};
+      },
     },
     session: {
       start: async () => {
@@ -40,8 +46,21 @@ vi.mock('../lib/api', () => ({
         h.calls.push('resume');
         return { id };
       },
-      stop: async (id: string) => h.calls.push(`stop:${id}`),
-      delete: async (id: string) => h.calls.push(`delete:${id}`),
+      // Like main (engine.stop): a successful stop broadcasts the stopped state
+      // and the save prompt BEFORE the call returns.
+      stop: async (id: string) => {
+        h.calls.push(`stop:${id}`);
+        if (h.stopFails > 0) {
+          h.stopFails--;
+          throw new Error('IPC stop failed');
+        }
+        h.sessionState?.({ status: 'stopped', paused: false });
+        h.savePrompt?.({ sessionId: id });
+      },
+      delete: async (id: string) => {
+        h.calls.push(`delete:${id}`);
+        if (h.deleteFails) throw new Error('IPC delete failed');
+      },
       reportCapture: async (st: { system: boolean; mic: boolean }) => h.calls.push(`report:${st.system}/${st.mic}`),
       sendRealtimeAudio: () => {},
     },
@@ -109,7 +128,8 @@ const startArgs = { profileId: 'p1', answerFormat: 'general', jobId: 'j1', activ
 beforeEach(() => {
   h.calls.length = 0;
   h.tracks.length = 0;
-  h.startFails = h.ctxFails = h.displayFails = h.micFails = false;
+  h.startFails = h.ctxFails = h.displayFails = h.micFails = h.deleteFails = false;
+  h.stopFails = 0;
   ended.display.length = 0;
   ended.mic.length = 0;
   useLiveSession.setState({ session: null, micError: null, sessionError: null, pendingSave: null });
@@ -141,9 +161,10 @@ describe('start reports what actually happened', () => {
     expect(h.tracks.every((t) => t.stop.mock.calls.length > 0)).toBe(true);
     const st = useLiveSession.getState();
     expect(st.session).toBeNull();
-    // The stopped session's save prompt is not offered — it heard nothing.
-    h.savePrompt?.({ sessionId: 's-new' });
-    expect(useLiveSession.getState().pendingSave).toBeNull();
+    // The rollback's own save prompt (broadcast during its stop) is not offered.
+    expect(st.pendingSave).toBeNull();
+    expect(r.ok === false && r.cleanup).toBeUndefined(); // cleanup confirmed
+    expect(st.micError).toMatch(/stopped and removed — nothing was recorded/);
   });
 
   it('the session fails to open: the acquired streams are released', async () => {
@@ -198,3 +219,70 @@ it('picker cancelled (or no display audio) but the mic works: the session runs a
   });
 });
 
+
+describe('M1 review round 2: rollback claims only what it confirmed', () => {
+  it('fail resume → successful resume → normal stop: the save prompt appears (suppression is one-shot)', async () => {
+    h.ctxFails = true;
+    const failed = await useLiveSession.getState().resumeExisting({ sessionId: 's-old', listensTo: 'system', prior: [] });
+    expect(failed).toMatchObject({ ok: false, stage: 'audio' });
+    expect(useLiveSession.getState().pendingSave).toBeNull(); // the failed attempt: no prompt
+
+    h.ctxFails = false;
+    const retried = await useLiveSession.getState().resumeExisting({ sessionId: 's-old', listensTo: 'system', prior: [] });
+    expect(retried).toEqual({ ok: true, sessionId: 's-old' });
+    await useLiveSession.getState().stop();
+    expect(useLiveSession.getState().pendingSave).toEqual({ sessionId: 's-old' });
+  });
+
+  it('the same for a NEW session id that is started again later', async () => {
+    h.ctxFails = true;
+    await useLiveSession.getState().startNew(startArgs);
+    h.ctxFails = false;
+    await useLiveSession.getState().startNew(startArgs); // the fake reuses the id
+    await useLiveSession.getState().stop();
+    expect(useLiveSession.getState().pendingSave).toEqual({ sessionId: 's-new' });
+  });
+
+  for (const kind of ['new', 'resumed'] as const) {
+    it(`${kind} session: a rejected stop is NOT reported as stopped; the session stays and Stop retries the rollback`, async () => {
+      h.ctxFails = true;
+      h.stopFails = 1;
+      const r =
+        kind === 'new'
+          ? await useLiveSession.getState().startNew(startArgs)
+          : await useLiveSession.getState().resumeExisting({ sessionId: 's-old', listensTo: 'system', prior: [] });
+      const id = kind === 'new' ? 's-new' : 's-old';
+      expect(r).toMatchObject({ ok: false, stage: 'audio', cleanup: 'failed' });
+      expect(r.ok === false && r.error).toMatch(/Stopping the session failed .* may still be running/);
+      expect(r.ok === false && r.error).not.toMatch(/was stopped/);
+      expect(h.calls).not.toContain(`delete:${id}`); // never delete before teardown is confirmed
+      expect(useLiveSession.getState().session?.id).toBe(id); // still visible, still stoppable
+
+      // Retry via the normal Stop: the same rollback, confirmed this time.
+      await useLiveSession.getState().stop();
+      expect(h.calls.filter((c) => c === `stop:${id}`)).toHaveLength(2);
+      expect(h.calls.includes(`delete:${id}`)).toBe(kind === 'new');
+      expect(useLiveSession.getState().session).toBeNull();
+      expect(useLiveSession.getState().pendingSave).toBeNull(); // still the failed attempt
+    });
+  }
+
+  it('a Stop retry that fails again stays visible and throws', async () => {
+    h.ctxFails = true;
+    h.stopFails = 2;
+    await useLiveSession.getState().startNew(startArgs);
+    await expect(useLiveSession.getState().stop()).rejects.toThrow(/may still be running/);
+    expect(useLiveSession.getState().session?.id).toBe('s-new');
+    expect(useLiveSession.getState().micError).toMatch(/Stopping the session failed/);
+  });
+
+  it('stopped but the delete fails: says exactly that, never "nothing was recorded"', async () => {
+    h.ctxFails = true;
+    h.deleteFails = true;
+    const r = await useLiveSession.getState().startNew(startArgs);
+    expect(r).toMatchObject({ ok: false, stage: 'audio', cleanup: 'failed' });
+    expect(r.ok === false && r.error).toMatch(/was stopped, but its empty record couldn't be removed .* delete it from Sessions/);
+    expect(r.ok === false && r.error).not.toMatch(/nothing was recorded/);
+    expect(useLiveSession.getState().session).toBeNull(); // it IS stopped (confirmed)
+  });
+});
