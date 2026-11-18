@@ -114,6 +114,7 @@ export const meetingMode: ModeDefinition = {
       contextChunks: input.contextChunks,
       memories: input.memories,
       history: input.history,
+      conversation: input.conversation,
       profile: input.profile,
       format: input.settings.answerFormat,
       pronunciation: false, // spoken-cue pronunciation aids are an interview thing

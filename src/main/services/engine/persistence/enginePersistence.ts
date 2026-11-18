@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { db, schema } from '../../../db';
 import type { ContributionKind, Speaker } from '@shared/types';
 
@@ -103,6 +103,41 @@ export const enginePersistence = {
       .set({ followupQuestion: followup })
       .where(eq(schema.aiAnswers.questionId, questionId))
       .run();
+  },
+
+  /** A resumed session's OWN timeline (oldest first): its final transcript
+   *  turns and its answered questions. Scoped by session id — another
+   *  session's rows can never be restored into this one. Bounded to the
+   *  last `maxTurns` turns. */
+  sessionTimeline(
+    sessionId: string,
+    maxTurns = 3000,
+  ): {
+    turns: { speaker: Speaker; text: string; at: number }[];
+    answers: { questionId: string; question: string; answer: string; at: number }[];
+  } {
+    const turns = db()
+      .select({ speaker: schema.transcriptChunks.speaker, text: schema.transcriptChunks.text, at: schema.transcriptChunks.createdAt })
+      .from(schema.transcriptChunks)
+      .where(eq(schema.transcriptChunks.sessionId, sessionId))
+      .orderBy(asc(schema.transcriptChunks.createdAt))
+      .all()
+      .filter((t) => t.text.trim())
+      .slice(-maxTurns)
+      .map((t) => ({ speaker: t.speaker as Speaker, text: t.text, at: t.at }));
+    const answers = db()
+      .select({
+        questionId: schema.detectedQuestions.id,
+        question: schema.detectedQuestions.text,
+        answer: schema.aiAnswers.directAnswer,
+        at: schema.aiAnswers.createdAt,
+      })
+      .from(schema.detectedQuestions)
+      .innerJoin(schema.aiAnswers, eq(schema.aiAnswers.questionId, schema.detectedQuestions.id))
+      .where(eq(schema.detectedQuestions.sessionId, sessionId))
+      .orderBy(asc(schema.aiAnswers.createdAt))
+      .all();
+    return { turns, answers };
   },
 
   /** Dual-write: the generic contribution row for a completed generation. */

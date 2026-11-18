@@ -154,10 +154,11 @@ describe('onTranscriptFinal — whose turn it is', () => {
     expect(trigger).toHaveBeenCalledTimes(1);
     await s.onTranscriptFinal('What about the timeline?', 'interviewer');
     expect(h.generateInputs).toHaveLength(1);
-    expect(h.generateInputs[0].history).toEqual([
-      // Remote turns keep the v1 item shape (no speaker) — pinned by parity.
-      { role: 'heard', text: 'So, a few topics today.' },
-      { role: 'heard', text: 'I already covered the timeline in my intro.', speaker: 'candidate' },
+    const c = h.generateInputs[0].conversation as { recent: { role: string; text: string }[] };
+    expect(c.recent.map((t) => [t.role, t.text])).toEqual([
+      ['interviewer', 'So, a few topics today.'],
+      // The user's own words are the CANDIDATE's — "You said:" in the prompt.
+      ['candidate', 'I already covered the timeline in my intro.'],
     ]);
   });
 

@@ -268,12 +268,14 @@ describe('answer framing', () => {
     }
   });
 
-  it('the interview guard is the v1 text; the conversation guard forbids invented figures', async () => {
+  it('the interview guard keeps the v1 rule plus the missing-detail option; the conversation guard forbids invented figures', async () => {
     await collect(streamAnswer(baseInput({ framing: 'interview' })));
     expect(system()).toContain(
       '- FABRICATION GUARD: if the context can\'t support what\'s asked, do NOT make it up. Begin\n' +
         '  the answer with "⚠", state in one short clause that it\'s not in their background, then\n' +
-        '  pivot to a grounded, cited, transferable-skills framing (this is the riskWarning case).',
+        '  pivot to a grounded, cited, transferable-skills framing — or, when only they can know it\n' +
+        '  (a number, a date, who did what), name the one detail they should fill in themselves\n' +
+        '  (this is the riskWarning case).',
     );
     await collect(streamAnswer(baseInput({ framing: 'conversation' })));
     const sys = system();

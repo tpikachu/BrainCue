@@ -41,6 +41,58 @@ export function capSource(
   return out;
 }
 
+/** Which side of an interview a chunk speaks for. */
+type SourceGroup = 'candidate' | 'role' | 'archive';
+export function sourceGroup(s: ChunkSource): SourceGroup {
+  if (s === 'jd' || s === 'company') return 'role';
+  if (s === 'session') return 'archive';
+  return 'candidate'; // resume, tailored, note, story, profile
+}
+
+/** A swapped-in chunk must still be relevant: at least this share of the
+ *  best match's score (and, for cosine scores, an absolute floor). */
+export const BALANCE_RELATIVE_FLOOR = 0.6;
+export const BALANCE_COSINE_FLOOR = 0.2;
+
+/**
+ * Keep one source from crowding out the other.
+ *
+ * Pure cosine ranking routinely handed all five slots to résumé chunks (a
+ * long CV has many near-duplicates of "I led…") or all five to the JD (whose
+ * wording mirrors the interviewer's), so an answer was either grounded in
+ * the candidate's history with no idea what the role needs, or the reverse.
+ * When the top-k has no chunk from the candidate's side or from the role's
+ * side, the best RELEVANT chunk of the missing side replaces the weakest
+ * chunk of the over-represented side. Irrelevant chunks are never forced in:
+ * a swap needs a score within BALANCE_RELATIVE_FLOOR of the best match.
+ */
+export function balanceSources(
+  picked: RetrievedChunk[],
+  ranked: RetrievedChunk[],
+  opts: { cosine?: boolean } = {},
+): RetrievedChunk[] {
+  if (picked.length < 2) return picked;
+  const top = Math.max(...picked.map((c) => c.score));
+  const floor = Math.max(top * BALANCE_RELATIVE_FLOOR, opts.cosine === false ? 0 : BALANCE_COSINE_FLOOR);
+  const out = [...picked];
+  for (const need of ['role', 'candidate'] as const) {
+    if (out.some((c) => sourceGroup(c.sourceType) === need)) continue;
+    const cand = ranked.find((c) => sourceGroup(c.sourceType) === need && c.score >= floor && !out.some((o) => o.id === c.id));
+    if (!cand) continue;
+    // Replace the weakest chunk of the group that holds the most slots.
+    const counts = new Map<SourceGroup, number>();
+    for (const c of out) counts.set(sourceGroup(c.sourceType), (counts.get(sourceGroup(c.sourceType)) ?? 0) + 1);
+    const heavy = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    if (!heavy || (counts.get(heavy) ?? 0) < 2) continue;
+    let weakest = -1;
+    out.forEach((c, i) => {
+      if (sourceGroup(c.sourceType) === heavy && (weakest < 0 || c.score < out[weakest].score)) weakest = i;
+    });
+    if (weakest >= 0) out[weakest] = cand;
+  }
+  return out.sort((a, b) => b.score - a.score);
+}
+
 /** Embed the query and return the top-k chunks for grounding: the profile's
  *  resume/notes plus, when given, the selected pack's JD — and up to
  *  SESSION_ARCHIVE_MAX archives of earlier conversations.
@@ -74,7 +126,7 @@ export async function retrieve(
     jobId,
     allowTailored: opts.tailoredResume === true,
   });
-  const chunks = capSource(ranked, 'session', SESSION_ARCHIVE_MAX, k);
+  const chunks = balanceSources(capSource(ranked, 'session', SESSION_ARCHIVE_MAX, k), ranked);
   if (opts.storyCue === false) return chunks;
   const story = sqliteVectorStore.topStory({ profileId, query: vector });
   if (story && story.score >= STORY_CUE_MIN_SCORE && !chunks.some((c) => c.id === story.id)) {

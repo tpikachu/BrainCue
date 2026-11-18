@@ -98,6 +98,7 @@ vi.mock('../openai/realtime', () => ({
 import * as schema from '../../db/schema';
 import { createTestDb } from '../../test/dbHarness';
 import { sessionManager } from './sessionManager';
+import type { ConversationSnapshot } from '../engine/interview/conversationContext';
 
 const evts = (ch: string) => h.events.filter((e) => e.ch === ch);
 const firstIndex = (ch: string) => h.events.findIndex((e) => e.ch === ch);
@@ -484,12 +485,18 @@ describe('in-session history (question N knows about question N-1)', () => {
     await sessionManager.processFinalTranscript(session.id, 'What was the hardest part of that migration project?');
 
     expect(inputs).toHaveLength(2);
-    expect(inputs[0].history).toBeUndefined();
-    // The detected question replaces the `heard` turn it came from — the
-    // exchange appears exactly once, with the answer that was streamed.
-    expect(inputs[1].history).toEqual([
-      { role: 'asked', question: 'Tell me about a migration you led?', answer: 'Hello world' },
+    // Question 1: nothing before it — the question itself is not context.
+    const first = inputs[0].conversation as ConversationSnapshot;
+    expect(first.recent).toEqual([]);
+    expect(first.suggestions).toEqual([]);
+    // Question 2 sees question 1 as it was ASKED (a transcript turn) and
+    // BrainCue's suggestion for it as a SUGGESTION — two sources, kept apart.
+    const second = inputs[1].conversation as ConversationSnapshot;
+    expect(second.recent.map((t) => [t.role, t.text])).toEqual([['interviewer', 'Tell me about a migration you led?']]);
+    expect(second.suggestions).toEqual([
+      expect.objectContaining({ question: 'Tell me about a migration you led?', lead: 'Hello world' }),
     ]);
+    expect(inputs[1].history).toBeUndefined(); // the 10-item buffer is gone
     sessionManager.stop(session.id);
   });
 
@@ -501,27 +508,37 @@ describe('in-session history (question N knows about question N-1)', () => {
       return defaultStream();
     };
 
-    await sessionManager.processFinalTranscript(session.id, 'Thanks for joining, we have a few topics today.');
-    h.classify = question;
-    await sessionManager.processFinalTranscript(session.id, 'Which database did you pick for the rewrite?');
-    // The candidate answers before the follow-up — which closes the window in
-    // which "And …" would continue (split) the previous question instead.
-    await sessionManager.processFinalTranscript(session.id, 'We went with Postgres.', 'candidate');
-    await sessionManager.processFinalTranscript(session.id, 'And why that one?');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await sessionManager.processFinalTranscript(session.id, 'Thanks for joining, we have a few topics today.');
+      h.classify = question;
+      await sessionManager.processFinalTranscript(session.id, 'Which database did you pick for the rewrite?');
+      // The candidate answers before the follow-up — which also closes the
+      // window in which "And …" would continue (split) the previous question.
+      await sessionManager.processFinalTranscript(session.id, 'We went with Postgres.', 'candidate');
+      await vi.advanceTimersByTimeAsync(1600); // the echo guard's hold on own turns
+      await sessionManager.processFinalTranscript(session.id, 'And why that one?');
+    } finally {
+      vi.useRealTimers();
+    }
 
-    expect(inputs[0].history).toEqual([
-      { role: 'heard', text: 'Thanks for joining, we have a few topics today.' },
+    expect((inputs[0].conversation as ConversationSnapshot).recent.map((t) => t.text)).toEqual([
+      'Thanks for joining, we have a few topics today.',
     ]);
-    expect(inputs[1].history).toEqual([
-      { role: 'heard', text: 'Thanks for joining, we have a few topics today.' },
-      { role: 'asked', question: 'Which database did you pick for the rewrite?', answer: 'Hello world' },
+    const followup = inputs[1].conversation as ConversationSnapshot;
+    expect(followup.recent.map((t) => [t.role, t.text])).toEqual([
+      ['interviewer', 'Thanks for joining, we have a few topics today.'],
+      ['interviewer', 'Which database did you pick for the rewrite?'],
+      ['candidate', 'We went with Postgres.'],
     ]);
-    // Retrieval for the referential follow-up embeds the previous question AND
-    // the opening of its answer (where the subject was named); the long first
-    // question retrieved on its own text.
+    // The follow-up continues the exchange the candidate actually answered.
+    expect(followup.subject).toMatchObject({ question: 'Which database did you pick for the rewrite?', said: 'We went with Postgres.' });
+    // Retrieval for the referential follow-up carries the subject from what
+    // the candidate SAID — not BrainCue's suggestion ("Hello world"), which
+    // may name something the candidate never mentioned.
     expect(h.retrieveCalls.map((c) => c[1])).toEqual([
       'Which database did you pick for the rewrite?',
-      'Which database did you pick for the rewrite? Hello world And why that one?',
+      'Which database did you pick for the rewrite? We went with Postgres. And why that one?',
     ]);
     expect(h.retrieveCalls[0][0]).toBe(profileId);
     sessionManager.stop(session.id);
@@ -547,9 +564,60 @@ describe('in-session history (question N knows about question N-1)', () => {
     await sessionManager.processFinalTranscript(session.id, 'How does that show up in conflict?');
 
     expect(inputs).toHaveLength(3);
-    expect(inputs[2].history).toEqual([
-      { role: 'asked', question: 'Describe your leadership style?', answer: 'Second take' },
+    // One suggestion for the question, carrying the LATEST take.
+    expect((inputs[2].conversation as ConversationSnapshot).suggestions).toEqual([
+      expect.objectContaining({ question: 'Describe your leadership style?', lead: 'Second take' }),
     ]);
     sessionManager.stop(session.id);
+  });
+});
+
+describe('resume and scope isolation', () => {
+  const question = async () => ({ isQuestion: true, type: 'behavioral', confidence: 0.9, strategy: 'star' });
+
+  it("a resumed interview restores ITS OWN turns and answers — never another session's", async () => {
+    const inputs: Record<string, unknown>[] = [];
+    h.classify = question;
+    h.streamAnswer = (input) => {
+      inputs.push(input);
+      return defaultStream();
+    };
+    // Session A: one project.
+    const a = startSession();
+    await sessionManager.processFinalTranscript(a.session.id, 'Tell me about the Falcon launch at Acme?');
+    sessionManager.stop(a.session.id);
+    // Session B (another profile): a different project.
+    const b = startSession();
+    await sessionManager.processFinalTranscript(b.session.id, 'Tell me about the Osprey migration at Globex?');
+    sessionManager.stop(b.session.id);
+
+    // Resume A and ask a follow-up.
+    sessionManager.resume(a.session.id);
+    inputs.length = 0;
+    await sessionManager.processFinalTranscript(a.session.id, 'What was your role there?');
+    const snap = inputs[0].conversation as ConversationSnapshot;
+    const all = JSON.stringify(snap);
+    expect(all).toContain('Falcon');
+    expect(all).not.toContain('Osprey');
+    expect(snap.subject?.question).toBe('Tell me about the Falcon launch at Acme?');
+    // Retrieval stays scoped to A's profile.
+    expect(h.retrieveCalls.at(-1)?.[0]).toBe(a.profileId);
+    sessionManager.stop(a.session.id);
+  });
+
+  it('a fresh session starts with an empty context even right after another one', async () => {
+    const inputs: Record<string, unknown>[] = [];
+    h.classify = question;
+    h.streamAnswer = (input) => {
+      inputs.push(input);
+      return defaultStream();
+    };
+    const a = startSession();
+    await sessionManager.processFinalTranscript(a.session.id, 'Tell me about the Falcon launch at Acme?');
+    sessionManager.stop(a.session.id);
+    const b = startSession();
+    await sessionManager.processFinalTranscript(b.session.id, 'Tell me about yourself?');
+    expect(JSON.stringify(inputs.at(-1)?.conversation)).not.toContain('Falcon');
+    sessionManager.stop(b.session.id);
   });
 });

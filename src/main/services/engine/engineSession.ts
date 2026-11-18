@@ -29,7 +29,7 @@ import type { RetrievedChunk } from '@shared/types';
 import { summonedPolicy } from './trigger/summonedPolicy';
 import type { AudioSource, Speaker } from '@shared/types';
 import type { RealtimeSttSession } from '../../providers/types';
-import type { SessionHistory, SessionHistoryItem } from '../openai/answer';
+import { ConversationContext } from './interview/conversationContext';
 import type { ContextEvent } from './contextEvent';
 import type { AmbientPolicy, ModeDefinition, RuntimeSettings } from './modeDefinition';
 
@@ -43,20 +43,6 @@ interface LastQuestion {
   type: string;
 }
 
-/** In-session history budget. Sized for the prompt, not the archive: enough
- *  to resolve a follow-up against the last few exchanges, small enough that
- *  the CONTEXT/MEMORY blocks stay the dominant grounding. */
-const HISTORY_MAX_ITEMS = 10;
-const HISTORY_TURN_CHARS = 300;
-const HISTORY_ANSWER_CHARS = 700;
-/** A question this short is almost always referential ("and the timeline?"),
- *  so retrieval embeds it together with the previous question. */
-const REFERENTIAL_MAX_WORDS = 8;
-/** How much of the previous answer joins a referential follow-up's retrieval
- *  query — its lead names the subject; the rest would drown the question. */
-const REFERENTIAL_ANSWER_CHARS = 240;
-
-const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 
 /**
  * One live conversation session: the generic flow
@@ -80,11 +66,13 @@ export class EngineSession {
   answering = false; // an answer is currently being generated (avoid overlap)
   answerAbort: AbortController | null = null; // cancels the in-flight answer (clear/regen)
   lastQuestion: LastQuestion | null = null;
-  /** What this session has heard and answered so far, oldest first. Handed to
-   *  the generator so question N knows about question N-1 — without it every
-   *  cue was a cold start and "what about the second option?" was unanswerable.
+  /** Everything this session has heard (both speakers) and suggested,
+   *  bounded — rendered per answer as a snapshot (recent turns verbatim, a
+   *  traceable record of earlier exchanges, recalled older turns, and
+   *  BrainCue's suggestions kept apart from what was said). Per instance, so
+   *  another session's conversation can never reach this one's answers.
    *  Prompt-only: the DB rows remain the record. */
-  private readonly history: SessionHistoryItem[] = [];
+  readonly context = new ConversationContext();
   // Coding sessions default to "listen but don't auto-answer" so a generated coding
   // answer isn't replaced when the remote speaker talks. We keep transcribing and
   // remember the last utterance so toggling answering on can answer it.
@@ -216,14 +204,18 @@ export class EngineSession {
   /** The last few turns, speaker-labelled, for the classifier. Only what was
    *  SAID — BrainCue's own suggestions are not part of the conversation. */
   private recentForClassifier(): ClassifierTurn[] {
-    return this.history
-      .filter((h): h is Extract<SessionHistoryItem, { role: 'heard' }> => h.role === 'heard')
-      .slice(-4)
-      .map((h) => ({
-        speaker:
-          h.speaker !== undefined && h.speaker !== this.mode.remoteSpeaker ? ('candidate' as const) : ('interviewer' as const),
-        text: h.text,
-      }));
+    return this.context.recentForClassifier(4);
+  }
+
+  /** Resume: restore this session's own turns and answers (oldest first). */
+  hydrate(
+    turns: { speaker: Speaker; text: string; at: number }[],
+    answers: { questionId: string; question: string; answer: string; at: number }[],
+  ): void {
+    this.context.hydrate(
+      turns.map((t) => ({ role: t.speaker === this.mode.remoteSpeaker ? 'interviewer' : 'candidate', text: t.text, at: t.at })),
+      answers,
+    );
   }
 
   /** Pause/resume — the scheduler turns waiting questions into missed cards. */
@@ -287,7 +279,7 @@ export class EngineSession {
       // briefly so the microphone's echo of the call (speakers, no headphones)
       // is dropped instead of showing every remote turn twice.
       this.echo.ownTurn(text, () => {
-        if (!this.stopped) this.commitTurn(text, speaker);
+        if (!this.stopped) this.commitTurn(text, speaker, finalAt);
       });
       // The candidate is speaking: the interviewer's next words start a new
       // question rather than continue the last one. ("Okay" / "mm-hmm" while
@@ -296,7 +288,7 @@ export class EngineSession {
       return;
     }
     this.echo.remoteTurn(text);
-    const tcId = this.commitTurn(text, speaker);
+    const tcId = this.commitTurn(text, speaker, finalAt);
     if (timing.speechEndAt) this.speechEnds.set(tcId, timing.speechEndAt);
     this.remoteTurns.push({ text, tcId, at: finalAt });
     if (this.remoteTurns.length > 12) this.remoteTurns.shift();
@@ -422,17 +414,13 @@ export class EngineSession {
     return sameWords(p.words, turnWords(questionText)) ? p.promise : null;
   }
 
-  /** Persist a turn, broadcast it to the transcript and remember it in the
-   *  in-session history. The user's own turns carry their speaker so the
-   *  prompt can label them "You said:"; remote turns keep the v1 item shape
-   *  (pinned by parity). */
-  private commitTurn(text: string, speaker: Speaker): string {
+  /** Persist a turn, broadcast it to the transcript and add it to the
+   *  conversation context at the time it was spoken. The user's own turns
+   *  are the candidate's ("You said:" in the prompt). */
+  private commitTurn(text: string, speaker: Speaker, at = Date.now()): string {
     const tcId = persist.finalTranscript(this.sessionId, speaker, text);
     broadcast(EVENTS.transcriptDelta, { text, isFinal: true, speaker });
-    const clipped = clip(text, HISTORY_TURN_CHARS);
-    this.remember(
-      speaker !== this.mode.remoteSpeaker ? { role: 'heard', text: clipped, speaker } : { role: 'heard', text: clipped },
-    );
+    this.context.addTurn(speaker === this.mode.remoteSpeaker ? 'interviewer' : 'candidate', text, at);
     return tcId;
   }
 
@@ -565,7 +553,9 @@ export class EngineSession {
     try {
       // Retrieval (an embeddings call) is INSIDE the try so a failure here is
       // surfaced + un-wedges the card too — not just generate failures.
-      const history = this.historyBefore(questionText);
+      // Snapshot NOW, synchronously: turns that arrive while this answer
+      // streams cannot change the context it is built on.
+      const conversation = this.context.snapshot(questionText);
       const t0 = Date.now();
       const prefetched = this.takePrefetch(questionText);
       context = prefetched
@@ -592,7 +582,7 @@ export class EngineSession {
         memories,
         profile,
         settings: this.settings,
-        history,
+        conversation,
         questionType,
         signal: abort.signal,
       })) {
@@ -643,7 +633,7 @@ export class EngineSession {
       }
     }
 
-    this.rememberAnswer(questionText, answer);
+    if (answer.trim()) this.context.addSuggestion(questionId, questionText, answer);
     persist.replaceAnswer({
       questionId,
       directAnswer: answer,
@@ -722,53 +712,9 @@ export class EngineSession {
     return { regenerated: true };
   }
 
-  /** The history the model should see for THIS question: everything except
-   *  the question itself — its own `heard` turn (pushed by onTranscriptFinal
-   *  before the trigger ran) and, on a regenerate, its own previous take. */
-  private historyBefore(questionText: string): SessionHistory | undefined {
-    const self = clip(questionText, HISTORY_TURN_CHARS);
-    const items = this.history.filter((h) =>
-      h.role === 'heard' ? h.text !== self : h.question !== self,
-    );
-    return items.length ? items : undefined;
-  }
-
-  /** Append to the in-session history, dropping the oldest past the budget. */
-  private remember(item: SessionHistoryItem): void {
-    this.history.push(item);
-    if (this.history.length > HISTORY_MAX_ITEMS) this.history.splice(0, this.history.length - HISTORY_MAX_ITEMS);
-  }
-
-  /** Record a completed answer. A regenerate of the same question updates its
-   *  entry instead of adding a second; a detected question replaces the
-   *  `heard` turn it came from so the exchange appears once. */
-  private rememberAnswer(question: string, answer: string): void {
-    const text = answer.trim();
-    if (!text) return;
-    const clipped = clip(text, HISTORY_ANSWER_CHARS);
-    const existing = this.history.find((h) => h.role === 'asked' && h.question === question);
-    if (existing && existing.role === 'asked') {
-      existing.answer = clipped;
-      return;
-    }
-    const last = this.history[this.history.length - 1];
-    if (last?.role === 'heard' && last.text === clip(question, HISTORY_TURN_CHARS)) this.history.pop();
-    this.remember({ role: 'asked', question: clip(question, HISTORY_TURN_CHARS), answer: clipped });
-  }
-
-  /** The text retrieval embeds. A short follow-up carries the previous
-   *  question AND the opening of its answer with it, so "what was your role
-   *  there?" retrieves chunks about the project the answer just named instead
-   *  of about roles in general (the question alone rarely names the subject;
-   *  the answer did). */
+  /** The text retrieval embeds — a referential follow-up carries its
+   *  subject from what the candidate actually said (conversationContext.ts). */
   private retrievalQuery(questionText: string): string {
-    if (questionText.trim().split(/\s+/).length > REFERENTIAL_MAX_WORDS) return questionText;
-    for (let i = this.history.length - 1; i >= 0; i--) {
-      const h = this.history[i];
-      if (h.role === 'asked') {
-        return `${h.question} ${clip(h.answer, REFERENTIAL_ANSWER_CHARS)} ${questionText}`;
-      }
-    }
-    return questionText;
+    return this.context.retrievalQuery(questionText);
   }
 }

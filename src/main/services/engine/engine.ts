@@ -312,6 +312,15 @@ class Engine {
       activity: row.activity as ContextPackKind | null,
       mode: row.mode as SessionMode, // a meeting resumes as a meeting
     });
+    // Continue where it left off: the session's own turns and answers
+    // become the live context again (the next "what was your role there?"
+    // still knows the project). Best effort — a failure starts it fresh.
+    try {
+      const t = enginePersistence.sessionTimeline(sessionId);
+      this.current?.hydrate(t.turns, t.answers);
+    } catch (e) {
+      log.warn('resume: could not restore the conversation context', e);
+    }
     return toSession(
       db().select().from(schema.sessions).where(eq(schema.sessions.id, sessionId)).get()!,
     );

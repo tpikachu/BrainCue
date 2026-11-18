@@ -30,6 +30,7 @@ export const interviewMode: ModeDefinition = {
       contextChunks: input.contextChunks,
       memories: input.memories,
       history: input.history,
+      conversation: input.conversation,
       profile: input.profile,
       // Answer format + pronunciation are chosen per run (this round) and can
       // be toggled live from the Cue Card.
