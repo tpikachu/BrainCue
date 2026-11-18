@@ -34,7 +34,14 @@ const FIXTURE = {
   roles: [role('A', 'pA'), role('B', 'pA'), role('C', 'pB'), role('D', 'pA')],
   /** Alex last interviewed for D — so with no role handed in, D is the default. */
   sessions: { pA: [{ id: 's1', kind: 'live', mode: 'interview', activity: 'job', jobId: 'D' }] } as Record<string, unknown[]>,
-  details: { s1: { id: 's1', transcript: [{ id: 't1', speaker: 'interviewer', text: 'Tell me about yourself.' }], questions: [], cards: [] } },
+  /** The persisted session as main returns it (session.get): its own
+   *  profile, kind, activity and role — what Resume re-checks when pressed. */
+  details: {
+    s1: {
+      id: 's1', profileId: 'pA', jobId: 'D', kind: 'live', mode: 'interview', activity: 'job', status: 'stopped',
+      transcript: [{ id: 't1', speaker: 'interviewer', text: 'Tell me about yourself.' }], questions: [], cards: [],
+    },
+  } as Record<string, any>,
   readiness: {
     chat: { ready: true, provider: 'anthropic', model: 'm', classifyModel: 'm', explanation: 'Anthropic · Claude Sonnet 5.5 — why' },
     transcription: { ready: true, engine: 'local' },
@@ -160,4 +167,56 @@ test("Resume of another profile's interview is blocked, with why", async ({ hpag
   const d = dialog(page);
   await expect(d.getByRole('alert')).toContainText('belongs to another profile');
   await expect(d.getByRole('button', { name: 'Resume interview' })).toBeDisabled();
+});
+
+// ---- M6 review: Resume re-checks the session and its role when pressed ------
+
+const reply = (page: Page, path: string, value: unknown) =>
+  page.evaluate(([p, v]) => ((window as any).__fake.replies[p as string] = v), [path, value] as const);
+const resumes = (page: Page) => page.evaluate(() => (window as any).__fake.resumes as string[]);
+
+test('Resume re-reads the role when pressed: deleted after the modal opened → the deleted-role blocker, nothing resumed', async ({ hpage: page }) => {
+  // Read on open (still there), gone by the time Resume is pressed.
+  await reply(page, 'jobs.get', [FIXTURE.roles[3], null]);
+  await page.evaluate((s) => (window as any).__harness.resume(s), resumeItem);
+  const d = dialog(page);
+  await expect(roleRow(page)).toContainText('Role D');
+  await d.getByRole('button', { name: 'Resume interview' }).click();
+  await expect(d.getByRole('alert')).toContainText('This interview’s role no longer exists — start a new interview instead.');
+  await expect(roleRow(page)).toContainText('deleted — start a new interview'); // no picker to point at
+  await expect(d.getByRole('button', { name: 'Resume interview' })).toBeDisabled();
+  expect(await resumes(page)).toEqual([]);
+});
+
+test("Resume reads the session as it is now: a role detached since the list was loaded is the deleted-role case", async ({ hpage: page }) => {
+  // The list row still names D; the persisted session no longer has a role
+  // (deleting a role sets the session's column to null).
+  await reply(page, 'session.get', { ...FIXTURE.details.s1, jobId: null });
+  await page.evaluate((s) => (window as any).__harness.resume(s), resumeItem);
+  const d = dialog(page);
+  await expect(roleRow(page)).toContainText('Role D');
+  await d.getByRole('button', { name: 'Resume interview' }).click();
+  await expect(d.getByRole('alert')).toContainText('role no longer exists');
+  expect(await resumes(page)).toEqual([]);
+});
+
+test('Resume when the role cannot be READ: nothing starts, the reason is shown, and pressing again works', async ({ hpage: page }) => {
+  await reply(page, 'jobs.get', [FIXTURE.roles[3], { throw: 'database is locked' }, FIXTURE.roles[3]]);
+  await page.evaluate((s) => (window as any).__harness.resume(s), resumeItem);
+  const d = dialog(page);
+  await expect(roleRow(page)).toContainText('Role D');
+  await d.getByRole('button', { name: 'Resume interview' }).click();
+  await expect(d.getByRole('alert')).toContainText('Couldn’t check this interview’s role (database is locked). Nothing was started — try again.');
+  expect(await resumes(page)).toEqual([]);
+  await d.getByRole('button', { name: 'Resume interview' }).click();
+  await expect.poll(() => resumes(page)).toEqual(['s1']);
+});
+
+test("Resume reads the session's profile as it is now, not the list row's", async ({ hpage: page }) => {
+  await reply(page, 'session.get', { ...FIXTURE.details.s1, profileId: 'pB' });
+  await page.evaluate((s) => (window as any).__harness.resume(s), resumeItem);
+  const d = dialog(page);
+  await d.getByRole('button', { name: 'Resume interview' }).click();
+  await expect(d.getByRole('alert')).toContainText('belongs to another profile');
+  expect(await resumes(page)).toEqual([]);
 });

@@ -687,7 +687,13 @@ export type KeepStepStatus =
   | 'practice'
   | 'too-short'
   | 'withheld'
-  | 'failed';
+  | 'failed'
+  /** Not run this time: a retry re-ran only the half that failed, so this
+   *  half's earlier outcome still stands. */
+  | 'not-run';
+
+/** The two halves of Keep, for a retry that re-runs only what failed. */
+export type KeepHalf = 'summary' | 'memory';
 
 export interface KeepStep {
   status: KeepStepStatus;

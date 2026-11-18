@@ -26,6 +26,9 @@ export interface ChecklistProps {
   interview: boolean;
   listensTo: 'system' | 'mic';
   readiness: Readiness | null;
+  /** Resuming an interview whose role was deleted: there is no picker to
+   *  choose another, so the row says what happened instead. */
+  roleGone?: boolean;
   /** A route, or `EDIT_ROLE`. */
   onGo: (to: string) => void;
 }
@@ -89,7 +92,7 @@ export function blockedText(blocked: Readiness['chat']['blocked']): string {
 export function checklistRows(
   p: Omit<ChecklistProps, 'onGo'> & { hasMic: boolean | null },
 ): { label: string; state: RowState }[] {
-  const { profile, space, interview, listensTo, readiness, hasMic } = p;
+  const { profile, space, interview, listensTo, readiness, hasMic, roleGone } = p;
   const rows: { label: string; state: RowState }[] = [];
 
   if (interview) {
@@ -117,8 +120,10 @@ export function checklistRows(
     rows.push({
       label: 'Role & JD',
       state: !space
-        ? // The role picker above is the fix; no second "choose a role" link.
-          { tone: 'block', text: 'choose the role above' }
+        ? roleGone
+          ? { tone: 'block', text: 'deleted — start a new interview' }
+          : // The role picker above is the fix; no second "choose a role" link.
+            { tone: 'block', text: 'choose the role above' }
         : space.parsedJd || space.jdText?.trim()
           ? { tone: 'ok', text: role }
           : {

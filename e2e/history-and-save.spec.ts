@@ -73,6 +73,18 @@ const DETAIL_M = {
   spaceTitle: 'Daily standup',
   spaceCompany: null,
 };
+
+const DETAIL_QA = {
+  ...item('qa1', { mode: 'companion', activity: null, jobId: null, jobTitle: null, jobCompany: null, typeCounts: {} }),
+  transcript: [],
+  questions: [],
+  report: null,
+  // Exactly what a saved voice quick Ask persists: one answer card, no
+  // detected question, no transcript.
+  cards: [{ id: 'qa-c1', sessionId: 'qa1', kind: 'answer', status: 'completed', title: 'What is a write-ahead log?', body: 'A log written before changes are applied, so a crash can replay them.', meta: { source: 'voice_quick_ask' }, sourceRefs: null, createdAt: 5, updatedAt: 5 }],
+  spaceTitle: null,
+  spaceCompany: null,
+};
 const role = (id: string, title: string, over: Record<string, unknown> = {}) => ({ id, profileId: 'pA', kind: 'job', title, company: 'Acme', memoryEnabled: true, updatedAt: 1, ...over });
 const FIXTURE = {
   profiles: [{ id: 'pA', name: 'Alex', parsedResume: { skills: ['TS'] }, resumeText: 'x' }],
@@ -138,6 +150,16 @@ test("a meeting opens with its cards; its report is generated only when asked fo
   await expect(d.locator('section[aria-label="Conversation"]')).toContainText('Ship Friday, pending QA');
   await expect(d.locator('section[aria-label="Conversation"]')).toContainText('decision · generated');
   expect(await calls(page)).not.toContain('session.meetingReport');
+});
+
+test('a saved voice quick Ask opens with what was asked and its answer, marked generated — no report, no model call', async ({ sessions: page }) => {
+  await reply(page, 'session.get', DETAIL_QA);
+  await page.getByRole('button', { name: 'Open' }).first().click();
+  const conv = page.getByRole('dialog').locator('section[aria-label="Conversation"]');
+  await expect(conv).toContainText('You asked: What is a write-ahead log?'); // asked, not detected
+  await expect(conv).toContainText('A log written before changes are applied');
+  await expect(conv.getByText('Suggested by BrainCue — not said')).toHaveCount(1);
+  expect([...new Set((await calls(page)).filter((c) => c.startsWith('session.')))]).toEqual(['session.page', 'session.get']);
 });
 
 test('history pages on the server: page 2 asks for the next 12, the total comes from main', async ({ sessions: page }) => {
@@ -207,7 +229,8 @@ test('Keep → processing fails: the reason, the transcript kept, and a Retry th
   await dialog(page).getByRole('button', { name: 'Retry' }).click();
   await expect(r).toContainText('Summary saved to “Backend Engineer”');
   await expect(dialog(page).getByRole('button', { name: 'Retry' })).toHaveCount(0);
-  expect(await argsOf(page, 'session.remember')).toEqual([['h1', 'R1'], ['h1', 'R1']]);
+  // The retry re-runs only the half that failed, at the same destination.
+  expect(await argsOf(page, 'session.remember')).toEqual([['h1', 'R1'], ['h1', 'R1', ['summary']]]);
 });
 
 test('no Space: says nothing is sent, and reports exactly that', async ({ save: page }) => {
@@ -231,7 +254,9 @@ test('an older Space, not on the picker page, stays the destination; a deleted o
   await d.getByRole('button', { name: 'Keep it' }).click();
   await expect(d.getByRole('alert')).toContainText('That Space no longer exists');
   expect(await calls(page)).not.toContain('session.remember');
-  await expect(d.locator('button[aria-haspopup="listbox"]')).toContainText('No Space');
+  // Not silently "No Space": the user chooses again before anything is filed.
+  await expect(d.locator('button[aria-haspopup="listbox"]')).toContainText('Choose where to file it…');
+  await expect(d.getByRole('button', { name: 'Keep it' })).toBeDisabled();
 });
 
 test('Keep waits for the Space it ran in to be read — a quick Keep never files it out of that Space', async ({ save: page }) => {
@@ -288,4 +313,88 @@ test('Discard asks first; a failed delete is said, and the prompt stays', async 
   await d.getByRole('button', { name: 'Delete it' }).click();
   await expect(d.getByRole('alert')).toContainText('It was not deleted (database is locked)');
   await expect(d).toBeVisible();
+});
+
+// ---------------------------------------- M6 review: destination & Retry ----
+
+test('a failed read of the Space it ran in leaves the destination UNKNOWN — Keep waits; Try again recovers it', async ({ save: page }) => {
+  await reply(page, 'jobs.get', [{ throw: 'database is locked' }, FIXTURE.roles[0]]);
+  await reply(page, 'session.remember', result('done', 'off'));
+  await open(page);
+  const d = dialog(page);
+  await expect(d.getByRole('alert')).toContainText('Couldn’t check the Space it ran in (database is locked). It may still exist');
+  await expect(d.locator('button[aria-haspopup="listbox"]')).toContainText('Choose where to file it…');
+  await expect(d.getByRole('button', { name: 'Keep it' })).toBeDisabled();
+  expect(await calls(page)).not.toContain('session.remember');
+  await d.getByRole('button', { name: 'Try again' }).click();
+  await expect(d.locator('button[aria-haspopup="listbox"]')).toContainText('Backend Engineer');
+  await d.getByRole('button', { name: 'Keep it' }).click();
+  await expect.poll(async () => (await argsOf(page, 'session.remember'))[0]).toEqual(['h1', 'R1']);
+});
+
+test('after a failed read, filing it without a Space is an explicit choice', async ({ save: page }) => {
+  await reply(page, 'jobs.get', { throw: 'database is locked' });
+  await reply(page, 'session.remember', result('no-space', 'no-space', { packId: null }));
+  await open(page);
+  const d = dialog(page);
+  await expect(d.getByRole('button', { name: 'Keep it' })).toBeDisabled();
+  await d.locator('button[aria-haspopup="listbox"]').click();
+  await page.locator('ul[role="listbox"] li[role="option"]').filter({ hasText: 'No Space' }).click();
+  await d.getByRole('button', { name: 'Keep it' }).click();
+  await expect.poll(async () => (await argsOf(page, 'session.remember'))[0]).toEqual(['h1', null]);
+});
+
+test("a Retry's own failure is shown on the result view — and the confirmed half stands", async ({ save: page }) => {
+  await reply(page, 'session.remember', [
+    result('failed', 'done', { memory: { status: 'done', count: 2 } }),
+    { throw: 'The request timed out' },
+    result('done', 'not-run'),
+  ]);
+  await open(page);
+  const d = dialog(page);
+  await d.getByRole('button', { name: 'Keep it' }).click();
+  const r = d.getByRole('list', { name: 'What was kept' });
+  await expect(r).toContainText('The summary failed (No Anthropic API key).');
+  await expect(r).toContainText('2 memory suggestions waiting for your review');
+  await d.getByRole('button', { name: 'Retry' }).click();
+  await expect(d.getByRole('alert')).toContainText('The request timed out');
+  await expect(r).toContainText('2 memory suggestions waiting for your review'); // still confirmed
+  await d.getByRole('button', { name: 'Retry' }).click();
+  await expect(r).toContainText('Summary saved to “Backend Engineer”');
+  await expect(r).toContainText('2 memory suggestions waiting for your review'); // not redone, not lost
+  await expect(d.getByRole('alert')).toHaveCount(0);
+  expect(await argsOf(page, 'session.remember')).toEqual([['h1', 'R1'], ['h1', 'R1', ['summary']], ['h1', 'R1', ['summary']]]);
+});
+
+test('Retry after the Space was deleted: the result view says so and asks where to file it — nothing is sent until chosen', async ({ save: page }) => {
+  // Read on open, still there at Keep, gone at Retry.
+  await reply(page, 'jobs.get', [FIXTURE.roles[0], FIXTURE.roles[0], null]);
+  await reply(page, 'session.remember', [result('failed', 'off'), result('no-space', 'no-space', { packId: null })]);
+  await open(page);
+  const d = dialog(page);
+  await d.getByRole('button', { name: 'Keep it' }).click();
+  await expect(d.getByRole('list', { name: 'What was kept' })).toContainText('The summary failed');
+  await d.getByRole('button', { name: 'Retry' }).click();
+  await expect(d.getByRole('alert')).toContainText('That Space no longer exists — choose another, or keep it without one.');
+  await expect(d.locator('button[aria-haspopup="listbox"]')).toContainText('Choose where to file it…');
+  await expect(d.getByRole('button', { name: 'Retry' })).toBeDisabled();
+  expect(await argsOf(page, 'session.remember')).toHaveLength(1);
+  await d.locator('button[aria-haspopup="listbox"]').click();
+  await page.locator('ul[role="listbox"] li[role="option"]').filter({ hasText: 'No Space' }).click();
+  await expect(d).toContainText('Retry files it without a Space and runs both halves there.');
+  await d.getByRole('button', { name: 'Retry' }).click();
+  await expect(d.getByRole('list', { name: 'What was kept' })).toContainText('No Space, so nothing was summarised or sent.');
+  // A new destination runs both halves there (no "only").
+  expect((await argsOf(page, 'session.remember')).at(-1)).toEqual(['h1', null]);
+});
+
+test('Retry refused by main (the Space was deleted in between) asks where to file it, on the result view', async ({ save: page }) => {
+  await reply(page, 'session.remember', [result('failed', 'off'), { throw: 'That Space no longer exists — choose another, or keep it without one.' }]);
+  await open(page);
+  const d = dialog(page);
+  await d.getByRole('button', { name: 'Keep it' }).click();
+  await d.getByRole('button', { name: 'Retry' }).click();
+  await expect(d.getByRole('alert')).toContainText('That Space no longer exists');
+  await expect(d.locator('button[aria-haspopup="listbox"]')).toContainText('Choose where to file it…');
+  await expect(d.getByRole('button', { name: 'Retry' })).toBeDisabled();
 });

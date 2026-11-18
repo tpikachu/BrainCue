@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { KeepStepStatus, RememberResult, SessionDetail } from '@shared/types';
 import { sessionTimeline } from './sessionTimeline';
-import { keepPreview, keepResult } from './keepCopy';
+import { failedHalves, keepPreview, keepResult, mergeRetry } from './keepCopy';
 
 /** M6: a saved session reads as a timeline built only from what was
  *  persisted, and the save prompt says what Keep will do and did. */
@@ -83,6 +83,36 @@ describe('sessionTimeline', () => {
   it('an empty session is an empty timeline', () => {
     expect(sessionTimeline({ mode: 'interview', transcript: [], questions: [], cards: [] })).toEqual([]);
   });
+
+  const answerCard = (id: string, title: string, body: string, createdAt: number, meta: Record<string, unknown> | null) => ({
+    id, sessionId: 's', kind: 'answer' as const, status: 'completed' as const, title, body, meta, sourceRefs: null, createdAt, updatedAt: createdAt,
+  });
+
+  it('a saved voice quick Ask (no transcript, no detected question) reads as generated: what was asked, and the answer', () => {
+    const tl = sessionTimeline({
+      mode: 'companion',
+      transcript: [],
+      questions: [],
+      cards: [answerCard('qa', 'What is a write-ahead log?', 'A log written before changes are applied.', 5, { source: 'voice_quick_ask' })],
+    });
+    expect(tl).toEqual([
+      { kind: 'suggestion', id: 'qa', question: 'What is a write-ahead log?', answer: 'A log written before changes are applied.', note: null, asked: true },
+    ]);
+  });
+
+  it("an answer card written for a detected question is never shown twice — it only fills that question's missing answer", () => {
+    const tl = sessionTimeline({
+      mode: 'interview',
+      transcript: [turn('t1', 'interviewer', 'Why Acme?', 10), turn('t2', 'interviewer', 'Why now?', 20)],
+      questions: [question('q1', 'Why Acme?', 't1', 11, 'Their scale.'), question('q2', 'Why now?', 't2', 21, null)],
+      cards: [
+        answerCard('c1', 'Why Acme?', 'Their scale.', 12, { questionId: 'q1' }),
+        answerCard('c2', 'Why now?', 'The team is ready.', 22, { questionId: 'q2' }),
+      ],
+    });
+    expect(tl.map((i) => `${i.kind}:${i.id}`)).toEqual(['turn:t1', 'suggestion:q1', 'turn:t2', 'suggestion:q2']);
+    expect(tl[3]).toMatchObject({ answer: 'The team is ready.' });
+  });
 });
 
 describe('keepPreview — what Keep will do, before it is pressed', () => {
@@ -139,6 +169,23 @@ describe('keepResult — what Keep did, never inferred from a zero count', () =>
     ]);
     expect(text(result('too-short', 'too-short')).join(' ')).toMatch(/Too little was said/);
     expect(text(result('done', 'nothing-new')).join(' ')).toMatch(/No new memory suggestions/);
+  });
+
+  it('a retry runs only the failed half; the confirmed half keeps its outcome', () => {
+    const first = result('failed', 'done', { archived: 0, memories: 2 });
+    expect(failedHalves(first)).toEqual(['summary']);
+    expect(failedHalves(result('failed', 'failed'))).toEqual(['summary', 'memory']);
+    expect(failedHalves(result('done', 'off'))).toEqual([]);
+    // The retry's memory half did not run — the 2 waiting suggestions stand.
+    const merged = mergeRetry(first, result('done', 'not-run'));
+    expect(merged.summary.status).toBe('done');
+    expect(merged.memory).toEqual({ status: 'done', count: 2 });
+    expect([merged.archived, merged.memories]).toEqual([3, 2]);
+    expect(keepResult(merged, ctx).failed).toBe(false);
+    expect(text(merged)).toContain('ok:2 memory suggestions waiting for your review in Memory — nothing is remembered until you approve it.');
+    // A retry that fails again replaces only its own half.
+    const again = mergeRetry(first, result('failed', 'not-run'));
+    expect([again.summary.status, again.memory.status]).toEqual(['failed', 'done']);
   });
 
   it('a failure names the reason, keeps the transcript and offers a retry', () => {

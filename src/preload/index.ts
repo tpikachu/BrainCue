@@ -31,6 +31,7 @@ import type {
   Presence,
   Readiness,
   RememberResult,
+  KeepHalf,
   RollbackResult,
   SessionPage,
   SparringFeedback,
@@ -279,8 +280,9 @@ const api = {
     /** Keep a finished conversation. `packId` files it into a Space first (null
      *  = no Space, undefined = leave it where it ran) — the archive and the
      *  memory candidates are both scoped from there. */
-    remember: (id: string, packId?: string | null) =>
-      invoke<RememberResult>(IPC.session.remember, { id, packId }),
+    /** `only`: a retry runs just the halves that failed. */
+    remember: (id: string, packId?: string | null, only?: KeepHalf[]) =>
+      invoke<RememberResult>(IPC.session.remember, { id, packId, ...(only ? { only } : {}) }),
     setInterviewType: (sessionId: string, interviewType: string) =>
       invoke<{ ok: true }>(IPC.session.setInterviewType, { sessionId, interviewType }),
     setAnswering: (enabled: boolean) =>

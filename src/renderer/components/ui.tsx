@@ -753,8 +753,8 @@ export function Select({
   const options: { value: string; label: string }[] = [];
   Children.forEach(children, (child) => {
     if (!isValidElement(child) || child.type !== 'option') return;
-    const p = child.props as { value?: string | number; children?: React.ReactNode };
-    options.push({ value: String(p.value ?? ''), label: nodeText(p.children) });
+    const p = child.props as { value?: string | number; children?: React.ReactNode; disabled?: boolean };
+    options.push({ value: String(p.value ?? ''), label: nodeText(p.children), ...(p.disabled ? { disabled: true } : {}) });
   });
   return (
     <Dropdown

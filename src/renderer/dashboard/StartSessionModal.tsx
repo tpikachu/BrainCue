@@ -20,6 +20,7 @@ import {
   START_ACTIVITIES,
   captureSummary,
   pickerOptions,
+  isResumableInterview,
   resolveDefaultSpace,
   spaceFits,
   startBlocker,
@@ -316,7 +317,42 @@ export function StartSessionModal(props: {
       if (resume) {
         // Continue the SAME session: its transcript becomes the live context
         // again. A failed resume never deletes it (resumeExisting keeps it).
-        const detail = (await api.session.get(resume.id)) as SessionDetail;
+        //
+        // Validated again HERE, from the session as it is now — not the list
+        // row or the lookup made when the modal opened — before any capture
+        // starts: still this profile's, still a resumable interview, and its
+        // role still exists (its JD grounds the answers). Main checks the
+        // role again on resume.
+        const detail = (await api.session.get(resume.id)) as SessionDetail | null;
+        if (!detail) {
+          setError('This interview no longer exists — it may have been deleted.');
+          return;
+        }
+        if (detail.profileId !== profileId) {
+          setError('This interview belongs to another profile — switch to it in the sidebar to resume it.');
+          return;
+        }
+        // A deleted role leaves the session with no role (the column is
+        // set null) — that is the deleted-role case below, not this one.
+        if (!isResumableInterview({ ...detail, jobId: detail.jobId ?? resume.jobId })) {
+          setError('This session can’t be resumed as an interview. Start a new interview instead.');
+          return;
+        }
+        let role: Job | null = null;
+        try {
+          if (detail.jobId) role = (await api.jobs.get(detail.jobId)) as Job | null;
+        } catch (e) {
+          // Unknown is not gone: nothing starts, and the user can try again.
+          setError(`Couldn’t check this interview’s role (${(e as Error)?.message || 'unknown error'}). Nothing was started — try again.`);
+          return;
+        }
+        if (!spaceFits(role, { profileId, activity: 'job' })) {
+          // The advertised blocker: the role row is cleared, so it shows.
+          invalidate();
+          clearChoice();
+          setError(null);
+          return;
+        }
         const prior = detail.transcript.map((c, i) => ({ id: i, speaker: c.speaker, text: c.text }));
         const resumed = await live.resumeExisting({
           sessionId: resume.id,
@@ -520,6 +556,7 @@ export function StartSessionModal(props: {
             profile={profile}
             space={space}
             interview={!!config.needsResume}
+            roleGone={!!resume && !resolving && !space}
             listensTo={config.listensTo}
             readiness={readiness}
             onGo={go}

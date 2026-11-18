@@ -140,6 +140,30 @@ describe('Keep reports each half as it actually went', () => {
     expect(again.memory.status).toBe('nothing-new'); // ran; nothing to suggest
   });
 
+  it('a retry runs only the half that failed — the other is not redone, and its transcript is not sent again', async () => {
+    const p = profile();
+    const s = session(p, space(p));
+    settingsRepo.set(SETTINGS_KEYS.memoryEnabled, '1');
+    h.archive = async () => {
+      throw new Error('timeout');
+    };
+    const first = await rememberSession(s, undefined, provider);
+    expect([first.summary.status, first.memory.status]).toEqual(['failed', 'nothing-new']);
+    h.archive = async () => GOOD;
+    let extracted = 0;
+    h.extract = async () => {
+      extracted += 1;
+      return { candidates: [] };
+    };
+    const calls = h.calls;
+    const retry = await rememberSession(s, undefined, provider, ['summary']);
+    expect(retry.summary.status).toBe('done');
+    expect(retry.memory).toEqual({ status: 'not-run', count: 0 });
+    expect(extracted).toBe(0);
+    expect(h.calls - calls).toBe(1); // the summary call only
+    expect(retry.provider).toBe('anthropic');
+  });
+
   it('failed: an unusable summary shape is a failure, not a silent zero', async () => {
     const p = profile();
     const r = await rememberSession(session(p, space(p)), undefined, provider);

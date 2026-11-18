@@ -380,7 +380,12 @@ parsing task's provider, so the sample interview can start on any provider.
   ("Continuing the round from … — its transcript is restored and kept"), and
   an explicit **Resume interview** that continues the SAME session
   (`resumeExisting`). Another profile's interview, or one whose role was
-  deleted, is blocked with why. Earlier content is never deleted.
+  deleted, is blocked with why. Pressing Resume re-reads the session and its
+  role as they are NOW, before any capture: still this profile's, still an
+  interview, its role still there (a failed read starts nothing and says
+  so). Main checks again in `engine.resume` — a missing or other-profile
+  Space, or an interview with no role, is refused before the row goes live.
+  Earlier content is never deleted.
 - **The Cue Card** (M6, `overlay/Overlay.tsx`, `cueLayout.ts`). The header
   says what the session is doing (Listening / Answering / Paused /
   Reconnecting) and holds the live controls: Privacy, click-through,

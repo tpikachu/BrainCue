@@ -8,7 +8,7 @@ import { cloudProvider } from '@shared/providers';
 import type { Job, RememberResult, SessionMode } from '@shared/types';
 import { Button, Field, Modal, Select, TextInput } from '../components/ui';
 import { pickerOptions } from './startFlow';
-import { keepPreview, keepResult, type Line } from './keepCopy';
+import { failedHalves, keepPreview, keepResult, mergeRetry, type Line } from './keepCopy';
 
 /** How many Spaces the picker loads at once; older ones are found by search. */
 const PAGE = 100;
@@ -31,6 +31,25 @@ const endedTitle = (p: { activity?: string | null; mode?: SessionMode } | null):
 
 const spaceLabel = (s: Job) => `${s.title || 'Untitled'}${s.company ? ` · ${s.company}` : ''}`;
 
+/** The picker's value for an explicit "no Space" — apart from the
+ *  placeholder shown while the destination is unknown or must be chosen. */
+const NONE = 'none';
+const CHOOSE = '';
+const GONE = 'That Space no longer exists — choose another, or keep it without one.';
+
+/**
+ * Where it will be filed, as far as the prompt KNOWS:
+ *  - `resolving`: the Space it ran in is still being read;
+ *  - `unknown`: that read FAILED — the Space may well still exist, so nothing
+ *    is filed until it is read again or the user chooses (never a silent
+ *    "no Space");
+ *  - `choose`: the chosen Space was confirmed gone at Keep / Retry — the user
+ *    picks again (another Space, or No Space) before anything runs;
+ *  - `known`: `space` is the destination (null = No Space, chosen or — when
+ *    the Space it ran in was confirmed gone on open — said).
+ */
+type Dest = 'resolving' | 'unknown' | 'choose' | 'known';
+
 /**
  * The save-or-discard prompt — and the gate on remembering
  * (docs/16-CONTINUITY.md §9).
@@ -45,9 +64,16 @@ const spaceLabel = (s: Job) => `${s.title || 'Untitled'}${s.company ? ` · ${s.c
  *
  * The destination is held as its own validated record, apart from the
  * picker's page: the Space it ran in is read by id (an older one is never
- * dropped for not being on the first page), re-read before Keep (a deleted
- * one is refused), and main validates it again (this profile's, and still
- * there).
+ * dropped for not being on the first page), re-read before Keep and before
+ * every Retry (a deleted one is refused), and main validates it again (this
+ * profile's, and still there). A destination that could not be READ is
+ * unknown, not absent: Keep waits for a successful read or an explicit
+ * choice, so a failed lookup never files the session out of its Space.
+ *
+ * A Retry re-runs only the half that failed, at the same destination; the
+ * other half's confirmed outcome stands (and its transcript is not sent
+ * again). A Retry's own errors, and a destination that has to be chosen
+ * again, are shown on the result view itself.
  *
  * Rendered in App rather than on a page: sessions start from several places
  * and are usually STOPPED from the Cue Card, so the prompt has to appear
@@ -60,6 +86,11 @@ export function SavePromptModal() {
   const refreshReadiness = useReadinessStore((s) => s.refresh);
   /** Where to keep it — validated (this session's profile), or none. */
   const [space, setSpace] = useState<Job | null>(null);
+  const [dest, setDest] = useState<Dest>('known');
+  /** Why the destination is unknown (the failed read). */
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  /** Bumped by "Try again" — re-reads the Space it ran in. */
+  const [lookups, setLookups] = useState(0);
   const [page, setPage] = useState<{ items: Job[]; total: number } | null>(null);
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState<false | 'keeping' | 'deleting'>(false);
@@ -67,10 +98,10 @@ export function SavePromptModal() {
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [result, setResult] = useState<RememberResult | null>(null);
+  /** Where `result` was filed. A Retry to the same place re-runs only what
+   *  failed; a new destination runs both halves there. */
+  const resultPack = useRef<string | null | undefined>(undefined);
   const [reloads, setReloads] = useState(0);
-  /** The Space it ran in is still being read: Keep waits for it, or a quick
-   *  Keep would file the session out of that Space. */
-  const [resolving, setResolving] = useState(false);
   /** The prompt this state belongs to: a reply for an earlier one is ignored. */
   const forSession = useRef<string | null>(null);
   /** Bumped by every explicit choice: a late lookup of the Space it ran in
@@ -79,8 +110,7 @@ export function SavePromptModal() {
 
   const profileId = pendingSave?.profileId ?? '';
 
-  // A new prompt starts over. The Space it ran in is read BY ID — wherever it
-  // sits in the list — and kept only if it still exists for this profile.
+  // A new prompt starts over.
   useEffect(() => {
     forSession.current = pendingSave?.sessionId ?? null;
     setSpace(null);
@@ -88,28 +118,45 @@ export function SavePromptModal() {
     setError(null);
     setNote(null);
     setResult(null);
+    resultPack.current = undefined;
     setConfirmDiscard(false);
-    setResolving(!!pendingSave?.packId);
+    setLookupError(null);
+    setDest(pendingSave?.packId ? 'resolving' : 'known');
     if (!pendingSave) return;
     // Fresh: the prompt names who the transcript would go to.
     void loadSettings();
     void refreshReadiness();
+  }, [pendingSave, loadSettings, refreshReadiness]);
+
+  // The Space it ran in is read BY ID — wherever it sits in the list — on
+  // open, and again on "Try again". Confirmed gone (or not this profile's):
+  // No Space, said. The read FAILED: the destination stays unknown.
+  useEffect(() => {
+    if (!pendingSave?.packId) return;
     const sid = pendingSave.sessionId;
+    const packId = pendingSave.packId;
     const gen = ++choice.current;
     const current = () => forSession.current === sid && choice.current === gen;
-    if (pendingSave.packId) {
-      void api.jobs
-        .get(pendingSave.packId)
-        .then((raw) => {
-          if (!current()) return;
-          const j = raw as Job | null;
-          if (j && j.profileId === pendingSave.profileId) setSpace(j);
-          else setNote('The Space it ran in no longer exists — choose another, or keep it without one.');
-        })
-        .catch(() => {})
-        .finally(() => current() && setResolving(false));
-    }
-  }, [pendingSave, loadSettings, refreshReadiness]);
+    setDest('resolving');
+    setLookupError(null);
+    void api.jobs
+      .get(packId)
+      .then((raw) => {
+        if (!current()) return;
+        const j = raw as Job | null;
+        if (j && j.profileId === pendingSave.profileId) setSpace(j);
+        else {
+          setSpace(null);
+          setNote('The Space it ran in no longer exists — choose another, or keep it without one.');
+        }
+        setDest('known');
+      })
+      .catch((e) => {
+        if (!current()) return;
+        setLookupError((e as Error)?.message || 'unknown error');
+        setDest('unknown');
+      });
+  }, [pendingSave, lookups]);
 
   // One page of this profile's Spaces, searched when asked (server-side).
   useEffect(() => {
@@ -129,6 +176,7 @@ export function SavePromptModal() {
 
   const options = pickerOptions(page?.items ?? [], space);
   const searchable = !!query || (!!page && page.total > page.items.length);
+  const settled = dest === 'known';
   const providerName = (id: string | null | undefined) => (id ? (cloudProvider(id)?.name ?? id) : null);
   const preview = keepPreview({
     space: space ? { title: space.title || 'Untitled', remembers: space.memoryEnabled !== false } : null,
@@ -141,29 +189,67 @@ export function SavePromptModal() {
   const isInterview = pendingSave?.mode === 'interview' || pendingSave?.mode === 'practice';
   const emptyish = (pendingSave?.turnCount ?? 0) < 4;
 
+  /** An explicit pick (a Space, or No Space). */
+  const choose = (value: string) => {
+    if (value === CHOOSE) return;
+    setSpace(value === NONE ? null : (options.find((s) => s.id === value) ?? null));
+    // An explicit choice supersedes the lookup still in flight.
+    choice.current += 1;
+    setDest('known');
+    setLookupError(null);
+    setError(null);
+    setNote(null);
+  };
+
+  /** The destination was confirmed gone: nothing runs until it is chosen. */
+  const mustChoose = (message: string) => {
+    setSpace(null);
+    setDest('choose');
+    setReloads((n) => n + 1);
+    setError(message);
+  };
+
+  // Keep — and Retry, which re-runs only the failed halves when the
+  // destination is the one the result was filed into.
   const keep = async () => {
-    if (!pendingSave || busy || resolving) return;
+    if (!pendingSave || busy || !settled) return;
     const sid = pendingSave.sessionId;
+    const target = space?.id ?? null;
     setBusy('keeping');
     setError(null);
     try {
       // Re-read the chosen Space: one deleted (or not this profile's) since
-      // it was chosen is never filed into. Main checks again.
+      // it was chosen is never filed into. Main checks again. A read that
+      // FAILS proves nothing — the choice stands, and nothing is sent.
       if (space) {
-        const fresh = (await api.jobs.get(space.id).catch(() => null)) as Job | null;
+        let fresh: Job | null;
+        try {
+          fresh = (await api.jobs.get(space.id)) as Job | null;
+        } catch (e) {
+          if (forSession.current === sid) {
+            setError(
+              `Couldn’t check that “${space.title || 'Untitled'}” still exists (${(e as Error)?.message || 'unknown error'}). Nothing was sent — try again.`,
+            );
+          }
+          return;
+        }
         if (!fresh || fresh.profileId !== pendingSave.profileId) {
-          if (forSession.current !== sid) return;
-          setSpace(null);
-          setReloads((n) => n + 1);
-          setError('That Space no longer exists — choose another, or keep it without one.');
+          if (forSession.current === sid) mustChoose(GONE);
           return;
         }
       }
-      const r = await api.session.remember(sid, space?.id ?? null);
-      if (forSession.current === sid) setResult(r);
+      const only = result && resultPack.current === target ? failedHalves(result) : [];
+      const r = await api.session.remember(sid, target, only.length ? only : undefined);
+      if (forSession.current !== sid) return;
+      setResult((prev) => (only.length ? mergeRetry(prev, r) : r));
+      resultPack.current = target;
     } catch (e) {
-      if (forSession.current === sid) {
-        setError((e as Error).message);
+      if (forSession.current !== sid) return;
+      const message = (e as Error).message;
+      // Main refused the destination (gone, or another profile's): choose again.
+      if (/no longer exists|another profile/.test(message)) mustChoose(message);
+      else {
+        setError(message);
         setReloads((n) => n + 1);
       }
     } finally {
@@ -189,6 +275,65 @@ export function SavePromptModal() {
   const outcome = result
     ? keepResult(result, { space: space ? space.title || 'Untitled' : null, provider: providerName(result.provider) })
     : null;
+  /** The Retry would file it somewhere other than the result's destination. */
+  const moved = !!result && settled && resultPack.current !== (space?.id ?? null);
+
+  const errorLine = error && (
+    <p className="text-sm text-amber-400" role="alert">
+      ⚠ {error}
+    </p>
+  );
+
+  // A Space is what makes remembering possible at all: the summary and its
+  // memories are scoped to one. A call started without one often turns out to
+  // belong to one, so the choice is offered again here — and on the result
+  // view whenever a Retry has to be filed somewhere new.
+  const picker = (
+    <Field label="File it in">
+      <Select
+        value={!settled ? CHOOSE : space ? space.id : NONE}
+        onChange={(e) => choose(e.target.value)}
+        disabled={!!busy}
+      >
+        {!settled && (
+          <option value={CHOOSE} disabled>
+            {dest === 'resolving' ? 'Checking the Space it ran in…' : 'Choose where to file it…'}
+          </option>
+        )}
+        <option value={NONE}>No Space — keep the transcript only</option>
+        {options.map((s) => (
+          <option key={s.id} value={s.id}>
+            {spaceLabel(s)}
+          </option>
+        ))}
+      </Select>
+      {searchable && (
+        <TextInput
+          className="mt-2"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search older Spaces…"
+          aria-label="Search Spaces"
+        />
+      )}
+    </Field>
+  );
+  const destination = (
+    <>
+      {picker}
+      {dest === 'unknown' && (
+        <div className="flex items-start justify-between gap-2 text-xs text-amber-400" role="alert">
+          <span>
+            Couldn’t check the Space it ran in ({lookupError}). It may still exist — try again, or choose where to
+            file it. Nothing is filed until then.
+          </span>
+          <Button variant="ghost" className="shrink-0" disabled={!!busy} onClick={() => setLookups((n) => n + 1)}>
+            Try again
+          </Button>
+        </div>
+      )}
+    </>
+  );
 
   return (
     <Modal
@@ -207,9 +352,19 @@ export function SavePromptModal() {
               <ResultLine key={l.text} line={l} />
             ))}
           </ul>
+          {/* A Retry whose destination was confirmed gone files nothing until
+              the user chooses again — here, on the view they are looking at. */}
+          {outcome.failed && (!settled || moved) && destination}
+          {outcome.failed && moved && (
+            <p className="text-xs text-neutral-400">
+              Retry files it {space ? `into “${space.title || 'Untitled'}”` : 'without a Space'} and runs both halves
+              there.
+            </p>
+          )}
+          {errorLine}
           <div className="flex justify-end gap-2">
             {outcome.failed && (
-              <Button variant="default" loading={busy === 'keeping'} onClick={() => void keep()}>
+              <Button variant="default" loading={busy === 'keeping'} disabled={!settled} onClick={() => void keep()}>
                 Retry
               </Button>
             )}
@@ -231,40 +386,7 @@ export function SavePromptModal() {
             </span>
           </p>
 
-          {/* A Space is what makes remembering possible at all: the summary and
-              its memories are scoped to one. A call started without one often
-              turns out to belong to one, so the choice is offered again here —
-              and this is the last time it is asked. */}
-          <Field label="File it in">
-            <Select
-              value={space?.id ?? ''}
-              onChange={(e) => {
-                setSpace(options.find((s) => s.id === e.target.value) ?? null);
-                // An explicit choice supersedes the lookup still in flight.
-                choice.current += 1;
-                setResolving(false);
-                setError(null);
-                setNote(null);
-              }}
-              disabled={!!busy}
-            >
-              <option value="">No Space — keep the transcript only</option>
-              {options.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {spaceLabel(s)}
-                </option>
-              ))}
-            </Select>
-            {searchable && (
-              <TextInput
-                className="mt-2"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search older Spaces…"
-                aria-label="Search Spaces"
-              />
-            )}
-          </Field>
+          {destination}
 
           {note && <p className="text-xs text-amber-400">{note}</p>}
 
@@ -274,11 +396,7 @@ export function SavePromptModal() {
             ))}
           </ul>
 
-          {error && (
-            <p className="text-sm text-amber-400" role="alert">
-              ⚠ {error}
-            </p>
-          )}
+          {errorLine}
 
           {confirmDiscard ? (
             <div
@@ -305,7 +423,7 @@ export function SavePromptModal() {
                 <Button variant="ghost" disabled={!!busy} onClick={clearPendingSave}>
                   Decide later
                 </Button>
-                <Button variant="primary" loading={busy === 'keeping'} disabled={resolving} onClick={() => void keep()}>
+                <Button variant="primary" loading={busy === 'keeping'} disabled={!settled} onClick={() => void keep()}>
                   Keep it
                 </Button>
               </div>

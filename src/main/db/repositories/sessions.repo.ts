@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, like, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, like, or, sql, type SQL } from 'drizzle-orm';
 import { db, schema } from '../index';
 import { transcriptOrder } from '../transcriptOrder';
 import type {
@@ -128,6 +128,19 @@ function toListItem(r: ListRow, counts: Map<string, Record<string, number>>): Se
   };
 }
 
+/** The detected question an answer card was written for, if any — the
+ *  engine records it in meta.questionId and as a 'question' source ref. */
+function linkedQuestion(r: { meta: string | null; sourceRefs: string | null }): string | null {
+  try {
+    const meta = r.meta ? (JSON.parse(r.meta) as { questionId?: unknown }) : null;
+    if (meta && typeof meta.questionId === 'string') return meta.questionId;
+    const refs = r.sourceRefs ? (JSON.parse(r.sourceRefs) as { type?: string; id?: string }[]) : [];
+    return refs.find((x) => x?.type === 'question' && typeof x.id === 'string')?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export const sessionsRepo = {
   /** One session row, or null. */
   get(id: string): Session | null {
@@ -254,14 +267,19 @@ export const sessionsRepo = {
       .where(eq(schema.sessionReports.sessionId, id))
       .get();
 
-    // The other cards it produced (meetings, companion) — answers to detected
-    // questions are above. Oldest first, as they appeared.
+    // The other cards it produced (meetings, companion, saved voice quick
+    // Asks), oldest first, as they appeared. An answer card is left out ONLY
+    // when it is the dual-write of a detected question's answer already shown
+    // above (linked by id, and that answer was saved) — a quick Ask has no
+    // detected question and no transcript, so it is the session's only content.
+    const answered = new Set(questions.filter((q) => q.answer?.directAnswer?.trim()).map((q) => q.id));
     const cards = db()
       .select()
       .from(schema.contributions)
-      .where(and(eq(schema.contributions.sessionId, id), ne(schema.contributions.kind, 'answer')))
+      .where(eq(schema.contributions.sessionId, id))
       .orderBy(asc(schema.contributions.createdAt))
       .all()
+      .filter((r) => r.kind !== 'answer' || !answered.has(linkedQuestion(r) ?? ''))
       .map<Contribution>((r) => ({
         id: r.id,
         sessionId: r.sessionId,

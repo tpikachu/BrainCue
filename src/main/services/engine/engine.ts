@@ -308,6 +308,20 @@ class Engine {
     if (!row) throw new Error('Session not found');
     const profile = profilesRepo.get(row.profileId);
     if (!profile) throw new Error('Profile not found');
+    // The Space it continues in must still be there — and still this
+    // profile's. One the activity needs (an interview's role: its JD grounds
+    // every answer) is required; a deleted one leaves the column null.
+    // Checked here, before the row goes live, so no window can resume a
+    // session whose role went away after its own checks. (v1 rows carry no
+    // activity and are not held to a rule they were never started under.)
+    const needsSpace = row.activity ? activityConfig(row.activity as ContextPackKind).needsSpace : false;
+    const pack = row.packId ? contextPacksRepo.get(row.packId) : null;
+    if (row.packId && (!pack || pack.profileId !== row.profileId)) {
+      throw new Error('This session’s Space no longer exists — start a new session instead.');
+    }
+    if (needsSpace && !pack) {
+      throw new Error('This interview’s role no longer exists — start a new interview instead.');
+    }
     db()
       .update(schema.sessions)
       .set({ status: 'live', endedAt: null })

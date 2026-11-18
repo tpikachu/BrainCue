@@ -250,15 +250,22 @@ export function registerSessionIpc(): void {
       /** Where to remember it. A string files the session into that Space,
        *  `null` files it out of every Space, absent leaves it where it ran. */
       packId: z.string().min(1).nullable().optional(),
+      /** A retry: run only these halves (the ones that failed). */
+      only: z.array(z.enum(['summary', 'memory'])).min(1).optional(),
     }),
-    ({ id, packId }) =>
-      rememberSession(id, packId, () => {
-        try {
-          return resolveTask('parsing').provider;
-        } catch {
-          return null;
-        }
-      }),
+    ({ id, packId, only }) =>
+      rememberSession(
+        id,
+        packId,
+        () => {
+          try {
+            return resolveTask('parsing').provider;
+          } catch {
+            return null;
+          }
+        },
+        only,
+      ),
   );
 
   handle(IPC.session.delete, zId, ({ id }) => {

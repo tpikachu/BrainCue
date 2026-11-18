@@ -103,6 +103,11 @@ describe('the interview setup summary', () => {
     expect(r[1].state).toMatchObject({ tone: 'warn', action: { label: 'Add JD', to: EDIT_ROLE } });
   });
 
+  it('no role: points at the picker — or, resuming one whose role was deleted (no picker), says so', () => {
+    expect(rows({ space: undefined })[1].state).toEqual({ tone: 'block', text: 'choose the role above' });
+    expect(rows({ space: undefined, roleGone: true })[1].state).toEqual({ tone: 'block', text: 'deleted — start a new interview' });
+  });
+
   it('keyword-only document matching is said on the AI row but does not block', () => {
     const r = rows({ readiness: { ...ready, retrieval: { ready: true, mode: 'lexical', note: 'No OpenAI key…' } } });
     expect(r[3].state).toMatchObject({ tone: 'ok', text: 'Anthropic · Claude Sonnet 5.5 · keyword document matching' });

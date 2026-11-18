@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { eq } from 'drizzle-orm';
 import { EVENTS } from '@shared/ipc';
 import type { RollbackResult } from '@shared/types';
 
@@ -75,6 +76,12 @@ function makeProfile(): string {
   h.db.insert(schema.profiles).values({ id, name: 'Test User', parsedResume: '{"skills":[]}' }).run();
   return id;
 }
+/** An interview's role — an interview needs one to start or resume. */
+function makeRole(profileId: string): string {
+  const id = `role-${profileId}`;
+  h.db.insert(schema.contextPacks).values({ id, profileId, kind: 'job', title: 'Backend Engineer' }).run();
+  return id;
+}
 const prompts = () => h.events.filter((e) => e.ch === EVENTS.savePrompt);
 const settled = () => h.events.filter((e) => e.ch === EVENTS.sessionRollback).map((e) => e.payload as RollbackResult);
 const row = (id: string) => h.db.select().from(schema.sessions).all().find((s) => s.id === id);
@@ -115,7 +122,7 @@ describe('a failed start is rolled back by ONE policy, from either window', () =
 
   it('resumed session: the retry stops it but KEEPS its earlier content, and a later legitimate stop prompts again', () => {
     const profileId = makeProfile();
-    const s = engine.start(profileId, 'general', null, 'general', { activity: 'job' });
+    const s = engine.start(profileId, 'general', makeRole(profileId), 'general', { activity: 'job' });
     h.db
       .insert(schema.transcriptChunks)
       .values({ id: `t-${s.id}`, sessionId: s.id, speaker: 'interviewer', text: 'Tell me about the migration.', isFinal: 1 })
@@ -173,5 +180,42 @@ describe('a failed start is rolled back by ONE policy, from either window', () =
     expect(engine.stopActive()).toEqual({ stopped: true });
     expect(prompts().map((p) => (p.payload as { sessionId: string }).sessionId)).toEqual([s.id]);
     expect(settled()).toHaveLength(0);
+  });
+});
+
+describe('resume validates the role in main, before the row goes live (M6 review)', () => {
+  const stopped = (profileId: string, packId: string | null) => {
+    const s = engine.start(profileId, 'general', packId, 'general', { activity: 'job' });
+    engine.stop(s.id);
+    h.events.length = 0;
+    return s.id;
+  };
+
+  it("an interview whose role was deleted is refused — the row stays stopped, nothing starts", () => {
+    const profileId = makeProfile();
+    const id = stopped(profileId, makeRole(profileId));
+    // What deleting a role does to its sessions (jobsRepo.delete detaches them).
+    h.db.update(schema.sessions).set({ packId: null }).where(eq(schema.sessions.id, id)).run();
+    h.db.delete(schema.contextPacks).where(eq(schema.contextPacks.id, `role-${profileId}`)).run();
+    expect(row(id)?.packId).toBeNull();
+    expect(() => engine.resume(id)).toThrow(/role no longer exists/);
+    expect(row(id)?.status).toBe('stopped');
+    expect(engine.stopActive()).toEqual({ stopped: false });
+  });
+
+  it("a Space that is now another profile's is refused", () => {
+    const a = makeProfile();
+    const b = makeProfile();
+    const id = stopped(a, makeRole(a));
+    h.db.update(schema.contextPacks).set({ profileId: b }).where(eq(schema.contextPacks.id, `role-${a}`)).run();
+    expect(() => engine.resume(id)).toThrow(/Space no longer exists/);
+    expect(row(id)?.status).toBe('stopped');
+  });
+
+  it('an interview whose role still exists resumes the same session', () => {
+    const profileId = makeProfile();
+    const id = stopped(profileId, makeRole(profileId));
+    expect(engine.resume(id)).toMatchObject({ id, status: 'live' });
+    engine.stop(id);
   });
 });

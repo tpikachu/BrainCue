@@ -2,7 +2,7 @@ import { contextPacksRepo } from '../../db/repositories/jobs.repo';
 import { sessionsRepo } from '../../db/repositories/sessions.repo';
 import { archiveSessionOutcome } from '../engine/sessionArchive';
 import { extractMemoryOutcome } from '../memory/extractor';
-import type { KeepStep, RememberResult } from '@shared/types';
+import type { KeepHalf, KeepStep, RememberResult } from '@shared/types';
 
 /** A half that actually asked the parsing provider (so the result names it). */
 const reachedProvider = (s: KeepStep) =>
@@ -28,11 +28,15 @@ const reachedProvider = (s: KeepStep) =>
  *   out of every Space, `undefined` leaves it where it ran.
  * @param parsingProvider which provider the summary/suggestions go to (the
  *   parsing task's route), named in the result when either half reached it.
+ * @param only a retry runs only these halves (the ones that failed); the
+ *   other comes back `not-run`, so its confirmed outcome is never redone —
+ *   the transcript is not sent again for a half that already succeeded.
  */
 export async function rememberSession(
   id: string,
   packId: string | null | undefined,
   parsingProvider: () => string | null,
+  only?: KeepHalf[],
 ): Promise<RememberResult> {
   const session = sessionsRepo.get(id);
   if (!session) throw new Error('Session not found');
@@ -45,7 +49,12 @@ export async function rememberSession(
   // the memory suggestions read their scope off this column.
   if (packId !== undefined) sessionsRepo.setPack(id, packId);
   const filed = packId !== undefined ? packId : session.jobId;
-  const [summary, memory] = await Promise.all([archiveSessionOutcome(id), extractMemoryOutcome(id)]);
+  const runs = (h: KeepHalf) => !only || only.includes(h);
+  const notRun = async (): Promise<KeepStep> => ({ status: 'not-run', count: 0 });
+  const [summary, memory] = await Promise.all([
+    runs('summary') ? archiveSessionOutcome(id) : notRun(),
+    runs('memory') ? extractMemoryOutcome(id) : notRun(),
+  ]);
   return {
     kept: true,
     packId: filed ?? null,

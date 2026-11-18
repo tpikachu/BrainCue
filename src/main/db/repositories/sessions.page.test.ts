@@ -22,6 +22,7 @@ vi.mock('../index', async () => {
 import * as schema from '../schema';
 import { createTestDb } from '../../test/dbHarness';
 import { sessionsRepo } from './sessions.repo';
+import { enginePersistence } from '../../services/engine/persistence/enginePersistence';
 
 beforeAll(async () => {
   h.db = (await createTestDb()).db;
@@ -91,18 +92,52 @@ describe('sessionsRepo.page', () => {
 });
 
 describe('sessionsRepo.detail', () => {
-  it("carries the session's other cards (oldest first, not its answers) and its Space", () => {
+  it("carries the session's other cards, oldest first — leaving out only an answer already shown with its question — and its Space", () => {
+    h.db.insert(schema.detectedQuestions).values({ id: 'q30', sessionId: 'a30', text: 'Why now?', type: 'behavioral', confidence: 1 }).run();
+    h.db.insert(schema.aiAnswers).values({ id: 'aa30', questionId: 'q30', directAnswer: 'Because the team is ready.' }).run();
     h.db
       .insert(schema.contributions)
       .values([
         { id: 'c2', sessionId: 'a30', kind: 'action_item', status: 'completed', title: 'Send the deck', body: '', createdAt: 20 },
         { id: 'c1', sessionId: 'a30', kind: 'decision', status: 'completed', title: null, body: 'Ship Friday', createdAt: 10 },
+        // A standalone answer (no detected question): its only record.
         { id: 'c3', sessionId: 'a30', kind: 'answer', status: 'completed', title: 'Q', body: 'A', createdAt: 15 },
+        // The engine's dual-write of q30's answer: already shown with q30.
+        {
+          id: 'c4', sessionId: 'a30', kind: 'answer', status: 'completed', title: 'Why now?', body: 'Because the team is ready.', createdAt: 16,
+          meta: JSON.stringify({ questionId: 'q30' }), sourceRefs: JSON.stringify([{ type: 'question', id: 'q30' }]),
+        },
       ])
       .run();
     const d = sessionsRepo.detail('a30')!;
-    expect(d.cards.map((c) => c.id)).toEqual(['c1', 'c2']);
+    expect(d.questions.map((q) => q.id)).toEqual(['q30']);
+    expect(d.cards.map((c) => c.id)).toEqual(['c1', 'c3', 'c2']);
     expect(d.spaceTitle).toBe('Daily standup');
     expect(sessionsRepo.detail('a29')!.spaceCompany).toBe('Acme');
+  });
+});
+
+describe('a saved voice quick Ask opens offline (M6 review)', () => {
+  it('the answer the writer persisted — no detected question, no transcript — is in the detail', () => {
+    h.db.insert(schema.sessions).values({ id: 'qa1', profileId: 'pA', mode: 'companion', kind: 'live', status: 'stopped', createdAt: 9_000 }).run();
+    // Exactly what voiceService.quickAsk writes when quick Asks are saved.
+    enginePersistence.insertContribution({
+      sessionId: 'qa1',
+      kind: 'answer',
+      title: 'What is a write-ahead log?',
+      body: 'A log of changes written before they are applied, so a crash can replay them.',
+      meta: { source: 'voice_quick_ask' },
+      sourceRefs: [{ type: 'chunk', id: 'k1' }],
+    });
+    const d = sessionsRepo.detail('qa1')!;
+    expect(d.transcript).toEqual([]);
+    expect(d.questions).toEqual([]);
+    expect(d.cards).toHaveLength(1);
+    expect(d.cards[0]).toMatchObject({
+      kind: 'answer',
+      title: 'What is a write-ahead log?',
+      body: 'A log of changes written before they are applied, so a crash can replay them.',
+      meta: { source: 'voice_quick_ask' },
+    });
   });
 });

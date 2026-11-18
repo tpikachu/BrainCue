@@ -1,4 +1,4 @@
-import type { KeepStep, RememberResult } from '@shared/types';
+import type { KeepHalf, KeepStep, RememberResult } from '@shared/types';
 
 /**
  * The save prompt's words (docs/16-CONTINUITY.md §9) — what Keep WILL do,
@@ -79,6 +79,7 @@ const SUMMARY: Record<KeepStep['status'], (s: KeepStep, ctx: Ctx) => Line> = {
   'too-short': () => ({ tone: 'muted', text: 'Too little was said to summarise — nothing was sent.' }),
   withheld: () => ({ tone: 'muted', text: 'The summary repeated something sensitive, so it was not saved.' }),
   failed: (s) => ({ tone: 'error', text: `The summary failed${why(s.error)}.` }),
+  'not-run': () => ({ tone: 'muted', text: 'The summary was not run again.' }),
 };
 
 const MEMORY: Record<KeepStep['status'], (s: KeepStep, ctx: Ctx) => Line> = {
@@ -94,6 +95,7 @@ const MEMORY: Record<KeepStep['status'], (s: KeepStep, ctx: Ctx) => Line> = {
   'too-short': () => ({ tone: 'muted', text: 'Too little was said for memory suggestions.' }),
   withheld: () => ({ tone: 'muted', text: 'Memory suggestions were withheld as sensitive.' }),
   failed: (s) => ({ tone: 'error', text: `Memory suggestions failed${why(s.error)}.` }),
+  'not-run': () => ({ tone: 'muted', text: 'Memory suggestions were not run again.' }),
 };
 
 interface Ctx {
@@ -117,4 +119,30 @@ export function keepResult(r: RememberResult, ctx: Ctx): { lines: Line[]; failed
   const failed = r.summary.status === 'failed' || r.memory.status === 'failed';
   if (failed) lines.push({ tone: 'muted', text: 'The transcript is kept either way. Retry now, or close and keep it as it is.' });
   return { lines, failed };
+}
+
+/** The halves a retry should run: only the ones that failed. */
+export function failedHalves(r: RememberResult): KeepHalf[] {
+  return [r.summary.status === 'failed' ? 'summary' : null, r.memory.status === 'failed' ? 'memory' : null].filter(
+    (h): h is KeepHalf => !!h,
+  );
+}
+
+/**
+ * A retry's result over the one before it: a half the retry did not run
+ * (`not-run`) keeps its earlier, confirmed outcome — a saved summary or
+ * waiting suggestions are never reported away by the retry of the other half.
+ */
+export function mergeRetry(prev: RememberResult | null, next: RememberResult): RememberResult {
+  if (!prev) return next;
+  const summary = next.summary.status === 'not-run' ? prev.summary : next.summary;
+  const memory = next.memory.status === 'not-run' ? prev.memory : next.memory;
+  return {
+    ...next,
+    summary,
+    memory,
+    provider: next.provider ?? prev.provider,
+    archived: summary.count,
+    memories: memory.count,
+  };
 }

@@ -50,10 +50,13 @@ Two tiers:
   127.0.0.1 (CDP captures wait for frames a hidden window does not always paint), and
   `HARNESS_SHOW_X` (≥ 1920 only) shows it without focus on a second monitor.
   - `startModal.race.spec.ts` — the start flow under controlled timing (late lookups after
-    reopen, a newer pick, a profile switch, a stale failure) and Resume through it.
+    reopen, a newer pick, a profile switch, a stale failure) and Resume through it — which
+    re-reads the session and its role when pressed (deleted, detached, unreadable, moved).
   - `history-and-save.spec.ts` — history opens from the persisted session only (no report,
-    no model call); reports are explicit; Keep reports each outcome (success, failure +
-    Retry, no Space, a refused destination), stays open while busy, Discard asks first.
+    no model call), including a saved voice quick Ask; reports are explicit; Keep reports
+    each outcome (success, failure + Retry, no Space, a refused destination), never files out
+    of an unreadable Space, shows a Retry's own errors and a gone destination on the result
+    view, re-runs only the failed half, stays open while busy, Discard asks first.
   - `cue-card.spec.ts` — the current question dominates; missed questions stay with why and
     a retry; earlier cards behind a toggle; sources name the provider; an unconfirmed Stop
     after a failed rollback is said in the Cue Card.

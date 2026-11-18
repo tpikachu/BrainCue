@@ -248,12 +248,22 @@ Two consequences:
   Space opted out, no Space, a rehearsal, too short, withheld as sensitive, or
   failed with its reason. The prompt reports each as itself — a zero count
   never stands in for a reason — keeps the transcript whatever happened, and
-  offers Retry on a failure (re-archiving replaces; re-extraction skips what is
-  already known). Before Keep it says where the transcript goes: it stays on
+  offers Retry on a failure. A Retry re-runs only the half that failed, at
+  the same destination (`only`); the other half's confirmed outcome stands
+  and its transcript is not sent again. Before Keep it says where the transcript goes: it stays on
   this machine; the summary and suggestions are made by sending it to the
   parsing provider (named), or nothing is sent (no Space, opted out, both
   off). It no longer says "everything stays on this machine". Discard asks
   first; Decide later keeps the transcript and sends nothing.
+- **An unknown destination is not "no Space" (M6 review).** The prompt reads
+  the Space the session ran in by id. If that read FAILS, the destination is
+  unknown — the Space may still exist — so Keep waits: the prompt says the
+  read failed, offers Try again, and accepts an explicit choice (a Space, or
+  No Space). Only a confirmed absence falls back to No Space, and says so. A
+  Space confirmed gone at Keep or at Retry (re-read in the renderer, or
+  refused by main) makes the user choose again before anything runs; on the
+  result view the picker appears there, with the error, and a Retry to a new
+  destination runs both halves there.
 
 Saved memory is grouped by Space in the Memory section for the same reason. A
 flat list said nothing about scope, and reading them interleaved you cannot

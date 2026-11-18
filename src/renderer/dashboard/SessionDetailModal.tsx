@@ -230,7 +230,7 @@ function TimelineRow({ item }: { item: TimelineItem }) {
     return (
       <li className="rounded-lg border border-indigo-500/20 bg-indigo-500/5 px-3 py-2">
         <p className="text-xs text-indigo-300">
-          <span className="font-medium">Question detected:</span> {item.question}
+          <span className="font-medium">{item.asked ? 'You asked:' : 'Question detected:'}</span> {item.question}
         </p>
         {item.answer ? (
           <div className="mt-1">

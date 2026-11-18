@@ -12,6 +12,10 @@ import { normalizeSpeaker, type SessionDetail, type SessionMode } from '@shared/
  * - A suggestion sits right after the turn its question was detected on; one
  *   with no such turn (a typed Ask, a v1 row), and every other card, sits
  *   after the last turn captured before it.
+ * - A saved answer card (a voice quick Ask: no detected question, no
+ *   transcript) is a suggestion too — its title is what was asked. One written
+ *   for a detected question fills that question's answer if the answer row is
+ *   missing, and is never shown twice.
  */
 
 export type Who = ReturnType<typeof normalizeSpeaker>;
@@ -26,6 +30,9 @@ export type TimelineItem =
       answer: string | null;
       /** Why it was not answered, or a caution shown with it. */
       note: string | null;
+      /** Asked by the user directly (a saved quick Ask), not detected in
+       *  what was said. */
+      asked?: boolean;
     }
   | { kind: 'card'; id: string; cardKind: string; title: string | null; body: string };
 
@@ -52,20 +59,36 @@ export function sessionTimeline(d: Pick<SessionDetail, 'transcript' | 'questions
     return slot;
   };
 
+  // Answer cards written for a detected question (by id) — the question's
+  // own row is the one shown; the card only fills a missing answer.
+  const questionIds = new Set(d.questions.map((q) => q.id));
+  const linkedBody = new Map<string, string>();
+  const cards = (d.cards ?? []).filter((c) => {
+    const qid = c.kind === 'answer' ? linkedQuestionId(c.meta) : null;
+    if (qid && questionIds.has(qid)) {
+      if (c.body.trim()) linkedBody.set(qid, c.body);
+      return false;
+    }
+    return true;
+  });
+
   for (const q of d.questions) {
     const anchored = q.transcriptChunkId != null ? at.get(q.transcriptChunkId) : undefined;
     const slot = anchored !== undefined ? anchored + 1 : slotFor(q.createdAt);
-    const answer = q.answer?.directAnswer?.trim() ? q.answer.directAnswer : null;
+    const answer = q.answer?.directAnswer?.trim() ? q.answer.directAnswer : (linkedBody.get(q.id) ?? null);
     after[slot].push({
       t: q.createdAt,
       item: { kind: 'suggestion', id: q.id, question: q.text, answer, note: q.answer?.riskWarning ?? null },
     });
   }
-  for (const c of d.cards ?? []) {
+  for (const c of cards) {
     if (!c.body.trim() && !c.title) continue;
     after[slotFor(c.createdAt)].push({
       t: c.createdAt,
-      item: { kind: 'card', id: c.id, cardKind: c.kind, title: c.title, body: c.body },
+      item:
+        c.kind === 'answer'
+          ? { kind: 'suggestion', id: c.id, question: c.title?.trim() || 'Asked', answer: c.body.trim() ? c.body : null, note: null, asked: true }
+          : { kind: 'card', id: c.id, cardKind: c.kind, title: c.title, body: c.body },
     });
   }
 
@@ -80,4 +103,8 @@ export function sessionTimeline(d: Pick<SessionDetail, 'transcript' | 'questions
     flush(i + 1);
   });
   return out;
+}
+
+function linkedQuestionId(meta: Record<string, unknown> | null | undefined): string | null {
+  return meta && typeof meta.questionId === 'string' ? meta.questionId : null;
 }
