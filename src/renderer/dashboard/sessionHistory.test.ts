@@ -113,6 +113,18 @@ describe('sessionTimeline', () => {
     expect(tl.map((i) => `${i.kind}:${i.id}`)).toEqual(['turn:t1', 'suggestion:q1', 'turn:t2', 'suggestion:q2']);
     expect(tl[3]).toMatchObject({ answer: 'The team is ready.' });
   });
+
+  it('an answer cleared on purpose (a paused correction: empty row + note) never takes an older card\'s answer', () => {
+    const note = 'Asked while paused — not answered. Press ↻ to answer it.';
+    const tl = sessionTimeline({
+      mode: 'interview',
+      transcript: [turn('t1', 'interviewer', 'Tell me about the first project. Sorry, I meant the second project', 10)],
+      questions: [question('q1', 'Tell me about the first project. Sorry, I meant the second project', 't1', 11, '', note)],
+      cards: [answerCard('c1', 'Tell me about the first project', 'The first project migrated billing.', 12, { questionId: 'q1' })],
+    });
+    expect(tl.map((i) => `${i.kind}:${i.id}`)).toEqual(['turn:t1', 'suggestion:q1']);
+    expect(tl[1]).toMatchObject({ answer: null, note });
+  });
 });
 
 describe('keepPreview — what Keep will do, before it is pressed', () => {

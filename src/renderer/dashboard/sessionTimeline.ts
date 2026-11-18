@@ -14,8 +14,11 @@ import { normalizeSpeaker, type SessionDetail, type SessionMode } from '@shared/
  *   after the last turn captured before it.
  * - A saved answer card (a voice quick Ask: no detected question, no
  *   transcript) is a suggestion too — its title is what was asked. One written
- *   for a detected question fills that question's answer if the answer row is
- *   missing, and is never shown twice.
+ *   for a detected question is never shown twice, and fills that question's
+ *   answer ONLY when the question has no answer row at all. An answer row
+ *   that is empty is an answer deliberately cleared (a correction that arrived
+ *   while paused, M3): an older card holds the answer to the old wording and
+ *   must never reappear under the corrected one.
  */
 
 export type Who = ReturnType<typeof normalizeSpeaker>;
@@ -60,7 +63,7 @@ export function sessionTimeline(d: Pick<SessionDetail, 'transcript' | 'questions
   };
 
   // Answer cards written for a detected question (by id) — the question's
-  // own row is the one shown; the card only fills a missing answer.
+  // own row is the one shown; the card only fills a missing answer RECORD.
   const questionIds = new Set(d.questions.map((q) => q.id));
   const linkedBody = new Map<string, string>();
   const cards = (d.cards ?? []).filter((c) => {
@@ -75,7 +78,11 @@ export function sessionTimeline(d: Pick<SessionDetail, 'transcript' | 'questions
   for (const q of d.questions) {
     const anchored = q.transcriptChunkId != null ? at.get(q.transcriptChunkId) : undefined;
     const slot = anchored !== undefined ? anchored + 1 : slotFor(q.createdAt);
-    const answer = q.answer?.directAnswer?.trim() ? q.answer.directAnswer : (linkedBody.get(q.id) ?? null);
+    const answer = q.answer
+      ? q.answer.directAnswer?.trim()
+        ? q.answer.directAnswer
+        : null // cleared on purpose (its note says why) — never an older answer
+      : (linkedBody.get(q.id) ?? null);
     after[slot].push({
       t: q.createdAt,
       item: { kind: 'suggestion', id: q.id, question: q.text, answer, note: q.answer?.riskWarning ?? null },

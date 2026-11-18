@@ -263,7 +263,9 @@ Two consequences:
   Space confirmed gone at Keep or at Retry (re-read in the renderer, or
   refused by main) makes the user choose again before anything runs; on the
   result view the picker appears there, with the error, and a Retry to a new
-  destination runs both halves there.
+  destination runs both halves there. What a result says it saved, and where,
+  is fixed when that result is confirmed: picking a destination for the next
+  Retry never relabels it — only a new result names the new Space.
 
 Saved memory is grouped by Space in the Memory section for the same reason. A
 flat list said nothing about scope, and reading them interleaved you cannot

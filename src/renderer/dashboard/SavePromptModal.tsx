@@ -101,6 +101,10 @@ export function SavePromptModal() {
   /** Where `result` was filed. A Retry to the same place re-runs only what
    *  failed; a new destination runs both halves there. */
   const resultPack = useRef<string | null | undefined>(undefined);
+  /** The title of the Space `result` was filed into, snapshotted when it was
+   *  confirmed: picking a destination for a future Retry never rewrites what
+   *  a past result says ("Summary saved to …"). */
+  const [resultSpace, setResultSpace] = useState<string | null>(null);
   const [reloads, setReloads] = useState(0);
   /** The prompt this state belongs to: a reply for an earlier one is ignored. */
   const forSession = useRef<string | null>(null);
@@ -119,6 +123,7 @@ export function SavePromptModal() {
     setNote(null);
     setResult(null);
     resultPack.current = undefined;
+    setResultSpace(null);
     setConfirmDiscard(false);
     setLookupError(null);
     setDest(pendingSave?.packId ? 'resolving' : 'known');
@@ -215,6 +220,7 @@ export function SavePromptModal() {
     if (!pendingSave || busy || !settled) return;
     const sid = pendingSave.sessionId;
     const target = space?.id ?? null;
+    const targetTitle = space ? space.title || 'Untitled' : null;
     setBusy('keeping');
     setError(null);
     try {
@@ -243,6 +249,7 @@ export function SavePromptModal() {
       if (forSession.current !== sid) return;
       setResult((prev) => (only.length ? mergeRetry(prev, r) : r));
       resultPack.current = target;
+      setResultSpace(targetTitle);
     } catch (e) {
       if (forSession.current !== sid) return;
       const message = (e as Error).message;
@@ -273,7 +280,7 @@ export function SavePromptModal() {
   };
 
   const outcome = result
-    ? keepResult(result, { space: space ? space.title || 'Untitled' : null, provider: providerName(result.provider) })
+    ? keepResult(result, { space: resultSpace, provider: providerName(result.provider) })
     : null;
   /** The Retry would file it somewhere other than the result's destination. */
   const moved = !!result && settled && resultPack.current !== (space?.id ?? null);

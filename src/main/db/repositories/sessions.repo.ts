@@ -268,11 +268,15 @@ export const sessionsRepo = {
       .get();
 
     // The other cards it produced (meetings, companion, saved voice quick
-    // Asks), oldest first, as they appeared. An answer card is left out ONLY
-    // when it is the dual-write of a detected question's answer already shown
-    // above (linked by id, and that answer was saved) — a quick Ask has no
-    // detected question and no transcript, so it is the session's only content.
-    const answered = new Set(questions.filter((q) => q.answer?.directAnswer?.trim()).map((q) => q.id));
+    // Asks), oldest first, as they appeared. An answer card is left out when
+    // it was written for a detected question that HAS an answer row: that row
+    // is the current answer — even when it is deliberately empty (a paused
+    // correction clears it, M3) — and the card is an earlier copy, possibly of
+    // an answer to wording that has since been corrected. Only a question with
+    // no answer row at all keeps its linked card, to recover the answer. A
+    // quick Ask has no detected question and no transcript, so it is the
+    // session's only content and is always kept.
+    const answered = new Set(questions.filter((q) => q.answer != null).map((q) => q.id));
     const cards = db()
       .select()
       .from(schema.contributions)

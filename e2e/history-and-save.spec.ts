@@ -398,3 +398,30 @@ test('Retry refused by main (the Space was deleted in between) asks where to fil
   await expect(d.locator('button[aria-haspopup="listbox"]')).toContainText('Choose where to file it…');
   await expect(d.getByRole('button', { name: 'Retry' })).toBeDisabled();
 });
+
+test('picking a destination for a Retry never relabels what was already saved — only a new result names the new Space', async ({ save: page }) => {
+  // Summary saved in R1, memory failed; at Retry, R1 is gone.
+  await reply(page, 'jobs.get', [FIXTURE.roles[0], FIXTURE.roles[0], null, FIXTURE.roles[1]]);
+  await reply(page, 'session.remember', [
+    result('done', 'failed', { memory: { status: 'failed', count: 0, error: 'timeout' } }),
+    result('done', 'off', { packId: 'OLD' }),
+  ]);
+  await open(page);
+  const d = dialog(page);
+  await d.getByRole('button', { name: 'Keep it' }).click();
+  const r = d.getByRole('list', { name: 'What was kept' });
+  await expect(r).toContainText('Summary saved to “Backend Engineer”');
+  await d.getByRole('button', { name: 'Retry' }).click();
+  await expect(d.getByRole('alert')).toContainText('That Space no longer exists');
+  await d.locator('button[aria-haspopup="listbox"]').click();
+  await page.locator('ul[role="listbox"] li[role="option"]').filter({ hasText: 'Staff Engineer (2024)' }).click();
+  await expect(d).toContainText('Retry files it into “Staff Engineer (2024)” and runs both halves there.');
+  // Nothing has been sent there yet — the confirmed result still names R1.
+  await expect(r).toContainText('Summary saved to “Backend Engineer”');
+  await expect(r).not.toContainText('Staff Engineer');
+  expect(await argsOf(page, 'session.remember')).toHaveLength(1);
+  // Only a new, confirmed result names the new Space.
+  await d.getByRole('button', { name: 'Retry' }).click();
+  await expect(r).toContainText('Summary saved to “Staff Engineer (2024)”');
+  expect((await argsOf(page, 'session.remember')).at(-1)).toEqual(['h1', 'OLD']);
+});

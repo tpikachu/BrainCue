@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -23,6 +24,7 @@ import * as schema from '../schema';
 import { createTestDb } from '../../test/dbHarness';
 import { sessionsRepo } from './sessions.repo';
 import { enginePersistence } from '../../services/engine/persistence/enginePersistence';
+import { sessionTimeline } from '../../../renderer/dashboard/sessionTimeline';
 
 beforeAll(async () => {
   h.db = (await createTestDb()).db;
@@ -139,5 +141,51 @@ describe('a saved voice quick Ask opens offline (M6 review)', () => {
       body: 'A log of changes written before they are applied, so a crash can replay them.',
       meta: { source: 'voice_quick_ask' },
     });
+  });
+});
+
+describe('a paused correction stays cleared in history (M6 review 2)', () => {
+  /** What EngineSession.answerQuestion persists for a completed answer. */
+  const answered = (sessionId: string, text: string, answer: string) => {
+    const questionId = enginePersistence.insertQuestion({ sessionId, text, type: 'behavioral', confidence: 1, strategy: '', transcriptChunkId: null });
+    enginePersistence.replaceAnswer({ questionId, directAnswer: answer, riskWarning: null, tokens: null });
+    enginePersistence.insertContribution({
+      sessionId,
+      kind: 'answer',
+      title: text,
+      body: answer,
+      meta: { questionId, riskWarning: null, tokens: null },
+      sourceRefs: [{ type: 'question', id: questionId }],
+    });
+    return questionId;
+  };
+  const PAUSED = 'Asked while paused — not answered. Press ↻ to answer it.';
+
+  it('the old answer never reappears under the corrected wording', () => {
+    h.db.insert(schema.sessions).values({ id: 'pc1', profileId: 'pA', mode: 'interview', kind: 'live', status: 'stopped', createdAt: 9_100 }).run();
+    const q = answered('pc1', 'Tell me about the first project', 'The first project migrated billing.');
+    // EngineSession.surfaceMissed for a revision that waited, then Pause:
+    enginePersistence.updateQuestionText(q, 'Tell me about the first project. Sorry, I meant the second project', null);
+    enginePersistence.replaceAnswer({ questionId: q, directAnswer: '', riskWarning: PAUSED, tokens: null });
+
+    const d = sessionsRepo.detail('pc1')!;
+    expect(d.cards).toEqual([]); // the stale copy is not offered to the view
+    const tl = sessionTimeline(d);
+    expect(tl).toEqual([
+      { kind: 'suggestion', id: q, question: 'Tell me about the first project. Sorry, I meant the second project', answer: null, note: PAUSED },
+    ]);
+    expect(JSON.stringify(tl)).not.toContain('migrated billing');
+  });
+
+  it('controls: a normal linked answer shows once; a question with NO answer row recovers it from its card', () => {
+    h.db.insert(schema.sessions).values({ id: 'pc2', profileId: 'pA', mode: 'interview', kind: 'live', status: 'stopped', createdAt: 9_200 }).run();
+    const ok = answered('pc2', 'Why Acme?', 'Their scale.');
+    const lost = answered('pc2', 'Why now?', 'The team is ready.');
+    h.db.delete(schema.aiAnswers).where(eq(schema.aiAnswers.questionId, lost)).run(); // the answer row is missing
+    const tl = sessionTimeline(sessionsRepo.detail('pc2')!);
+    expect(tl.map((i) => (i.kind === 'suggestion' ? [i.id, i.answer] : i.kind))).toEqual([
+      [ok, 'Their scale.'],
+      [lost, 'The team is ready.'],
+    ]);
   });
 });
