@@ -3,7 +3,7 @@ import { api } from '../lib/api';
 import { FLAGS } from '@shared/flags';
 import { ACTIVITIES, ACTIVITY_ORDER, DEFAULT_ACTIVITY, activity, isInterviewSpace } from '@shared/activities';
 import type { CompanionSpaceOverrides, ContextPackKind, Job } from '@shared/types';
-import { Button, Field, Modal, Select, Switch, TextArea, TextInput } from '../components/ui';
+import { Button, Field, Modal, ModalCancel, Select, Switch, TextArea, TextInput } from '../components/ui';
 import { UploadIcon } from '../components/icons';
 
 type Notice = { tone: 'ok' | 'err'; text: string } | null;
@@ -61,20 +61,27 @@ export function JobFormModal({
   // The answer to the offer, applied when the Space is saved — so a brand-new
   // Space is created AND tailored in one action.
   const [tailorWanted, setTailorWanted] = useState(false);
+  /** What the fields held when opened (or last saved): anything else is an
+   *  unsaved draft, and an accidental Escape/backdrop/× asks before dropping it. */
+  const [baseline, setBaseline] = useState('');
+  const snapshot = (f: typeof form, k: ContextPackKind, c: CompanionSpaceOverrides) => JSON.stringify([f, k, c]);
 
   // Reset the form to the (edited) job each time the modal opens.
   useEffect(() => {
     if (!open) return;
-    setForm({
+    const initial = {
       title: job?.title ?? '',
       company: job?.company ?? '',
       jdUrl: job?.jdUrl ?? '',
       jdText: job?.jdText ?? '',
       companyUrl: job?.companyUrl ?? '',
       notes: job?.notes ?? '',
-    });
-    setKind((job?.kind as ContextPackKind) ?? initialKind ?? DEFAULT_ACTIVITY);
+    };
+    const initialKindValue = (job?.kind as ContextPackKind) ?? initialKind ?? DEFAULT_ACTIVITY;
+    setForm(initial);
+    setKind(initialKindValue);
     setCompanion(job?.companionPrefs ?? {});
+    setBaseline(snapshot(initial, initialKindValue, job?.companionPrefs ?? {}));
     setTailored(job?.tailoredResume ?? null);
     setTailorWanted(false); // an offer, re-asked per visit — never a sticky default
     setTailorNotice(null);
@@ -83,6 +90,14 @@ export function JobFormModal({
   }, [open, job?.id]);
 
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
+  const dirty = !!baseline && (snapshot(form, kind, companion) !== baseline || tailorWanted);
+  const busy = saving
+    ? 'Saving'
+    : tailoring
+      ? 'Tailoring your résumé'
+      : fetching
+        ? 'Fetching the page'
+        : false;
 
   const uploadJd = async () => {
     const { filePath } = await api.dialog.openFile();
@@ -141,6 +156,8 @@ export function JobFormModal({
       } else {
         onSaved(res.job as Job);
       }
+      // Saved: what is on screen is no longer a draft.
+      setBaseline(snapshot(form, kind, companion));
       if (res.companyError) {
         setNotice({ tone: 'err', text: `Saved, but reading the link failed: ${res.companyError}` });
         return;
@@ -204,6 +221,7 @@ export function JobFormModal({
           notes: form.notes.trim() || null,
         });
         onSaved(res.job as Job);
+        setBaseline(snapshot(form, kind, companion));
       }
       const { job: saved, indexError } = await api.jobs.tailorResume(job.id);
       setTailored(saved.tailoredResume);
@@ -243,6 +261,8 @@ export function JobFormModal({
     <Modal
       open={open}
       onClose={onClose}
+      dirty={dirty}
+      busy={busy}
       // An interview Space is, to the person using it, a role they are
       // interviewing for — named that way rather than as storage.
       title={isInterviewSpace(kind) ? (editing ? 'Edit role' : 'New role') : editing ? 'Edit Space' : 'New Space'}
@@ -522,9 +542,7 @@ export function JobFormModal({
             <span />
           )}
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
+            <ModalCancel />
             {/* The label states what pressing it will actually do. Tailoring is
                 a slow model call, so a button that just said "Create" would
                 look hung for the length of it. */}

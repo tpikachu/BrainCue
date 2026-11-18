@@ -102,9 +102,14 @@ export const IPC = {
     togglePause: 'session:toggle-pause',
     togglePauseActive: 'session:toggle-pause-active',
     stopActive: 'session:stop-active',
+    // Undo a start whose audio never attached: stop it (no save prompt) and,
+    // when new, remove it. Pending in main until confirmed, so any window's
+    // later Stop retries the same policy.
+    rollback: 'session:rollback',
     audioChunk: 'session:audio-chunk',
     realtimeAudio: 'session:realtime-audio',
     list: 'session:list',
+    page: 'session:page', // one server-side page of a profile's history
     get: 'session:get',
     delete: 'session:delete',
     generateReport: 'session:generate-report',
@@ -253,6 +258,7 @@ export const EVENTS = {
   transcriberStatus: 'session:transcriber-status', // STT socket lifecycle: reconnecting | connected
   captureStatus: 'session:capture-status', // which audio streams are ACTUALLY flowing (Cue Card notice)
   savePrompt: 'session:save-prompt', // a session just stopped → ask the dashboard to save/discard it
+  sessionRollback: 'session:rollback-result', // a failed start's rollback settled (RollbackResult)
   captureBuffer: 'capture:buffer', // current multi-image problem captures, for the Cue Card strip
   confirmRequest: 'ui:confirm-request', // main asks a protected window to show a confirm modal (reply via IPC.ui.confirmResponse)
   voiceState: 'voice:state', // dialogue controller transitions (VoiceStateEvent)

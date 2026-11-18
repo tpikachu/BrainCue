@@ -12,6 +12,7 @@ import { vectorToBuffer } from '../rag/vectorMath';
 import { checkSensitive } from '../memory/sensitiveFilter';
 import { archiveFormat } from '@shared/archiveFormat';
 import type { ArchiveSection } from '@shared/archiveFormat';
+import type { KeepStep } from '@shared/types';
 
 /**
  * Session archive — the thing that makes BrainCue continuous
@@ -189,28 +190,41 @@ export function renderArchive(
   return lines.join('\n\n');
 }
 
-/**
- * Summarise a finished session and index it for retrieval. Returns how many
- * chunks were written (0 whenever it declined — consent off, no Space to keep
- * it in, Space opted out, too short, or the model failed).
- *
- * Never throws: this runs fire-and-forget after a session ends, and a failed
- * archive must not surface as a broken session.
- */
+/** How many chunks were written (0 whenever it declined or failed) — see
+ *  {@link archiveSessionOutcome} for why. */
 export async function archiveSession(sessionId: string): Promise<number> {
+  return (await archiveSessionOutcome(sessionId)).count;
+}
+
+/**
+ * Summarise a finished session and index it for retrieval, and say what
+ * happened: written, declined (switched off, no Space to keep it in, the Space
+ * opted out, a rehearsal, too short, withheld as sensitive) or failed (the
+ * provider call or its result). The save prompt reports each one as itself —
+ * a zero count alone cannot tell "off" from "failed".
+ *
+ * Never throws: a failed archive must not surface as a broken session, and
+ * the transcript is kept whatever this returns.
+ */
+export async function archiveSessionOutcome(sessionId: string): Promise<KeepStep> {
+  const no = (status: KeepStep['status'], error?: string): KeepStep => ({
+    status,
+    count: 0,
+    ...(error ? { error } : {}),
+  });
   try {
-    if (settingsRepo.get(SETTINGS_KEYS.sessionArchiveEnabled) === '0') return 0;
+    if (settingsRepo.get(SETTINGS_KEYS.sessionArchiveEnabled) === '0') return no('off');
 
     const session = db()
       .select()
       .from(schema.sessions)
       .where(eq(schema.sessions.id, sessionId))
       .get();
-    if (!session) return 0;
+    if (!session) return no('failed', 'Session not found');
     // Practice drills are rehearsals against an AI, not conversations that
     // happened — archiving them would pollute recall with invented scenarios.
     if (session.mode === 'practice' || session.kind === 'mock' || session.kind === 'sparring') {
-      return 0;
+      return no('practice');
     }
     // No Space, nothing kept. An archive has to be scoped to something for it
     // to be worth retrieving: a Space is what makes the tenth standup grounded
@@ -218,9 +232,9 @@ export async function archiveSession(sessionId: string): Promise<number> {
     // another client's call. A session with no Space is a one-off — it helped
     // live and leaves its transcript, and the user is told so before it starts
     // and offered a Space again when it ends.
-    if (!session.packId) return 0;
+    if (!session.packId) return no('no-space');
     const pack = contextPacksRepo.get(session.packId);
-    if (pack && !pack.memoryEnabled) return 0; // the Space opted out of remembering
+    if (pack && !pack.memoryEnabled) return no('space-off'); // the Space opted out of remembering
 
     const turns = db()
       .select()
@@ -228,7 +242,7 @@ export async function archiveSession(sessionId: string): Promise<number> {
       .where(eq(schema.transcriptChunks.sessionId, sessionId))
       .orderBy(...transcriptOrder())
       .all();
-    if (turns.length < MIN_TURNS) return 0;
+    if (turns.length < MIN_TURNS) return no('too-short');
 
     const full = turns.map((t) => `${t.speaker}: ${t.text}`).join('\n');
     // Keep the END of a long call: that is where decisions and commitments land.
@@ -245,7 +259,8 @@ export async function archiveSession(sessionId: string): Promise<number> {
       maxOutputTokens: 900,
     });
     const parsed = archiveSchema.safeParse(raw);
-    if (!parsed.success) return 0; // unusable shape → archive nothing
+    // Unusable shape → archive nothing.
+    if (!parsed.success) return no('failed', 'the summary came back in an unusable shape');
 
     const quotes = attributeQuotes(parsed.data.keyQuotes, turns);
     const text = renderArchive(parsed.data, session.endedAt ?? session.createdAt, {
@@ -254,10 +269,10 @@ export async function archiveSession(sessionId: string): Promise<number> {
     });
     // The privacy gate applies here exactly as it does to memory: a summary can
     // repeat a credential someone read aloud, and an archive is retrievable.
-    if (checkSensitive(text).sensitive) return 0;
+    if (checkSensitive(text).sensitive) return no('withheld');
 
     const pieces = chunkText(text, ARCHIVE_CHUNK_CHARS);
-    if (pieces.length === 0) return 0;
+    if (pieces.length === 0) return no('failed', 'the summary came back empty');
 
     const embedding = providerFor('embedding');
     const identity = embedding.identity();
@@ -297,8 +312,10 @@ export async function archiveSession(sessionId: string): Promise<number> {
         })
         .run();
     }
-    return pieces.length;
-  } catch {
-    return 0; // an archive must never break the end of a session
+    return { status: 'done', count: pieces.length };
+  } catch (e) {
+    // An archive must never break the end of a session — but it must say it
+    // failed, so the user can retry rather than believe it was kept.
+    return no('failed', (e as Error)?.message || String(e));
   }
 }

@@ -374,11 +374,56 @@ parsing task's provider, so the sample interview can start on any provider.
   live, interview-mode session — never a meeting, companion session, mock or
   sparring drill). The page's Start opens the same start flow with the role
   chosen; roles are created as interview Spaces (kind fixed, "New role").
-- The Cue Card during an interview: status, Pause/Stop, the current question
-  and answer, the General | Technical chip, **Answer that** + Ask, and a compact
-  transcript (latest line; one tap for the full one). Model, history,
-  pronunciation and clear moved behind "⋯". Two duplicated controls (a second
-  companion bar, a second memory editor) were removed.
+- **Resume goes through the start flow** (M6). From the Interview page or a
+  session's detail, Resume opens `StartSessionModal` with `resume`: the same
+  readiness rows and disclosure, the role fixed to the interview's own
+  ("Continuing the round from … — its transcript is restored and kept"), and
+  an explicit **Resume interview** that continues the SAME session
+  (`resumeExisting`). Another profile's interview, or one whose role was
+  deleted, is blocked with why. Earlier content is never deleted.
+- **The Cue Card** (M6, `overlay/Overlay.tsx`, `cueLayout.ts`). The header
+  says what the session is doing (Listening / Answering / Paused /
+  Reconnecting) and holds the live controls: Privacy, click-through,
+  ⏸ Pause / ▶ Resume, ■ Stop, ⋯, hide. Then the capture warning (a missing
+  stream, and what it costs), the latest transcript line (full transcript one
+  tap away), **missed questions** — each with why (asked while paused,
+  recognised late, asked while others waited; `AnswerMetaEvent.missed`) and
+  **Answer it** — and the ONE current card: the question large, its answer,
+  its retry, and "Sources sent to <answer provider>" collapsed. Earlier cards
+  are kept, in arrival order, behind "Earlier (n)". Style, model, answer
+  history, pronunciation, clear, the capture tools, view, settings and what
+  the session is grounded in live in the ⋯ tray. A missed question never
+  becomes the current card (it would push the last answer out of view) and is
+  never dropped, even with answer history off. Arrival order, manual-Ask
+  ownership and same-card revisions are main's and the reducer's — the
+  layout only arranges them. Coding keeps its listen-only toggle visible.
+- **Readable history** (M6, `SessionsPage`, `SessionDetailModal`,
+  `sessionTimeline.ts`). Sessions are paged on the server (`session:page`).
+  Opening one reads the persisted session only (`session:get`) — no key, no
+  report, no network — and shows it as a timeline in capture order: what
+  each person said (Interviewer / You, or Them / You), each detected question
+  with "Suggested by BrainCue — not said" (or "Not answered — <why>"), and a
+  meeting's other cards marked generated. A coaching report is an explicit
+  button that names where the transcript goes; its failure leaves the
+  conversation readable. A meeting's report is generated only when asked
+  for. Delete asks first.
+- **Keep / Discard** (M6, `SavePromptModal`, `keepCopy.ts`): see
+  [16-CONTINUITY.md §3](./16-CONTINUITY.md) — typed outcomes per half, the
+  provider named, Retry on failure, the destination validated wherever the
+  picker found it, and the prompt held open while it works.
+- **Keyboard and drafts** (M6, `components/ui.tsx`). `Modal` keeps focus
+  inside (Tab / Shift+Tab wrap; focus that wanders is brought back), returns
+  it on close, and never re-runs its focus effect on a re-render. Dismissal
+  (Escape, backdrop, ×, or a body's own Cancel via `ModalCancel` /
+  `useModalDismiss`) goes through a guard: `busy` refuses it and says so;
+  `dirty` asks "Discard your changes?" with **Keep editing** focused. Only the
+  top modal answers Escape, and an open inner control (a dropdown, the
+  discard question) closes first. `Dropdown` is a select-only combobox:
+  arrows / Home / End move, Enter / Space choose, type-ahead, Escape closes
+  the list, `aria-expanded` / `aria-activedescendant` / `aria-selected`
+  exposed; options keep focus on the combobox. Hover detail is also shown on
+  keyboard focus (`TooltipShield`), and a readiness row with detail is
+  focusable. The role form and the new-profile form are guarded.
 - **Capture truth**: the dashboard reports which audio streams actually flow,
   and again when a track ends; the Cue Card names a missing stream and what it
   costs ("Call audio is not captured — questions can't be heard").
@@ -392,13 +437,18 @@ parsing task's provider, so the sample interview can start on any provider.
   - `audio` — the AudioContext/pump failed to attach: the tracks are
     stopped, then the session is rolled back — stopped, and a new one also
     deleted (it heard nothing; a resumed one keeps its earlier content).
-    The rollback's own save prompt is suppressed ONE-SHOT (only during its
-    stop), so a later successful run of the same session prompts normally.
-    Only what was confirmed is claimed: a rejected stop leaves the session
-    in the store, visibly live, with "may still be running" and
-    `cleanup: 'failed'`, and Stop retries the same rollback; nothing is
-    deleted before the stop is confirmed. A stop that succeeds with a
-    failed delete says so and names the record to remove from Sessions.
+    The rollback is held in MAIN (`engine.rollback`, M6) from before its
+    stop until confirmed: main sends no save prompt for it, and any later
+    Stop of that session — the dashboard's, or the Cue Card's
+    `stopActive` — runs the same rollback rather than a plain stop that
+    would offer Keep. Each outcome is broadcast (`session:rollback-result`)
+    so both windows say the same thing. A later successful run of the same
+    session prompts normally. Only what was confirmed is claimed: a
+    rejected stop leaves the session in the store, visibly live, with "may
+    still be running" and `cleanup: 'failed'`, and Stop (either window)
+    retries the same rollback; nothing is deleted before the stop is
+    confirmed. A stop that succeeds with a failed delete says so and names
+    the record to remove from Sessions.
 
   The start modal stays open on any failure and shows the reason. Capture
   status is reported only AFTER the pipeline is attached, and a track that

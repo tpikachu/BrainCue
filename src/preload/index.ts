@@ -30,6 +30,9 @@ import type {
   CaptureStatus,
   Presence,
   Readiness,
+  RememberResult,
+  RollbackResult,
+  SessionPage,
   SparringFeedback,
   Story,
   VoiceAudioEvent,
@@ -277,7 +280,7 @@ const api = {
      *  = no Space, undefined = leave it where it ran) — the archive and the
      *  memory candidates are both scoped from there. */
     remember: (id: string, packId?: string | null) =>
-      invoke<{ archived: number; memories: number }>(IPC.session.remember, { id, packId }),
+      invoke<RememberResult>(IPC.session.remember, { id, packId }),
     setInterviewType: (sessionId: string, interviewType: string) =>
       invoke<{ ok: true }>(IPC.session.setInterviewType, { sessionId, interviewType }),
     setAnswering: (enabled: boolean) =>
@@ -289,7 +292,10 @@ const api = {
     togglePause: (sessionId: string) => invoke(IPC.session.togglePause, { sessionId }),
     togglePauseActive: () =>
       invoke<{ paused: boolean; active: boolean }>(IPC.session.togglePauseActive),
-    stopActive: () => invoke<{ stopped: boolean }>(IPC.session.stopActive),
+    stopActive: () => invoke<{ stopped: boolean; rollback?: RollbackResult }>(IPC.session.stopActive),
+    /** Undo a failed start: stop (no save prompt) and, when `discard`, remove. */
+    rollback: (sessionId: string, discard: boolean) =>
+      invoke<RollbackResult>(IPC.session.rollback, { sessionId, discard }),
     audioChunk: (sessionId: string, audio: ArrayBuffer, mime: string) =>
       invoke(IPC.session.audioChunk, { sessionId, audio, mime }),
     // One-way streaming audio (no response) for low-latency Realtime STT.
@@ -302,6 +308,9 @@ const api = {
     /** Sessions for ONE profile — Sessions and Insights are views of the
      *  active profile. Omitting it means every profile (data stats only). */
     list: (profileId?: string) => invoke(IPC.session.list, { profileId }),
+    /** One page of a profile's history (newest first, searchable). */
+    page: (profileId: string, query: string, limit: number, offset: number) =>
+      invoke<SessionPage>(IPC.session.page, { profileId, query, limit, offset }),
     get: (id: string) => invoke(IPC.session.get, { id }),
     delete: (id: string) => invoke(IPC.session.delete, { id }),
     generateReport: (sessionId: string) => invoke(IPC.session.generateReport, { sessionId }),
@@ -519,6 +528,8 @@ const api = {
     ) => on(EVENTS.transcriberStatus, cb),
     onCaptureStatus: (cb: (p: CaptureStatus) => void) => on(EVENTS.captureStatus, cb),
     onSavePrompt: (cb: (p: SavePrompt) => void) => on(EVENTS.savePrompt, cb),
+    /** A failed start's rollback settled — whichever window pressed Stop. */
+    onSessionRollback: (cb: (p: RollbackResult) => void) => on(EVENTS.sessionRollback, cb),
     onCaptureBuffer: (cb: (p: { images: string[] }) => void) => on(EVENTS.captureBuffer, cb),
     onConfirmRequest: (cb: (p: ConfirmRequest) => void) => on(EVENTS.confirmRequest, cb),
     onVoiceState: (cb: (p: VoiceStateEvent) => void) => on(EVENTS.voiceState, cb),

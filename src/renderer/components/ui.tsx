@@ -1,75 +1,233 @@
 import type React from 'react';
-import { Children, isValidElement, useEffect, useRef, useState } from 'react';
+import {
+  Children,
+  createContext,
+  forwardRef,
+  isValidElement,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from 'react';
 import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, SearchIcon } from './icons';
 
-/** Centered modal dialog. Closes on overlay click or Escape. */
+/** Open modals, innermost last: only the top one answers Escape and keeps
+ *  focus, so a confirm over a form never closes both. */
+const modalStack: number[] = [];
+let modalSeq = 0;
+
+/** What a modal body can call to leave through the same guard as Escape /
+ *  backdrop / × — its own Cancel button, say. */
+const ModalDismissContext = createContext<(() => void) | null>(null);
+/** Request this modal's close through its guard (busy / unsaved draft).
+ *  Outside a Modal it is `fallback` (or nothing). */
+export function useModalDismiss(fallback?: () => void): () => void {
+  return useContext(ModalDismissContext) ?? fallback ?? (() => {});
+}
+
+/** A modal's own Cancel: leaves through the same guard as Escape. */
+export function ModalCancel({ children = 'Cancel', ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  const dismiss = useModalDismiss();
+  return (
+    <Button variant="ghost" {...rest} onClick={dismiss}>
+      {children}
+    </Button>
+  );
+}
+
+const FOCUSABLE =
+  'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])';
+
+/**
+ * Centered modal dialog.
+ *
+ * - **Focus** moves into the dialog on open, stays there (Tab / Shift+Tab
+ *   wrap inside it; focus that wanders out is brought back) and returns to
+ *   whatever had it before, on close. It never re-runs on a re-render, so a
+ *   parent's live updates do not pull focus out of a field.
+ * - **Dismissal** (Escape, backdrop, ×, or a body button via
+ *   {@link useModalDismiss}) goes through a guard: while `busy` it is
+ *   refused, and said so — a save in flight is not silently dropped; with
+ *   `dirty` (an edited draft) it asks "Discard your changes?" first. Escape
+ *   closes an open inner control (a dropdown, the discard question) before
+ *   the dialog.
+ */
 export function Modal({
   open,
   onClose,
   title,
   width = 'max-w-2xl',
+  dirty = false,
+  busy = false,
   children,
 }: {
   open: boolean;
   onClose: () => void;
   title?: string;
   width?: string;
+  /** An edited draft would be lost: ask before closing. */
+  dirty?: boolean;
+  /** Something is in flight (saving, parsing…): do not close. A string says what. */
+  busy?: boolean | string;
   children: React.ReactNode;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  // Read onClose through a ref so the focus effect depends ONLY on `open`. Call sites
-  // pass a new inline onClose each render; if it were a dep, any parent re-render with
-  // the modal open (e.g. the Cue Card's per-frame audio-meter updates) would re-run
-  // this effect and yank focus out of the dialog's controls.
+  const keepRef = useRef<HTMLButtonElement>(null);
+  // Read onClose (and the guard) through refs so the focus effect depends ONLY
+  // on `open`. Call sites pass a new inline onClose each render; if it were a
+  // dep, any parent re-render with the modal open (e.g. the Cue Card's
+  // per-frame audio-meter updates) would re-run this effect and yank focus out
+  // of the dialog's controls.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const guard = useRef({ dirty, busy });
+  guard.current = { dirty, busy };
+  const [ask, setAsk] = useState<null | 'discard' | 'busy'>(null);
+  const askRef = useRef(ask);
+  askRef.current = ask;
+  const idRef = useRef(0);
+  if (idRef.current === 0) idRef.current = ++modalSeq;
+
+  const requestClose = useRef(() => {
+    if (guard.current.busy) return setAsk('busy');
+    if (guard.current.dirty) return setAsk('discard');
+    onCloseRef.current();
+  }).current;
+
+  useEffect(() => {
+    if (!open) setAsk(null);
+  }, [open]);
+  // The busy note clears itself once the work is done.
+  useEffect(() => {
+    if (!busy && ask === 'busy') setAsk(null);
+  }, [busy, ask]);
+  useEffect(() => {
+    if (ask === 'discard') keepRef.current?.focus();
+  }, [ask]);
+
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onCloseRef.current();
+    const id = idRef.current;
+    modalStack.push(id);
+    const top = () => modalStack[modalStack.length - 1] === id;
+    const onKey = (e: KeyboardEvent) => {
+      if (!top()) return;
+      if (e.key === 'Escape') {
+        // An inner control (an open dropdown) handled it first.
+        if (e.defaultPrevented) return;
+        e.preventDefault();
+        if (askRef.current) setAsk(null);
+        else requestClose();
+        return;
+      }
+      if (e.key !== 'Tab' || !dialogRef.current) return;
+      const items = [...dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+        (el) => el.offsetParent !== null || el === document.activeElement,
+      );
+      if (items.length === 0) {
+        e.preventDefault();
+        dialogRef.current.focus();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const at = document.activeElement;
+      const inside = !!at && dialogRef.current.contains(at);
+      if (e.shiftKey && (at === first || at === dialogRef.current || !inside)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (at === last || !inside)) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    // Focus that leaves the dialog (a click on the page behind is caught by
+    // the backdrop, but programmatic focus is not) is brought back.
+    const onFocusIn = (e: FocusEvent) => {
+      if (!top() || !dialogRef.current) return;
+      if (!dialogRef.current.contains(e.target as Node)) dialogRef.current.focus();
+    };
     window.addEventListener('keydown', onKey);
+    document.addEventListener('focusin', onFocusIn);
     // Move focus into the dialog (so keyboard/AT users land inside it) and restore it
     // to whatever was focused before, on close. `prev` is captured once, when open→true.
     const prev = document.activeElement as HTMLElement | null;
     dialogRef.current?.focus();
     return () => {
       window.removeEventListener('keydown', onKey);
-      prev?.focus?.();
+      document.removeEventListener('focusin', onFocusIn);
+      const at = modalStack.indexOf(id);
+      if (at >= 0) modalStack.splice(at, 1);
+      if (prev && prev.isConnected) prev.focus?.();
     };
-  }, [open]);
+  }, [open, requestClose]);
 
   if (!open) return null;
+  const busyText = typeof busy === 'string' ? busy : 'Still working';
   return (
-    <div
-      // Starts BELOW the custom title bar (`--titlebar-h`, set by Titlebar).
-      // Electron hands the bar's `-webkit-app-region: drag` rectangle to the
-      // OS by position, whatever is painted over it — a dialog scrolled up
-      // under those pixels had an unclickable Close button.
-      className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h,0px)] z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-6 backdrop-blur-sm"
-      onMouseDown={onClose}
-    >
+    <ModalDismissContext.Provider value={requestClose}>
       <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        tabIndex={-1}
-        className={`my-8 w-full ${width} rounded-2xl border border-white/10 bg-neutral-900 shadow-2xl shadow-black/40 outline-none`}
-        onMouseDown={(e) => e.stopPropagation()}
+        // Starts BELOW the custom title bar (`--titlebar-h`, set by Titlebar).
+        // Electron hands the bar's `-webkit-app-region: drag` rectangle to the
+        // OS by position, whatever is painted over it — a dialog scrolled up
+        // under those pixels had an unclickable Close button.
+        className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h,0px)] z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-6 backdrop-blur-sm"
+        onMouseDown={requestClose}
       >
-        <div className="flex items-center justify-between border-b border-white/5 px-5 py-3">
-          <h3 className="font-medium">{title}</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md p-1 text-neutral-400 transition-colors hover:bg-white/10 hover:text-neutral-200"
-            aria-label="Close"
-          >
-            <CloseIcon className="h-5 w-5" />
-          </button>
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={title}
+          aria-busy={busy ? true : undefined}
+          tabIndex={-1}
+          className={`my-8 w-full ${width} rounded-2xl border border-white/10 bg-neutral-900 shadow-2xl shadow-black/40 outline-none`}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between border-b border-white/5 px-5 py-3">
+            <h3 className="font-medium">{title}</h3>
+            <button
+              type="button"
+              onClick={requestClose}
+              className="rounded-md p-1 text-neutral-400 transition-colors hover:bg-white/10 hover:text-neutral-200"
+              aria-label="Close"
+            >
+              <CloseIcon className="h-5 w-5" />
+            </button>
+          </div>
+          {ask === 'discard' && (
+            <div
+              role="alertdialog"
+              aria-label="Discard your changes?"
+              className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/20 bg-amber-500/10 px-5 py-2.5 text-sm text-amber-100"
+            >
+              <span>Discard your changes? They are not saved.</span>
+              <span className="flex gap-2">
+                <Button ref={keepRef} variant="default" onClick={() => setAsk(null)}>
+                  Keep editing
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    setAsk(null);
+                    onCloseRef.current();
+                  }}
+                >
+                  Discard changes
+                </Button>
+              </span>
+            </div>
+          )}
+          {ask === 'busy' && (
+            <p role="status" className="border-b border-white/5 bg-neutral-800/60 px-5 py-2 text-xs text-neutral-300">
+              {busyText} — this stays open until it finishes, so nothing is lost.
+            </p>
+          )}
+          <div className="p-5">{children}</div>
         </div>
-        <div className="p-5">{children}</div>
       </div>
-    </div>
+    </ModalDismissContext.Provider>
   );
 }
 
@@ -83,17 +241,13 @@ export function Spinner({ className = '' }: { className?: string }) {
   );
 }
 
-export function Button({
-  variant = 'default',
-  loading = false,
-  className = '',
-  children,
-  disabled,
-  ...rest
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: 'primary' | 'default' | 'ghost' | 'danger' | 'success';
-  loading?: boolean;
-}) {
+export const Button = forwardRef<
+  HTMLButtonElement,
+  React.ButtonHTMLAttributes<HTMLButtonElement> & {
+    variant?: 'primary' | 'default' | 'ghost' | 'danger' | 'success';
+    loading?: boolean;
+  }
+>(function Button({ variant = 'default', loading = false, className = '', children, disabled, ...rest }, ref) {
   const styles: Record<string, string> = {
     primary: 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm shadow-indigo-900/40',
     success: 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm shadow-emerald-900/40',
@@ -103,6 +257,8 @@ export function Button({
   };
   return (
     <button
+      ref={ref}
+      type="button"
       {...rest}
       disabled={disabled || loading}
       className={`inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${styles[variant]} ${className}`}
@@ -111,7 +267,7 @@ export function Button({
       {children}
     </button>
   );
-}
+});
 
 /** `data-tour` passes through so the guided tour can spotlight a specific card
  *  rather than the nav item that leads to its page (see dashboard/Tour.tsx). */
@@ -211,6 +367,7 @@ export function Dropdown({
   className = '',
   disabled = false,
   buttonLabel,
+  ariaLabel,
 }: {
   value: string;
   options: DropdownOption[];
@@ -220,45 +377,142 @@ export function Dropdown({
   disabled?: boolean;
   /** Override the closed-state text (default: the selected option's label). */
   buttonLabel?: string;
+  /** Accessible name when no enclosing label gives one. */
+  ariaLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [openUp, setOpenUp] = useState(false);
+  /** The highlighted option (keyboard / pointer) while open. */
+  const [active, setActive] = useState(-1);
   const rootRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
+  const optId = (i: number) => `${listId}-o${i}`;
   // Set by a real press on the button. A click without it is the enclosing
   // <label> (dashboard Field) re-dispatching the user's click on the label
   // text onto its first control — i.e. this button. That synthetic click used
   // to re-open a list the outside mousedown had just closed.
   const pressed = useRef(false);
+  const typed = useRef({ text: '', at: 0 });
 
-  const toggle = () => {
-    if (!open && rootRef.current) {
+  const enabled = options.map((o, i) => (o.disabled ? -1 : i)).filter((i) => i >= 0);
+  const selectedIndex = options.findIndex((o) => o.value === value);
+
+  const openList = (at?: 'first' | 'last') => {
+    if (rootRef.current) {
       // Open upward when the list would run past the window bottom and
       // there is more room above (the Cue Card is small).
       const r = rootRef.current.getBoundingClientRect();
       const room = 240;
       setOpenUp(r.bottom + room > window.innerHeight && r.top > window.innerHeight - r.bottom);
     }
-    setOpen((v) => !v);
+    const start =
+      at === 'last'
+        ? enabled[enabled.length - 1]
+        : at === 'first'
+          ? enabled[0]
+          : enabled.includes(selectedIndex)
+            ? selectedIndex
+            : enabled[0];
+    setActive(start ?? -1);
+    setOpen(true);
+  };
+  const close = () => {
+    setOpen(false);
+    setActive(-1);
+  };
+  const choose = (i: number) => {
+    const o = options[i];
+    if (!o || o.disabled) return;
+    close();
+    onChange(o.value);
+  };
+  const toggle = () => (open ? close() : openList());
+  const step = (dir: 1 | -1) => {
+    if (enabled.length === 0) return;
+    const at = enabled.indexOf(active);
+    const next = at < 0 ? (dir === 1 ? 0 : enabled.length - 1) : Math.min(enabled.length - 1, Math.max(0, at + dir));
+    setActive(enabled[next]);
+  };
+  /** Type-ahead: jump to the next option whose label starts with what was typed. */
+  const typeAhead = (ch: string) => {
+    const now = Date.now();
+    typed.current = { text: now - typed.current.at < 700 ? typed.current.text + ch : ch, at: now };
+    const q = typed.current.text.toLowerCase();
+    const from = Math.max(0, enabled.indexOf(active));
+    const order = [...enabled.slice(from + (q.length === 1 ? 1 : 0)), ...enabled.slice(0, from + (q.length === 1 ? 1 : 0))];
+    const hit = order.find((i) => options[i].label.toLowerCase().startsWith(q));
+    if (hit !== undefined) setActive(hit);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (disabled) return;
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault(); // no synthesized click to follow, no page scroll
+        openList(e.key === 'ArrowUp' ? 'last' : undefined);
+      } else if (e.key === 'Home' || e.key === 'End') {
+        e.preventDefault();
+        openList(e.key === 'Home' ? 'first' : 'last');
+      }
+      return;
+    }
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        step(1);
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        step(-1);
+        break;
+      case 'Home':
+        e.preventDefault();
+        setActive(enabled[0] ?? -1);
+        break;
+      case 'End':
+        e.preventDefault();
+        setActive(enabled[enabled.length - 1] ?? -1);
+        break;
+      case 'Enter':
+      case ' ':
+        e.preventDefault();
+        if (active >= 0) choose(active);
+        else close();
+        break;
+      case 'Escape':
+        // The inner control closes first: an enclosing Modal must not close
+        // along with the list (it skips an Escape already handled).
+        e.preventDefault();
+        e.stopPropagation();
+        close();
+        break;
+      case 'Tab':
+        close(); // focus moves on as usual
+        break;
+      default:
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) typeAhead(e.key);
+    }
   };
 
   useEffect(() => {
     if (!open) return;
     const onDocMouseDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      if (!rootRef.current?.contains(e.target as Node)) close();
     };
+    // Escape with focus elsewhere (the list was opened by pointer and focus
+    // moved): still closes the list, not the dialog around it.
     const onDocKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        // Swallow the Escape so an enclosing Modal (which listens on `window`)
-        // doesn't close along with the dropdown.
+        e.preventDefault();
         e.stopPropagation();
-        setOpen(false);
+        close();
       }
     };
     // Close when the window itself loses focus. Without this the list can be
     // left hanging open: over the click-through Cue Card a click on a
     // non-interactive region is forwarded to the app behind, so the mousedown
     // above never reaches this document.
-    const onWindowBlur = () => setOpen(false);
+    const onWindowBlur = () => close();
     document.addEventListener('mousedown', onDocMouseDown);
     document.addEventListener('keydown', onDocKeyDown);
     window.addEventListener('blur', onWindowBlur);
@@ -269,24 +523,29 @@ export function Dropdown({
     };
   }, [open]);
 
+  // Keep the highlighted option in view while arrowing through a long list.
+  useEffect(() => {
+    if (open && active >= 0) document.getElementById(optId(active))?.scrollIntoView?.({ block: 'nearest' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, active]);
+
   const selected = options.find((o) => o.value === value);
   return (
     <div ref={rootRef} className={`relative ${className}`}>
       <button
         type="button"
+        role="combobox"
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        aria-activedescendant={open && active >= 0 ? optId(active) : undefined}
+        aria-label={ariaLabel}
         className={buttonClassName}
         onMouseDown={() => {
           pressed.current = true;
         }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault(); // no synthesized click to follow
-            toggle();
-          }
-        }}
+        onKeyDown={onKeyDown}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -308,13 +567,34 @@ export function Dropdown({
       </button>
       {open && (
         <ul
+          id={listId}
           role="listbox"
           className={`absolute left-0 z-[60] max-h-64 w-full min-w-max max-w-[22rem] overflow-y-auto rounded-lg border border-neutral-700 bg-neutral-900 py-1 shadow-xl shadow-black/50 ${
             openUp ? 'bottom-full mb-1' : 'top-full mt-1'
           }`}
         >
           {options.map((o, i) => (
-            <li key={o.value} role="option" aria-selected={o.value === value} aria-disabled={o.disabled || undefined}>
+            <li
+              key={o.value}
+              id={optId(i)}
+              role="option"
+              aria-selected={o.value === value}
+              aria-disabled={o.disabled || undefined}
+              title={o.title}
+              // Keep focus on the button (the list is aria-activedescendant).
+              onMouseDown={(e) => e.preventDefault()}
+              onMouseEnter={() => !o.disabled && setActive(i)}
+              onClick={(e) => {
+                // Same <label> quirk as the toggle button above: inside a
+                // Field, the label would re-dispatch this click onto the
+                // toggle button and REOPEN the list right after choosing.
+                // Cancelling the click cancels that.
+                e.preventDefault();
+                e.stopPropagation();
+                choose(i);
+              }}
+              className={o.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}
+            >
               {o.group && o.group !== options[i - 1]?.group && (
                 <div
                   role="presentation"
@@ -325,31 +605,20 @@ export function Dropdown({
                   {o.group}
                 </div>
               )}
-              <button
-                type="button"
-                disabled={o.disabled}
-                title={o.title}
-                className={`block w-full px-3 py-1.5 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+              <div
+                className={`px-3 py-1.5 text-left text-sm transition-colors ${
                   o.value === value
                     ? 'bg-indigo-600/25 text-indigo-200'
-                    : 'text-neutral-200 enabled:hover:bg-neutral-800'
-                }`}
-                onClick={(e) => {
-                  // Same <label> quirk as the toggle button above: inside a
-                  // Field, the label re-dispatches this click onto the toggle
-                  // button, which REOPENS the list right after choosing.
-                  // Cancel the default so picking an option actually closes it.
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setOpen(false);
-                  onChange(o.value);
-                }}
+                    : i === active
+                      ? 'bg-neutral-800 text-neutral-100'
+                      : 'text-neutral-200'
+                } ${i === active ? 'ring-1 ring-inset ring-indigo-400/60' : ''}`}
               >
                 <span className="block truncate">{o.label}</span>
                 {o.description && (
                   <span className="block truncate text-[11px] leading-snug text-neutral-500">{o.description}</span>
                 )}
-              </button>
+              </div>
             </li>
           ))}
         </ul>
@@ -416,11 +685,22 @@ export function TooltipShield() {
       curEl = null;
       setTip(null);
     };
+    // Keyboard users get the same detail: focusing a titled control shows it.
+    const onFocusIn = (e: FocusEvent): void => {
+      const el = titled(e.target);
+      curEl = el;
+      if (el) show(el);
+      else setTip(null);
+    };
+    document.addEventListener('focusin', onFocusIn, true);
+    document.addEventListener('focusout', hide, true);
     document.addEventListener('mouseover', onOver, true);
     document.addEventListener('mousedown', hide, true);
     window.addEventListener('scroll', hide, true);
     window.addEventListener('blur', hide);
     return () => {
+      document.removeEventListener('focusin', onFocusIn, true);
+      document.removeEventListener('focusout', hide, true);
       document.removeEventListener('mouseover', onOver, true);
       document.removeEventListener('mousedown', hide, true);
       window.removeEventListener('scroll', hide, true);

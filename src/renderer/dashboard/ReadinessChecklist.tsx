@@ -34,7 +34,8 @@ type Tone = 'ok' | 'warn' | 'block';
 export interface RowState {
   tone: Tone;
   text: string;
-  /** Hover detail — the long explanation, kept off the form. */
+  /** The long explanation, kept off the form: shown on hover AND on keyboard
+   *  focus (the row is focusable when it has one), and read by screen readers. */
   detail?: string;
   /** The concrete fix, shown UNDER a blocked row — never only on hover. */
   fix?: string;
@@ -45,7 +46,11 @@ function Row(props: RowState & { label: string; onGo: (p: string) => void }) {
   const mark = props.tone === 'ok' ? '✓' : props.tone === 'warn' ? '!' : '✕';
   const color = props.tone === 'ok' ? 'text-green-400' : props.tone === 'warn' ? 'text-amber-400' : 'text-red-400';
   return (
-    <li className="flex items-start gap-2 py-1.5" title={props.detail}>
+    <li
+      className="flex items-start gap-2 rounded py-1.5 outline-none focus-visible:ring-1 focus-visible:ring-indigo-400/60"
+      title={props.detail}
+      tabIndex={props.detail ? 0 : undefined}
+    >
       <span className={`w-3 shrink-0 text-center font-semibold ${color}`} aria-hidden>
         {mark}
       </span>
@@ -53,6 +58,7 @@ function Row(props: RowState & { label: string; onGo: (p: string) => void }) {
       <span className="min-w-0 flex-1">
         <span className={`block truncate ${props.tone === 'ok' ? 'text-neutral-400' : 'text-neutral-300'}`}>{props.text}</span>
         {props.fix && <span className="mt-0.5 block text-[11px] leading-snug text-neutral-500">{props.fix}</span>}
+        {props.detail && <span className="sr-only">{props.detail}</span>}
       </span>
       {props.action && (
         <button

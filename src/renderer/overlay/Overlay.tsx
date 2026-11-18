@@ -14,8 +14,9 @@ import type {
   CaptureStatus,
   InterviewType,
 } from '@shared/types';
-import type { CloudProviderId } from '@shared/providers';
+import { cloudProvider, type CloudProviderId } from '@shared/providers';
 import { HeadphonesIcon } from '../components/icons';
+import { rollbackMessage } from '../lib/rollbackCopy';
 import { withModel, type PickerTask } from '../lib/modelChoice';
 import { splitPronunciation } from './pronunciation';
 import type { CardModel } from './cards/model';
@@ -23,17 +24,16 @@ import { ContributionCard } from './cards/ContributionCard';
 import { useOverlayStore } from './store/useOverlayStore';
 import { createStreamBuffer } from './lib/streamBuffer';
 import { noDrag } from './lib/style';
-import { AnswerControls } from './controls/AnswerControls';
 import { AskBar } from './controls/AskBar';
 import { CompanionBar } from './controls/CompanionBar';
 import { VoiceBar } from './controls/VoiceBar';
 import { useVoice } from './voice/useVoice';
 import { EqualizerBars } from './controls/EqualizerBars';
 import { HeaderBar } from './controls/HeaderBar';
-import { SessionBar } from './controls/SessionBar';
+import { MoreTray } from './controls/MoreTray';
+import { cueLayout, missLabel } from './cueLayout';
 import { AudioMeter } from './panels/AudioMeter';
 import { CapturesPanel } from './panels/CapturesPanel';
-import { ClientNotesPanel } from './panels/ClientNotesPanel';
 import { DataSentPanel } from './panels/DataSentPanel';
 import { ErrorBanner } from './panels/ErrorBanner';
 import { SettingsModal } from './panels/SettingsModal';
@@ -71,7 +71,11 @@ export default function Overlay() {
   const [privacy, setPrivacy] = useState(true);
   const [privacyUnsupported, setPrivacyUnsupported] = useState(false); // Linux: no-op
   const [clientInfo, setClientInfo] = useState<ClientInfo | null>(null);
-  const [showClient, setShowClient] = useState(false);
+  /** The ⋯ tray: everything a live call does not need at a glance. */
+  const [moreOpen, setMoreOpen] = useState(false);
+  /** Earlier cards, behind one toggle (missed questions stay visible). */
+  const [showEarlier, setShowEarlier] = useState(false);
+  const [stopping, setStopping] = useState(false);
   // Live answer controls (mirrored to the active session via setAnswerPrefs).
   const [interviewType, setInterviewType] = useState<InterviewType>('general');
   const [answerFormat, setAnswerFormat] = useState<AnswerFormat>('general');
@@ -87,11 +91,18 @@ export default function Overlay() {
   // engine pushes answer prefs, so a change made in the dashboard meanwhile is
   // picked up — there is no settings-changed push event.
   const [settings, setSettings] = useState<AppSettings | null>(null);
-  const loadSettings = () =>
-    api.settings
+  /** Who answers (main's route for the answer task), for "Sources sent to …". */
+  const [answerProvider, setAnswerProvider] = useState<string | null>(null);
+  const loadSettings = () => {
+    void api.settings
+      .readiness()
+      .then((r) => setAnswerProvider(cloudProvider(r.routes.answer)?.name ?? r.routes.answer))
+      .catch(() => {});
+    return api.settings
       .get()
       .then((s) => setSettings(s as AppSettings))
       .catch(() => {});
+  };
 
   // Voice/summon runtime: dialogue state mirror, push-to-talk
   // capture + VAD, and speech playback. Inert while the flag is off.
@@ -224,6 +235,8 @@ export default function Overlay() {
           feed().clear();
           setSessionError(null);
           setReconnecting(false);
+          setShowEarlier(false);
+          setMoreOpen(false);
         }
         // Session stopped: drop the dangling interim partial + streaming cursor so
         // the Cue Card doesn't look like it's still listening.
@@ -246,9 +259,11 @@ export default function Overlay() {
         setMode(s.mode);
       }),
       api.events.onPrivacyChanged((p) => setPrivacy((p as { enabled: boolean }).enabled)),
-      api.events.onClientInfo((p) => {
-        setClientInfo(p);
-        if (!p) setShowClient(false);
+      api.events.onClientInfo((p) => setClientInfo(p)),
+      // A failed start's rollback, settled from either window: if it could
+      // not be confirmed, this window says so too.
+      api.events.onSessionRollback((r) => {
+        if (!r.stopped || r.removed === false) setSessionError(rollbackMessage(r));
       }),
       api.events.onAnswerPrefs((p) => {
         setInterviewType(p.interviewType);
@@ -273,11 +288,12 @@ export default function Overlay() {
     };
   }, []);
 
-  // Derived from the cards list. The "focus" card = whichever is currently streaming
-  // (so regenerating an OLDER card still drives the header + transparency panels),
-  // else the newest.
+  // Derived from the cards list (cueLayout): the ONE dominant card is
+  // whichever is streaming (so regenerating an OLDER card brings it forward),
+  // else the newest answered one; missed questions stay visible on their own;
+  // everything else is behind "Earlier".
   const streaming = cards.some((c) => c.streaming);
-  const current = cards.find((c) => c.streaming) ?? cards[cards.length - 1];
+  const { current, missed, earlier } = cueLayout(cards);
   const question = current?.title ?? '';
   const meta = current?.meta ?? null;
   const context = current?.context ?? null;
@@ -361,6 +377,21 @@ export default function Overlay() {
       })
       .catch(() => {});
   };
+  // The Cue Card's Stop. A session whose failed start is still being rolled
+  // back is rolled back by main (no Keep prompt; a new one is removed) — the
+  // same policy as the dashboard's Stop. Anything unconfirmed is said here.
+  const stop = async () => {
+    setStopping(true);
+    try {
+      const r = await api.session.stopActive();
+      if (r.rollback && (!r.rollback.stopped || r.rollback.removed === false)) setSessionError(rollbackMessage(r.rollback));
+    } catch (e) {
+      setSessionError(`Stopping failed (${(e as Error).message}) — the session may still be running. Press Stop to try again.`);
+    } finally {
+      setStopping(false);
+    }
+  };
+
   const clearAnswer = () => {
     buffer.current.cancel(); // full clear — every stream's buffer goes
     useOverlayStore.getState().clear(); // clear all cards (each also has its own ×)
@@ -431,39 +462,68 @@ export default function Overlay() {
     };
   }, [clickthrough]);
 
+  const cardProps = (c: CardModel, isCurrent: boolean) => ({
+    card: c,
+    isCurrent,
+    live,
+    paused,
+    copied: copiedId === c.id,
+    openCite,
+    onToggleCite: setOpenCite,
+    onToggleCollapsed: () => useOverlayStore.getState().toggle(c.id),
+    onCopy: () => copyCard(c),
+    onRegenerate: () => void regenerateCard(c),
+    onRemove: () => useOverlayStore.getState().remove(c.id),
+    onCorrectMemory: () => correctMemory(c),
+    onForgetMemory: () => void forgetMemory(c),
+  });
+
   return (
     <div
       className="flex h-screen flex-col bg-neutral-900 p-2.5 text-neutral-100"
       style={{ fontSize: `${fontSize}px` }}
     >
       <HeaderBar
+        live={live}
         paused={paused}
         streaming={streaming}
-        live={live}
         speaking={speaking}
         reconnecting={reconnecting}
         privacy={privacy}
         privacyUnsupported={privacyUnsupported}
         clickthrough={clickthrough}
-        mode={mode}
-        clientInfo={clientInfo}
-        showClient={showClient}
+        title={clientInfo ? clientInfo.company || clientInfo.title || null : null}
+        moreOpen={moreOpen}
+        stopping={stopping}
         onTogglePrivacy={() => void togglePrivacy()}
         onToggleClickthrough={() => setClickthrough((c) => !c)}
-        onToggleMode={() => applyMode(mode === 'compact' ? 'expanded' : 'compact')}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onToggleClient={() => setShowClient((s) => !s)}
+        onStop={() => void stop()}
+        onToggleMore={() => setMoreOpen((m) => !m)}
       />
 
-      {showClient && clientInfo && <ClientNotesPanel clientInfo={clientInfo} />}
+      {moreOpen && (
+        <MoreTray
+          live={live}
+          interviewType={interviewType}
+          answerFormat={answerFormat}
+          pronunciation={pronunciation}
+          historyEnabled={historyEnabled}
+          settings={settings}
+          mode={mode}
+          clientInfo={clientInfo}
+          onPickModel={(task, provider, id) => void pickModel(task, provider, id)}
+          onChangeFormat={(f) => void changeFormat(f)}
+          onTogglePronunciation={() => void togglePronunciation()}
+          onToggleHistory={() => useOverlayStore.getState().setHistoryEnabled(!historyEnabled)}
+          onClear={clearAnswer}
+          onToggleMode={() => applyMode(mode === 'compact' ? 'expanded' : 'compact')}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+      )}
 
       {captures.length > 0 && <CapturesPanel captures={captures} />}
 
-      {sessionError && (
-        <ErrorBanner message={sessionError} onDismiss={() => setSessionError(null)} />
-      )}
-
-      {live && <SessionBar clientInfo={clientInfo} paused={paused} />}
+      {sessionError && <ErrorBanner message={sessionError} onDismiss={() => setSessionError(null)} />}
 
       {/* Companion sessions: live presence dial + visible cost estimate. */}
       {live && companionStatus && <CompanionBar status={companionStatus} />}
@@ -481,39 +541,75 @@ export default function Overlay() {
         </p>
       )}
 
-      {live && (
-        <AnswerControls
-          interviewType={interviewType}
-          answerFormat={answerFormat}
-          pronunciation={pronunciation}
-          answerInterviewer={answerInterviewer}
-          historyEnabled={historyEnabled}
-          settings={settings}
-          onPickModel={(task, provider, id) => void pickModel(task, provider, id)}
-          onChangeFormat={(f) => void changeFormat(f)}
-          onTogglePronunciation={() => void togglePronunciation()}
-          onToggleAnswerInterviewer={() => setAnswerInterviewer((v) => !v)}
-          onToggleHistory={() => useOverlayStore.getState().setHistoryEnabled(!historyEnabled)}
-          onClear={clearAnswer}
-        />
+      {/* Coding interviews listen without auto-answering by default — a state
+          worth seeing, so it stays out of the ⋯ tray. */}
+      {live && interviewType === 'coding' && (
+        <button
+          data-ct-interactive
+          type="button"
+          onClick={() => setAnswerInterviewer((v) => !v)}
+          style={noDrag}
+          title={
+            answerInterviewer
+              ? 'Auto-answering the interviewer — click to go listen-only'
+              : "Listen-only: transcribes but won't auto-answer (keeps your coding answer). Click to answer what the interviewer just asked."
+          }
+          className={`mb-2 shrink-0 self-start rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
+            answerInterviewer ? 'bg-blue-600 text-white' : 'bg-neutral-800 text-amber-300 hover:text-amber-200'
+          }`}
+        >
+          {answerInterviewer ? '🎧 Answering the interviewer' : '🔇 Listen-only'}
+        </button>
       )}
 
       {live && mode === 'expanded' && <AudioMeter level={level} speaking={speaking} />}
 
+      {/* The latest line of the conversation; the full transcript on demand. */}
       {(live || transcript.length > 0 || Object.keys(interims).length > 0) && (
         <TranscriptPanel lines={transcript} interims={interims} />
       )}
 
-      {/* Contribution cards — the newest streams; older ones are kept (collapsed)
-          when history is on. Click a collapsed card to expand; × removes one. */}
+      {/* Missed questions — not answered, never dropped: each with why, and
+          one tap to answer it now. */}
+      {missed.length > 0 && (
+        <ul data-ct-interactive className="mb-2 shrink-0 space-y-1" style={noDrag} aria-label="Missed questions">
+          {missed.map((c) => (
+            <li key={c.id} className="flex items-start gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px]">
+              <span className="min-w-0 flex-1">
+                <span className="font-medium text-amber-300">{missLabel(c)}:</span>{' '}
+                <span className="text-neutral-200">{c.title}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => void regenerateCard(c)}
+                className="shrink-0 rounded bg-amber-500/20 px-1.5 py-0.5 font-medium text-amber-100 hover:bg-amber-500/30"
+              >
+                Answer it
+              </button>
+              <button
+                type="button"
+                onClick={() => useOverlayStore.getState().remove(c.id)}
+                aria-label="Dismiss this missed question"
+                className="shrink-0 text-neutral-500 hover:text-neutral-300"
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* The current question and its answer — the dominant content. */}
       <div className="min-h-0 flex-1 space-y-2 overflow-auto" style={noDrag}>
-        {cards.length === 0 ? (
+        {!current ? (
           <div className="flex h-full flex-col items-center justify-center text-center text-neutral-500">
             {live && !paused ? (
               <>
                 <EqualizerBars />
                 <span className="mt-2 text-xs">Listening… answers will appear here.</span>
               </>
+            ) : live && paused ? (
+              <span className="text-xs">Paused — nothing is being heard. Resume to continue.</span>
             ) : (
               <>
                 <HeadphonesIcon className="h-7 w-7 text-neutral-600" />
@@ -526,24 +622,41 @@ export default function Overlay() {
             )}
           </div>
         ) : (
-          cards.map((c, i) => (
-            <ContributionCard
-              key={c.id}
-              card={c}
-              isCurrent={i === cards.length - 1}
-              live={live}
-              paused={paused}
-              copied={copiedId === c.id}
-              openCite={openCite}
-              onToggleCite={setOpenCite}
-              onToggleCollapsed={() => useOverlayStore.getState().toggle(c.id)}
-              onCopy={() => copyCard(c)}
-              onRegenerate={() => void regenerateCard(c)}
-              onRemove={() => useOverlayStore.getState().remove(c.id)}
-              onCorrectMemory={() => correctMemory(c)}
-              onForgetMemory={() => void forgetMemory(c)}
-            />
-          ))
+          <div className="cue-current">
+            <ContributionCard {...cardProps(current, true)} prominent />
+            {meta?.riskWarning && !meta.missed && (
+              <p className="mt-1.5 rounded bg-amber-900/40 px-2 py-1 text-[11px] text-amber-300">⚠ {meta.riskWarning}</p>
+            )}
+            {context && (
+              <DataSentPanel
+                context={context}
+                provider={answerProvider}
+                show={showData}
+                onToggle={() => setShowData((s) => !s)}
+              />
+            )}
+          </div>
+        )}
+
+        {/* Earlier cards — kept, in arrival order, one tap away. */}
+        {earlier.length > 0 && (
+          <div data-ct-interactive className="border-t border-white/5 pt-1.5">
+            <button
+              type="button"
+              onClick={() => setShowEarlier((v) => !v)}
+              aria-expanded={showEarlier}
+              className="text-[11px] text-neutral-500 hover:text-neutral-300"
+            >
+              {showEarlier ? '▾' : '▸'} Earlier ({earlier.length})
+            </button>
+            {showEarlier && (
+              <div className="mt-1 space-y-1.5">
+                {earlier.map((c) => (
+                  <ContributionCard key={c.id} {...cardProps(c, false)} />
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -587,19 +700,6 @@ export default function Overlay() {
           over the default Space, so the bar renders whenever the flag is on. */}
       {FLAGS.voice && (
         <VoiceBar voice={voice} prefs={voicePrefs} level={voiceLevel} onToggleMute={() => void toggleMute()} />
-      )}
-
-      {meta?.riskWarning && (
-        <p
-          className="mt-2 shrink-0 rounded bg-amber-900/40 px-2 py-1 text-[11px] text-amber-300"
-          style={noDrag}
-        >
-          ⚠ {meta.riskWarning}
-        </p>
-      )}
-
-      {context && (
-        <DataSentPanel context={context} show={showData} onToggle={() => setShowData((s) => !s)} />
       )}
 
       <SettingsModal

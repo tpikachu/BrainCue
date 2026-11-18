@@ -431,7 +431,9 @@ export class EngineSession {
       // On screen now: a later revision of it marks this card, not a new one.
       job.questionId = questionId;
     }
-    emitContributionMeta(questionId, { questionId, riskWarning });
+    // `missed` lets the Cue Card keep this card (and its retry) visible
+    // as a missed question, apart from the answers.
+    emitContributionMeta(questionId, { questionId, riskWarning, missed: why });
     emitContributionDone(questionId);
   }
 

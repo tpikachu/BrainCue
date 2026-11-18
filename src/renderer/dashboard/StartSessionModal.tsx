@@ -7,7 +7,7 @@ import { useLiveSession } from '../store/useLiveSession';
 import { useReadiness, useReadinessStore } from '../store/useReadiness';
 import { ACTIVITIES, DEFAULT_ACTIVITY, activityOf } from '@shared/activities';
 import { cloudProvider } from '@shared/providers';
-import type { CompanionPresence, ContextPackKind, Job, Presence, SessionListItem } from '@shared/types';
+import type { CompanionPresence, ContextPackKind, Job, Presence, SessionDetail, SessionListItem } from '@shared/types';
 import { COMPANION_TO_ENGINE_PRESENCE } from '@shared/types';
 import { Button, Dropdown, Field, Modal, Select, TextInput } from '../components/ui';
 import { JobFormModal } from './JobFormModal';
@@ -54,13 +54,21 @@ const PAGE = 100;
  *
  * Nothing is captured before Start. What is captured and what is sent (to
  * which provider) is one click away in the disclosure above the button.
+ *
+ * RESUME comes through here too (`resume`): the same setup rows, readiness
+ * and disclosure before anything is captured, with the role fixed to the
+ * interview's own and its transcript restored — the earlier content is never
+ * deleted, whatever happens to the new attempt.
  */
 export function StartSessionModal(props: {
   open: boolean;
   onClose: () => void;
   initialSpaceId?: string;
   initialActivity?: ContextPackKind;
+  /** Continue this saved interview instead of starting a new one. */
+  resume?: SessionListItem;
 }) {
+  const resume = props.resume ?? null;
   const navigate = useNavigate();
   // Whose session this is was decided in the sidebar — the modal never asks.
   const profile = useActiveProfile();
@@ -144,10 +152,12 @@ export function StartSessionModal(props: {
     setPresence('balanced');
     setForm(null);
     setError(null);
-    setResolving(!!props.initialSpaceId);
-    if (props.initialSpaceId) {
+    // Resuming: the role is the interview's own, read by id like any other.
+    const handedIn = resume ? (resume.jobId ?? undefined) : props.initialSpaceId;
+    setResolving(!!handedIn);
+    if (handedIn) {
       void api.jobs
-        .get(props.initialSpaceId)
+        .get(handedIn)
         .then((raw) => {
           if (!current()) return; // reopened, switched, or a newer choice since
           const j = raw as Job | null;
@@ -165,7 +175,7 @@ export function StartSessionModal(props: {
         .finally(() => current() && setResolving(false));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.open, props.initialSpaceId, props.initialActivity, loadSettings, refreshReadiness]);
+  }, [props.open, props.initialSpaceId, props.initialActivity, resume?.id, loadSettings, refreshReadiness]);
 
   // A profile switch makes every choice stale — and every lookup in flight:
   // start over from the new profile's default.
@@ -233,7 +243,8 @@ export function StartSessionModal(props: {
   // The default, once per profile|activity: the Space last used (read by id,
   // wherever it sits), else the only one an interview could use, else none.
   useEffect(() => {
-    if (!props.open || chosen || resolving || !history || !current || debounced) return;
+    // A resume never falls back to a default: its role is the interview's own.
+    if (!props.open || resume || chosen || resolving || !history || !current || debounced) return;
     if (defaultedFor === scopeKey) return;
     let alive = true;
     const forKey = scopeKey;
@@ -252,16 +263,26 @@ export function StartSessionModal(props: {
     return () => {
       alive = false;
     };
-  }, [props.open, chosen, resolving, history, current, debounced, defaultedFor, scopeKey, activity, profileId]);
+  }, [props.open, resume, chosen, resolving, history, current, debounced, defaultedFor, scopeKey, activity, profileId]);
 
   const options = pickerOptions(current?.items ?? [], selected);
   // More roles than one page holds (or a search in progress): offer search.
   const searchable = !!query || (!!current && current.total > current.items.length);
   const space = selected ?? undefined;
   const spaceTitle = space ? space.company || space.title : null;
+  /** Resume-only gates: the interview must be this profile's, and its role
+   *  must still exist (its JD is what grounds the answers). */
+  const resumeBlocker = !resume
+    ? null
+    : resume.profileId !== profileId
+      ? 'This interview belongs to another profile — switch to it in the sidebar to resume it.'
+      : !resolving && !space
+        ? 'This interview’s role no longer exists — start a new interview instead.'
+        : null;
   const blocker = !readiness
     ? null // still checking — Start stays disabled below, without a false alarm
-    : startBlocker({
+    : resumeBlocker ??
+      startBlocker({
         profile,
         chatReady: readiness.chat.ready,
         chatProblem: readiness.chat.problem,
@@ -292,6 +313,25 @@ export function StartSessionModal(props: {
     setStarting(true);
     setError(null);
     try {
+      if (resume) {
+        // Continue the SAME session: its transcript becomes the live context
+        // again. A failed resume never deletes it (resumeExisting keeps it).
+        const detail = (await api.session.get(resume.id)) as SessionDetail;
+        const prior = detail.transcript.map((c, i) => ({ id: i, speaker: c.speaker, text: c.text }));
+        const resumed = await live.resumeExisting({
+          sessionId: resume.id,
+          listensTo: config.listensTo,
+          micDeviceId: settings?.audio?.micDeviceId ?? null,
+          prior,
+        });
+        if (!resumed.ok) {
+          setError(resumed.error);
+          return;
+        }
+        props.onClose();
+        navigate('/interview');
+        return;
+      }
       // Re-read the chosen Space: one deleted (or moved out of this profile)
       // since it was chosen is never started against.
       if (space) {
@@ -386,7 +426,8 @@ export function StartSessionModal(props: {
       <Modal
         open={props.open && form === null}
         onClose={props.onClose}
-        title={interview ? 'Start an interview' : 'Start a session'}
+        busy={starting ? (resume ? 'Resuming' : 'Starting') : false}
+        title={resume ? 'Resume the interview' : interview ? 'Start an interview' : 'Start a session'}
         width="max-w-lg"
       >
         <div className="space-y-4 text-sm">
@@ -411,7 +452,17 @@ export function StartSessionModal(props: {
             </Field>
           )}
 
+          {/* Resuming: the role is fixed — it is this interview's. */}
+          {resume && (
+            <p className="rounded-lg border border-white/5 bg-neutral-950/50 px-3 py-2 text-xs text-neutral-300">
+              Continuing the round from{' '}
+              {new Date(resume.createdAt).toLocaleDateString([], { dateStyle: 'medium' })}
+              {space ? ` for ${roleLabel(space)}` : ''} — its transcript is restored and kept.
+            </p>
+          )}
+
           {/* Which role (an interview) or Space (anything else). */}
+          {!resume && (
           <Field label={interview ? 'Role' : `${config.label} Space${config.needsSpace ? '' : ' (optional)'}`}>
             <div className="flex gap-2">
               <Select
@@ -462,6 +513,7 @@ export function StartSessionModal(props: {
               </p>
             )}
           </Field>
+          )}
 
           {/* One line each: résumé, role & JD (interviews), audio, AI. */}
           <ReadinessChecklist
@@ -532,7 +584,7 @@ export function StartSessionModal(props: {
           {/* Résumé, role, transcription and AI gaps are already on their rows,
               each with its fix — said once. Only what no row shows (a live
               session, no profile) or a failed start is said here. */}
-          {(error || (blocker && (!profile || live.session))) && (
+          {(error || (blocker && (!profile || live.session || resumeBlocker))) && (
             <p className="text-xs text-amber-400" role="alert">
               ⚠ {error ?? blocker}
             </p>
@@ -541,7 +593,7 @@ export function StartSessionModal(props: {
           {/* Explicit start — nothing is captured until this click. Practice
               (preparation FOR an interview, not a kind of call) is one quiet link. */}
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {interview && (
+            {interview && !resume && (
               <span className="mr-auto text-xs text-neutral-500">
                 Practice first:{' '}
                 {PRACTICE_LINKS.map((p, i) => (
@@ -563,7 +615,7 @@ export function StartSessionModal(props: {
               loading={starting}
               onClick={() => void start()}
             >
-              {interview ? 'Start interview' : 'Start listening'}
+              {resume ? 'Resume interview' : interview ? 'Start interview' : 'Start listening'}
             </Button>
           </div>
         </div>

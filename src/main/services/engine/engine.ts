@@ -5,6 +5,7 @@ import { broadcast } from '../../ipc/broadcast';
 import { profilesRepo } from '../../db/repositories/profiles.repo';
 import { contextPacksRepo } from '../../db/repositories/jobs.repo';
 import { sessionsRepo } from '../../db/repositories/sessions.repo';
+import { memoriesRepo } from '../../db/repositories/memories.repo';
 import { providerFor } from '../../providers/registry';
 import { getOverlayWindow, showOverlay } from '../../windows/overlayWindow';
 import { getMainWindow } from '../../windows/mainWindow';
@@ -25,6 +26,7 @@ import type {
   ContextPackKind,
   InterviewType,
   Presence,
+  RollbackResult,
   Session,
   SessionMode,
   Speaker,
@@ -95,6 +97,15 @@ function toSession(r: typeof schema.sessions.$inferSelect): Session {
  */
 class Engine {
   private current: EngineSession | null = null;
+  /**
+   * Failed starts being rolled back (a session opened, but its audio never
+   * attached). Set BEFORE the stop is attempted, so a stop that throws leaves
+   * it pending: a later stop of that session — from the dashboard, the Cue
+   * Card or anywhere else — follows the same policy instead of a plain stop:
+   * no save prompt for the attempt, and a brand-new session is removed. A
+   * resumed one (`discard: false`) keeps its earlier content.
+   */
+  private readonly rollbacks = new Map<string, { discard: boolean }>();
 
   /** Set up the live session + Realtime transcriber (shared by start and
    *  resume; mock/sparring rehearsals come through here too via the facade's
@@ -405,6 +416,9 @@ class Engine {
       if (wasEphemeral) {
         // Mock rehearsals are never persisted — drop the session + its Q/A.
         sessionsRepo.delete(sessionId);
+      } else if (this.rollbacks.has(sessionId)) {
+        // A failed start being rolled back heard nothing worth keeping: no
+        // save prompt (rollback() removes a new one; a resumed one stays).
       } else {
         // Ask the dashboard to save (pick the type) or discard the just-ended session.
         broadcast(
@@ -472,11 +486,48 @@ class Engine {
 
   /** Stop whichever session is currently live (for the Cue Card, which doesn't
    *  carry a session id). No-op when nothing is live. The 'stopped' sessionState
-   *  broadcast tears down the dashboard store + mic too. */
-  stopActive(): { stopped: boolean } {
+   *  broadcast tears down the dashboard store + mic too. A session whose failed
+   *  start is still being rolled back is rolled back instead — the same policy
+   *  and the same truthful result as the dashboard's Stop. */
+  stopActive(): { stopped: boolean; rollback?: RollbackResult } {
     if (!this.current) return { stopped: false };
-    this.stop(this.current.sessionId);
+    const id = this.current.sessionId;
+    const pending = this.rollbacks.get(id);
+    if (pending) {
+      const r = this.rollback(id, pending.discard);
+      return { stopped: r.stopped, rollback: r };
+    }
+    this.stop(id);
     return { stopped: true };
+  }
+
+  /**
+   * Undo a session whose start failed (its audio never attached): stop it,
+   * then remove it when it was new. Claims only what is CONFIRMED — a stop
+   * that throws stays pending (any later stop retries this), a failed removal
+   * is reported. The result is broadcast to every window, so the dashboard and
+   * the Cue Card say the same thing whichever one pressed Stop.
+   */
+  rollback(sessionId: string, discard: boolean): RollbackResult {
+    this.rollbacks.set(sessionId, { discard });
+    const settle = (r: RollbackResult): RollbackResult => {
+      broadcast(EVENTS.sessionRollback, r);
+      return r;
+    };
+    try {
+      this.stop(sessionId);
+    } catch (e) {
+      return settle({ sessionId, stopped: false, error: (e as Error)?.message || String(e) });
+    }
+    this.rollbacks.delete(sessionId); // stopped is confirmed; nothing is pending
+    if (!discard) return settle({ sessionId, stopped: true });
+    try {
+      memoriesRepo.deleteBySession(sessionId);
+      sessionsRepo.delete(sessionId);
+    } catch (e) {
+      return settle({ sessionId, stopped: true, removed: false, error: (e as Error)?.message || String(e) });
+    }
+    return settle({ sessionId, stopped: true, removed: true });
   }
 
   /** Manual or caller-classified question (mock rehearsals pass their own

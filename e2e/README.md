@@ -39,11 +39,30 @@ Two tiers:
 - ✅ Start flow role choice (`start-flow.spec.ts`, no key, nothing captured): a role beyond
   the picker's first page stays chosen when handed in or remembered, is reachable by search,
   and a deleted or other-profile role is never the default.
-- ✅ Start flow under controlled timing (`startModal.race.spec.ts`): the real
-  StartSessionModal, bundled with esbuild, in the project's Electron with one HIDDEN window
-  (`harness/main.cjs` — no app code, DB, audio or network); a fake bridge holds/releases
-  role lookups and a stubbed `startNew` records the submitted job id. Covers a late lookup
-  after reopen, after a newer pick, after a profile switch, and a stale failure.
+- ✅ Renderer harness (`harness/harness.ts` + `harness/entry.tsx`): REAL components,
+  bundled with esbuild, in the project's Electron with one HIDDEN window (`harness/main.cjs`
+  — no app code, DB, audio or network). The preload bridge is a fake that records every
+  call and whose replies a test can script, hold or fail; startNew / resumeExisting record
+  what they were asked to start. Each load proves the page takes input (a hidden window
+  occasionally hands a fresh document none) and reloads if not. `HARNESS_ROOT` bundles
+  from another checkout (an earlier commit's worktree) for before/after runs. Screenshots
+  are opt-in: `HARNESS_CAPTURE_PORT` serves Electron's own capture of the window on
+  127.0.0.1 (CDP captures wait for frames a hidden window does not always paint), and
+  `HARNESS_SHOW_X` (≥ 1920 only) shows it without focus on a second monitor.
+  - `startModal.race.spec.ts` — the start flow under controlled timing (late lookups after
+    reopen, a newer pick, a profile switch, a stale failure) and Resume through it.
+  - `history-and-save.spec.ts` — history opens from the persisted session only (no report,
+    no model call); reports are explicit; Keep reports each outcome (success, failure +
+    Retry, no Space, a refused destination), stays open while busy, Discard asks first.
+  - `cue-card.spec.ts` — the current question dominates; missed questions stay with why and
+    a retry; earlier cards behind a toggle; sources name the provider; an unconfirmed Stop
+    after a failed rollback is said in the Cue Card.
+  - `keyboard-drafts.spec.ts` — focus contained and restored, dropdown keys and ARIA state,
+    Escape closes the inner control first, edited drafts and busy saves survive dismissal,
+    readiness detail reachable by keyboard.
+- ✅ History in the real app (`history.spec.ts`, no key): a sample conversation opens from
+  the DB with no report; `session:remember` reports a failed summary as failed and keeps
+  the transcript; a missing or other-profile Space is refused in main.
 - ✅ Real main + SQLite via `window.api`: interview delete **FK cascade**, profile-delete
   cascade, model preset + per-task override round-trip.
 - ✅ (live) résumé parse → embed → RAG retrieval.

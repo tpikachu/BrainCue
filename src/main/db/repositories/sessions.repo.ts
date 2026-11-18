@@ -1,13 +1,15 @@
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, like, ne, or, sql, type SQL } from 'drizzle-orm';
 import { db, schema } from '../index';
 import { transcriptOrder } from '../transcriptOrder';
 import type {
   AiAnswer,
+  Contribution,
   DetectedQuestion,
   PracticeStats,
   Session,
   SessionDetail,
   SessionListItem,
+  SessionPage,
   SessionReport,
   StoryCompetency,
   TranscriptChunk,
@@ -48,7 +50,132 @@ const toReport = (r: typeof schema.sessionReports.$inferSelect): SessionReport =
   createdAt: r.createdAt,
 });
 
+/** The list row's columns: the session, its Space's title/company and the
+ *  profile name (left-joined — a deleted Space reads as none). */
+const listColumns = {
+  id: schema.sessions.id,
+  profileId: schema.sessions.profileId,
+  jobId: schema.sessions.packId,
+  activity: schema.sessions.activity,
+  mode: schema.sessions.mode,
+  kind: schema.sessions.kind,
+  interviewType: schema.sessions.interviewType,
+  status: schema.sessions.status,
+  startedAt: schema.sessions.startedAt,
+  endedAt: schema.sessions.endedAt,
+  createdAt: schema.sessions.createdAt,
+  jobTitle: schema.contextPacks.title,
+  jobCompany: schema.contextPacks.company,
+  profileName: schema.profiles.name,
+};
+interface ListRow {
+  id: string;
+  profileId: string;
+  jobId: string | null;
+  activity: string | null;
+  mode: string;
+  kind: string;
+  interviewType: string;
+  status: string;
+  startedAt: number | null;
+  endedAt: number | null;
+  createdAt: number;
+  jobTitle: string | null;
+  jobCompany: string | null;
+  profileName: string | null;
+}
+
+/** Per-(session, question type) counts, for the given sessions only — so a
+ *  page of history never scans every question in the database. */
+function typeCountsFor(ids: string[] | null): Map<string, Record<string, number>> {
+  const bySession = new Map<string, Record<string, number>>();
+  if (ids && ids.length === 0) return bySession;
+  const counts = db()
+    .select({
+      sessionId: schema.detectedQuestions.sessionId,
+      type: schema.detectedQuestions.type,
+      c: sql<number>`count(*)`,
+    })
+    .from(schema.detectedQuestions)
+    .where(ids ? inArray(schema.detectedQuestions.sessionId, ids) : undefined)
+    .groupBy(schema.detectedQuestions.sessionId, schema.detectedQuestions.type)
+    .all();
+  for (const r of counts) {
+    const m = bySession.get(r.sessionId) ?? {};
+    m[r.type] = r.c;
+    bySession.set(r.sessionId, m);
+  }
+  return bySession;
+}
+
+function toListItem(r: ListRow, counts: Map<string, Record<string, number>>): SessionListItem {
+  return {
+    id: r.id,
+    profileId: r.profileId,
+    jobId: r.jobId ?? null,
+    activity: r.activity as Session['activity'],
+    mode: r.mode as Session['mode'],
+    kind: r.kind as Session['kind'],
+    interviewType: r.interviewType as Session['interviewType'],
+    status: r.status as Session['status'],
+    startedAt: r.startedAt,
+    endedAt: r.endedAt ?? null,
+    createdAt: r.createdAt,
+    jobTitle: r.jobTitle ?? null,
+    jobCompany: r.jobCompany ?? null,
+    profileName: r.profileName ?? null,
+    typeCounts: counts.get(r.id) ?? {},
+  };
+}
+
 export const sessionsRepo = {
+  /** One session row, or null. */
+  get(id: string): Session | null {
+    const r = db().select().from(schema.sessions).where(eq(schema.sessions.id, id)).get();
+    return r ? toSession(r) : null;
+  },
+
+  /**
+   * One page of a profile's history, newest first — server-side LIMIT/OFFSET
+   * with an exact count, searchable by Space title/company, activity, mode and
+   * interview type. Sessions is a list that only grows.
+   */
+  page(opts: { profileId: string; query?: string; limit: number; offset: number }): SessionPage {
+    const q = (opts.query ?? '').trim();
+    const pat = `%${q}%`;
+    const where: SQL | undefined = and(
+      eq(schema.sessions.profileId, opts.profileId),
+      q
+        ? or(
+            like(schema.contextPacks.title, pat),
+            like(schema.contextPacks.company, pat),
+            like(schema.sessions.activity, pat),
+            like(schema.sessions.mode, pat),
+            like(schema.sessions.interviewType, pat),
+          )
+        : undefined,
+    );
+    const rows = db()
+      .select(listColumns)
+      .from(schema.sessions)
+      .leftJoin(schema.contextPacks, eq(schema.contextPacks.id, schema.sessions.packId))
+      .leftJoin(schema.profiles, eq(schema.profiles.id, schema.sessions.profileId))
+      .where(where)
+      .orderBy(desc(schema.sessions.createdAt))
+      .limit(opts.limit)
+      .offset(opts.offset)
+      .all();
+    const total =
+      db()
+        .select({ c: sql<number>`count(*)` })
+        .from(schema.sessions)
+        .leftJoin(schema.contextPacks, eq(schema.contextPacks.id, schema.sessions.packId))
+        .where(where)
+        .get()?.c ?? 0;
+    const counts = typeCountsFor(rows.map((r) => r.id));
+    return { items: rows.map((r) => toListItem(r, counts)), total };
+  },
+
   /**
    * Sessions with job (title/company) + profile name + a per-question type
    * breakdown, newest first.
@@ -61,64 +188,19 @@ export const sessionsRepo = {
    */
   list(profileId?: string): SessionListItem[] {
     const rows = db()
-      .select({
-        id: schema.sessions.id,
-        profileId: schema.sessions.profileId,
-        jobId: schema.sessions.packId,
-        activity: schema.sessions.activity,
-        mode: schema.sessions.mode,
-        kind: schema.sessions.kind,
-        interviewType: schema.sessions.interviewType,
-        status: schema.sessions.status,
-        startedAt: schema.sessions.startedAt,
-        endedAt: schema.sessions.endedAt,
-        createdAt: schema.sessions.createdAt,
-        jobTitle: schema.contextPacks.title,
-        jobCompany: schema.contextPacks.company,
-        profileName: schema.profiles.name,
-      })
+      .select(listColumns)
       .from(schema.sessions)
       .leftJoin(schema.contextPacks, eq(schema.contextPacks.id, schema.sessions.packId))
       .leftJoin(schema.profiles, eq(schema.profiles.id, schema.sessions.profileId))
       .where(profileId ? eq(schema.sessions.profileId, profileId) : undefined)
       .orderBy(desc(schema.sessions.createdAt))
       .all();
-
     // One grouped query for the per-(session,type) question counts, so the
-    // Reports list can show "behavioral ×4 · coding ×2" without N detail loads.
-    const counts = db()
-      .select({
-        sessionId: schema.detectedQuestions.sessionId,
-        type: schema.detectedQuestions.type,
-        c: sql<number>`count(*)`,
-      })
-      .from(schema.detectedQuestions)
-      .groupBy(schema.detectedQuestions.sessionId, schema.detectedQuestions.type)
-      .all();
-    const bySession = new Map<string, Record<string, number>>();
-    for (const r of counts) {
-      const m = bySession.get(r.sessionId) ?? {};
-      m[r.type] = r.c;
-      bySession.set(r.sessionId, m);
-    }
-
-    return rows.map((r) => ({
-      id: r.id,
-      profileId: r.profileId,
-      jobId: r.jobId,
-      activity: r.activity as Session['activity'],
-      mode: r.mode as Session['mode'],
-      kind: r.kind as Session['kind'],
-      interviewType: r.interviewType as Session['interviewType'],
-      status: r.status as Session['status'],
-      startedAt: r.startedAt,
-      endedAt: r.endedAt,
-      createdAt: r.createdAt,
-      jobTitle: r.jobTitle ?? null,
-      jobCompany: r.jobCompany ?? null,
-      profileName: r.profileName ?? null,
-      typeCounts: bySession.get(r.id) ?? {},
-    }));
+    // list can show "behavioral ×4 · coding ×2" without N detail loads.
+    // (Every session's counts in one scan: an IN list of a long history could
+    // exceed SQLite's bound-parameter limit. Paged history uses page().)
+    const counts = typeCountsFor(null);
+    return rows.map((r) => toListItem(r, counts));
   },
 
   detail(id: string): SessionDetail | null {
@@ -172,11 +254,43 @@ export const sessionsRepo = {
       .where(eq(schema.sessionReports.sessionId, id))
       .get();
 
+    // The other cards it produced (meetings, companion) — answers to detected
+    // questions are above. Oldest first, as they appeared.
+    const cards = db()
+      .select()
+      .from(schema.contributions)
+      .where(and(eq(schema.contributions.sessionId, id), ne(schema.contributions.kind, 'answer')))
+      .orderBy(asc(schema.contributions.createdAt))
+      .all()
+      .map<Contribution>((r) => ({
+        id: r.id,
+        sessionId: r.sessionId,
+        kind: r.kind as Contribution['kind'],
+        status: r.status as Contribution['status'],
+        title: r.title,
+        body: r.body,
+        meta: r.meta ? JSON.parse(r.meta) : null,
+        sourceRefs: r.sourceRefs ? JSON.parse(r.sourceRefs) : null,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      }));
+
+    const pack = s.packId
+      ? db()
+          .select({ title: schema.contextPacks.title, company: schema.contextPacks.company })
+          .from(schema.contextPacks)
+          .where(eq(schema.contextPacks.id, s.packId))
+          .get()
+      : undefined;
+
     return {
       ...toSession(s),
       transcript,
       questions,
       report: reportRow ? toReport(reportRow) : null,
+      cards,
+      spaceTitle: pack?.title ?? null,
+      spaceCompany: pack?.company ?? null,
     };
   },
 

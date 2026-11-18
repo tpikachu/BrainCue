@@ -8,18 +8,53 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  *  - the capture status was reported BEFORE the pipeline was attached.
  * The store now returns an explicit StartResult and rolls back on failure.
  */
-const h = vi.hoisted(() => ({
-  calls: [] as string[],
-  savePrompt: null as null | ((p: unknown) => void),
-  sessionState: null as null | ((p: unknown) => void),
-  stopFails: 0, // how many stop calls reject before one succeeds
-  deleteFails: false,
-  startFails: false,
-  ctxFails: false,
-  displayFails: false,
-  micFails: false,
-  tracks: [] as { stop: ReturnType<typeof vi.fn>; readyState: string }[],
-}));
+const h = vi.hoisted(() => {
+  const h = {
+    calls: [] as string[],
+    savePrompt: null as null | ((p: unknown) => void),
+    sessionState: null as null | ((p: unknown) => void),
+    rollbackSettled: null as null | ((p: unknown) => void),
+    stopFails: 0, // how many stop calls fail before one succeeds
+    deleteFails: false,
+    startFails: false,
+    ctxFails: false,
+    displayFails: false,
+    micFails: false,
+    rollbackLost: false, // the rollback IPC never reaches main
+    pending: new Map<string, boolean>(), // main's held rollbacks (engine.rollback)
+    tracks: [] as { stop: ReturnType<typeof vi.fn>; readyState: string }[],
+    /** Like main (engine.rollback): the rollback is held BEFORE the stop is
+     *  tried; a stop that fails leaves it pending; a confirmed stop
+     *  broadcasts the stopped state but NO save prompt; a new session is then
+     *  removed. Every outcome is broadcast (onSessionRollback). */
+    rollback: async (id: string, discard: boolean): Promise<unknown> => {
+      if (h.rollbackLost) throw new Error('IPC rollback failed');
+      h.pending.set(id, discard);
+      h.calls.push(`stop:${id}`);
+      const settle = (r: unknown) => (h.rollbackSettled?.(r), r);
+      if (h.stopFails > 0) {
+        h.stopFails--;
+        return settle({ sessionId: id, stopped: false, error: 'IPC stop failed' });
+      }
+      h.pending.delete(id);
+      h.sessionState?.({ status: 'stopped', paused: false });
+      if (!discard) return settle({ sessionId: id, stopped: true });
+      h.calls.push(`delete:${id}`);
+      if (h.deleteFails) return settle({ sessionId: id, stopped: true, removed: false, error: 'IPC delete failed' });
+      return settle({ sessionId: id, stopped: true, removed: true });
+    },
+    /** The Cue Card's Stop (main's stopActive; the fake takes the live id):
+     *  a held rollback runs instead of a plain stop. */
+    stopActive: async (id: string): Promise<{ stopped: boolean; rollback?: unknown }> => {
+      if (h.pending.has(id)) return { stopped: true, rollback: await h.rollback(id, h.pending.get(id)!) };
+      h.calls.push(`stop:${id}`);
+      h.sessionState?.({ status: 'stopped', paused: false });
+      h.savePrompt?.({ sessionId: id });
+      return { stopped: true };
+    },
+  };
+  return h;
+});
 
 vi.mock('../lib/api', () => ({
   api: {
@@ -33,6 +68,10 @@ vi.mock('../lib/api', () => ({
       onSessionError: () => () => {},
       onSessionState: (cb: (p: unknown) => void) => {
         h.sessionState = cb;
+        return () => {};
+      },
+      onSessionRollback: (cb: (p: unknown) => void) => {
+        h.rollbackSettled = cb;
         return () => {};
       },
     },
@@ -61,6 +100,7 @@ vi.mock('../lib/api', () => ({
         h.calls.push(`delete:${id}`);
         if (h.deleteFails) throw new Error('IPC delete failed');
       },
+      rollback: (id: string, discard: boolean) => h.rollback(id, discard),
       reportCapture: async (st: { system: boolean; mic: boolean }) => h.calls.push(`report:${st.system}/${st.mic}`),
       sendRealtimeAudio: () => {},
     },
@@ -128,8 +168,9 @@ const startArgs = { profileId: 'p1', answerFormat: 'general', jobId: 'j1', activ
 beforeEach(() => {
   h.calls.length = 0;
   h.tracks.length = 0;
-  h.startFails = h.ctxFails = h.displayFails = h.micFails = h.deleteFails = false;
+  h.startFails = h.ctxFails = h.displayFails = h.micFails = h.deleteFails = h.rollbackLost = false;
   h.stopFails = 0;
+  h.pending.clear();
   ended.display.length = 0;
   ended.mic.length = 0;
   useLiveSession.setState({ session: null, micError: null, sessionError: null, pendingSave: null });
@@ -274,6 +315,48 @@ describe('M1 review round 2: rollback claims only what it confirmed', () => {
     await expect(useLiveSession.getState().stop()).rejects.toThrow(/may still be running/);
     expect(useLiveSession.getState().session?.id).toBe('s-new');
     expect(useLiveSession.getState().micError).toMatch(/Stopping the session failed/);
+  });
+
+  // M6: the Cue Card's Stop after a failed rollback follows the SAME policy.
+  for (const kind of ['new', 'resumed'] as const) {
+    it(`${kind} session: the Cue Card's Stop retries the rollback — no Keep prompt, and the dashboard says what was confirmed`, async () => {
+      h.ctxFails = true;
+      h.stopFails = 1;
+      if (kind === 'new') await useLiveSession.getState().startNew(startArgs);
+      else await useLiveSession.getState().resumeExisting({ sessionId: 's-old', listensTo: 'system', prior: [] });
+      const id = kind === 'new' ? 's-new' : 's-old';
+      expect(useLiveSession.getState().session?.id).toBe(id);
+
+      // Pressed in the OTHER window: main runs its held rollback.
+      const r = await h.stopActive(id);
+      expect(r.rollback).toMatchObject({ stopped: true, ...(kind === 'new' ? { removed: true } : {}) });
+      expect(h.calls.includes(`delete:${id}`)).toBe(kind === 'new');
+      const st = useLiveSession.getState();
+      expect(st.pendingSave).toBeNull(); // never Keep/Discard for the failed attempt
+      expect(st.session).toBeNull();
+      expect(st.micError).toBe(
+        kind === 'new'
+          ? 'The session was stopped and removed — nothing was recorded.'
+          : 'The session was stopped; its earlier content is kept.',
+      );
+      // Settled: the dashboard has nothing left to retry.
+      await useLiveSession.getState().stop();
+      expect(h.calls.filter((c) => c === `stop:${id}`)).toHaveLength(2);
+    });
+  }
+
+  it('the rollback never reached main and something else stopped it: no prompt; the same rollback completes', async () => {
+    h.ctxFails = true;
+    h.rollbackLost = true;
+    const r = await useLiveSession.getState().startNew(startArgs);
+    expect(r).toMatchObject({ ok: false, stage: 'audio', cleanup: 'failed' });
+    h.rollbackLost = false;
+    // A plain stop (main held nothing) broadcasts a Keep prompt for it…
+    await h.stopActive('s-new');
+    await vi.waitFor(() => expect(h.calls).toContain('delete:s-new'));
+    // …which is not shown: the new, empty session is removed instead.
+    expect(useLiveSession.getState().pendingSave).toBeNull();
+    expect(useLiveSession.getState().micError).toMatch(/stopped and removed/);
   });
 
   it('stopped but the delete fails: says exactly that, never "nothing was recorded"', async () => {

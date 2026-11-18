@@ -2,8 +2,9 @@ import { create } from 'zustand';
 import { api } from '../lib/api';
 import { floatTo16BitPCM, rms } from '../lib/pcm';
 import { resolveCapture, type Attempt } from '../lib/captureStreams';
-import type { AudioSource, Presence, Session } from '@shared/types';
+import type { AudioSource, Presence, RollbackResult, Session } from '@shared/types';
 import type { SavePrompt } from '@shared/ipc';
+import { rollbackMessage } from '../lib/rollbackCopy';
 
 export type { AudioSource };
 
@@ -102,14 +103,11 @@ interface Pump {
 let ctx: AudioContext | null = null;
 let pumps: Pump[] = [];
 let lineId = 0;
-/** Session ids whose save prompt is suppressed — ONLY while the rollback of
- *  a failed start is stopping them (see rollback()). Cleared when that stop
- *  settles, so a later successful resume of the same session, stopped
- *  normally, is offered for saving as usual. */
-const suppressSavePrompt = new Set<string>();
 /** A failed start whose rollback could not be confirmed. The session stays
  *  in the store (visibly live), and Stop retries the SAME rollback — stop,
- *  then delete when it was new — instead of a plain stop. */
+ *  then delete when it was new — instead of a plain stop. Main holds the same
+ *  rollback (engine.rollback), so the Cue Card's Stop follows it too; this is
+ *  the dashboard's view of it, settled by main's broadcast. */
 let pendingRollback: { sessionId: string; discard: boolean } | null = null;
 /** Latest RMS per stream — `speaking` follows whichever is louder. */
 const levels: Record<AudioSource, number> = { system: 0, mic: 0 };
@@ -205,11 +203,27 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
       ].slice(-MAX_TRANSCRIPT),
     }));
   });
-  // The stop that rolls back a failed start is not offered for saving — the
-  // attempt heard nothing (and a new session is deleted next). Main broadcasts
-  // the prompt before the stop call returns, so the one-shot mark is still set.
+  // A failed start is never offered for saving — main does not prompt for a
+  // rollback it holds. Should a prompt still arrive for a session this store
+  // is rolling back (main never received the rollback, and something else
+  // stopped it), it is not shown: the same rollback is completed instead.
   api.events.onSavePrompt((p) => {
-    if (!suppressSavePrompt.has((p as SavePrompt).sessionId)) set({ pendingSave: p });
+    const sp = p as SavePrompt;
+    if (pendingRollback?.sessionId === sp.sessionId) {
+      const discard = pendingRollback.discard;
+      void api.session
+        .rollback(sp.sessionId, discard)
+        .then((r) => settleRollback(r))
+        .catch(() => {});
+      return;
+    }
+    set({ pendingSave: sp });
+  });
+  // Whichever window pressed Stop on a failed start (the dashboard, or the
+  // Cue Card via stopActive), main settles the SAME rollback and says so here.
+  api.events.onSessionRollback?.((r) => {
+    if (pendingRollback?.sessionId !== r.sessionId) return;
+    settleRollback(r);
   });
   // Surface backend session failures (transcription socket dropped, OpenAI auth,
   // etc.) — otherwise the UI shows a happy "listening" state forever.
@@ -347,44 +361,42 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
     }
   }
 
+  /** Apply a settled rollback (this store's own call, or main's broadcast
+   *  after the Cue Card's Stop): once stopped is confirmed nothing is pending,
+   *  the live state clears, and the notice says exactly what was confirmed. */
+  function settleRollback(r: RollbackResult): { stopped: boolean; removed?: boolean; message: string } {
+    const message = rollbackMessage(r);
+    if (r.stopped) {
+      if (pendingRollback?.sessionId === r.sessionId) pendingRollback = null;
+      if (get().session?.id === r.sessionId) {
+        stopCapture();
+        set({ session: null, transcript: [], interim: '', interims: {} });
+      }
+      set({ micError: message });
+    }
+    return { stopped: r.stopped, removed: r.removed, message };
+  }
+
   /**
    * Undo a session created by a start whose audio never attached: stop it,
-   * then (a new one) delete it. Claims only what was CONFIRMED — a rejected
-   * stop or delete is reported, and the rollback stays pending so Stop can
-   * retry it.
+   * then (a new one) delete it — in main (engine.rollback), which holds the
+   * rollback until it is confirmed, so the Cue Card's Stop follows the same
+   * policy. Claims only what was CONFIRMED: a failed stop or delete is
+   * reported, and the rollback stays pending so Stop can retry it.
    */
   async function rollback(
     sessionId: string,
     discard: boolean,
   ): Promise<{ stopped: boolean; removed?: boolean; message: string }> {
     pendingRollback = { sessionId, discard };
-    suppressSavePrompt.add(sessionId);
+    let r: RollbackResult;
     try {
-      await api.session.stop(sessionId);
+      r = await api.session.rollback(sessionId, discard);
     } catch (e) {
-      return {
-        stopped: false,
-        message: `Stopping the session failed (${(e as Error).message || String(e)}) — it may still be running. Press Stop to try again.`,
-      };
-    } finally {
-      // One-shot: covers this stop's prompt only, never a later session run.
-      suppressSavePrompt.delete(sessionId);
+      r = { sessionId, stopped: false, error: (e as Error).message || String(e) };
     }
-    // Stopped is confirmed from here on; nothing is pending in main.
-    pendingRollback = null;
-    if (!discard) return { stopped: true, message: 'The session was stopped; its earlier content is kept.' };
-    try {
-      await api.session.delete(sessionId);
-    } catch (e) {
-      // The stop's broadcast already cleared the live state, so there is no
-      // Stop to press — the empty record is named for removal in Sessions.
-      return {
-        stopped: true,
-        removed: false,
-        message: `The session was stopped, but its empty record couldn't be removed (${(e as Error).message || String(e)}) — delete it from Sessions.`,
-      };
-    }
-    return { stopped: true, removed: true, message: 'The session was stopped and removed — nothing was recorded.' };
+    if (!r.stopped) return { stopped: false, message: rollbackMessage(r) };
+    return settleRollback(r);
   }
 
   function stopCapture(): void {

@@ -240,7 +240,20 @@ Two consequences:
 - **`session:remember` files the session first.** Passing `packId` moves the
   row before archiving or extracting, because doing it afterwards would leave
   both attached to the old Space. `null` files it out of every Space; omitting
-  it leaves the session where it ran.
+  it leaves the session where it ran. The destination is validated in main
+  first (it must exist and be this profile's) — a Space deleted after it was
+  chosen is refused, never filed into.
+- **Keep says what it did (M6).** Each half returns a typed outcome
+  (`services/session/remember.ts`): saved, nothing new, switched off, the
+  Space opted out, no Space, a rehearsal, too short, withheld as sensitive, or
+  failed with its reason. The prompt reports each as itself — a zero count
+  never stands in for a reason — keeps the transcript whatever happened, and
+  offers Retry on a failure (re-archiving replaces; re-extraction skips what is
+  already known). Before Keep it says where the transcript goes: it stays on
+  this machine; the summary and suggestions are made by sending it to the
+  parsing provider (named), or nothing is sent (no Space, opted out, both
+  off). It no longer says "everything stays on this machine". Discard asks
+  first; Decide later keeps the transcript and sends nothing.
 
 Saved memory is grouped by Space in the Memory section for the same reason. A
 flat list said nothing about scope, and reading them interleaved you cannot

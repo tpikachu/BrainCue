@@ -2,6 +2,7 @@ import { sameWords, turnWords } from '../echoGuard';
 import { assessUtterance, isContinuation, isCorrection } from './questionHeuristics';
 import type { Detection } from './detector';
 import type { ClassifierTurn } from '../../openai/questions';
+import type { MissReason } from '@shared/types';
 
 /**
  * The interview question scheduler — what happens to an interviewer turn
@@ -117,8 +118,9 @@ export interface QuestionJob {
   state: 'queued' | 'answering' | 'answered' | 'missed' | 'dropped';
 }
 
-/** Why a question became a visible missed card instead of an answer. */
-export type MissReason = 'queue-full' | 'paused' | 'late';
+/** Why a question became a visible missed card instead of an answer (shared
+ *  with the Cue Card, which labels a missed card by it). */
+export type { MissReason };
 
 export interface SchedulerDeps {
   detect(text: string, recent: ClassifierTurn[]): Promise<Detection>;

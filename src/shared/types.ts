@@ -647,6 +647,76 @@ export interface SessionDetail extends Session {
   transcript: TranscriptChunk[];
   questions: (DetectedQuestion & { answer: AiAnswer | null })[];
   report: SessionReport | null;
+  /** The session's other persisted cards (meeting/companion: action items,
+   *  decisions, memories surfaced…), oldest first. Answers to detected
+   *  questions are in `questions`, not here. */
+  cards: Contribution[];
+  /** The Space it is filed in, if it still exists. */
+  spaceTitle: string | null;
+  spaceCompany: string | null;
+}
+
+/** One page of a profile's session history (server-side LIMIT/OFFSET). */
+export interface SessionPage {
+  items: SessionListItem[];
+  total: number;
+}
+
+/**
+ * What "Keep it" actually did, per half (docs/16-CONTINUITY.md §9). The
+ * transcript is kept locally whatever these say; each half reports its own
+ * outcome so the save prompt never infers a reason from a zero count.
+ *  - `done`: written (`count` summary pieces / memory suggestions).
+ *  - `nothing-new` (memory): ran, but everything was already known or below
+ *    the confidence floor — nothing to review.
+ *  - `off`: switched off in Settings (summary) / not consented (memory).
+ *  - `space-off`: the chosen Space opted out of remembering.
+ *  - `no-space`: kept without a Space — nowhere to file it.
+ *  - `practice`: a rehearsal; never summarised (summary only).
+ *  - `too-short`: too little was said.
+ *  - `withheld` (summary): the summary repeated something sensitive, so it
+ *    was not stored.
+ *  - `failed`: the provider call (or its result) failed; `error` says why.
+ */
+export type KeepStepStatus =
+  | 'done'
+  | 'nothing-new'
+  | 'off'
+  | 'space-off'
+  | 'no-space'
+  | 'practice'
+  | 'too-short'
+  | 'withheld'
+  | 'failed';
+
+export interface KeepStep {
+  status: KeepStepStatus;
+  count: number;
+  error?: string;
+}
+
+export interface RememberResult {
+  /** The transcript and session stay on this machine — always true here. */
+  kept: true;
+  /** Where it was filed (null = no Space). */
+  packId: string | null;
+  summary: KeepStep;
+  memory: KeepStep;
+  /** Which provider was asked to summarise / suggest memories, by id — only
+   *  when at least one half reached it. */
+  provider: string | null;
+  /** Legacy counts (v1 callers). */
+  archived: number;
+  memories: number;
+}
+
+/** Result of rolling back a failed start (or retrying that rollback). */
+export interface RollbackResult {
+  sessionId: string;
+  stopped: boolean;
+  /** A new session is also removed; a resumed one is kept (undefined). */
+  removed?: boolean;
+  error?: string;
 }
 
 export type OverlayMode = 'compact' | 'expanded';
@@ -791,9 +861,15 @@ export interface AnswerDeltaEvent {
   questionId: string;
   token: string;
 }
+/** Why a question became a visible missed card instead of an answer. */
+export type MissReason = 'queue-full' | 'paused' | 'late';
+
 export interface AnswerMetaEvent {
   questionId: string;
   riskWarning: string | null;
+  /** Set on a missed card: it was NOT answered, and why. Cleared when it is
+   *  answered (regenerate resets the card's meta). */
+  missed?: MissReason | null;
 }
 /** Post-stream follow-up prediction for a just-answered question (v1.5). */
 export interface AnswerFollowupEvent {

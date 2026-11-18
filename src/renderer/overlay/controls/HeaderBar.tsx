@@ -1,74 +1,74 @@
 import type React from 'react';
 import { api } from '../../lib/api';
-import type { ClientInfo } from '@shared/ipc';
-import {
-  BoltIcon,
-  CloseIcon,
-  CompactIcon,
-  CursorIcon,
-  ExpandIcon,
-  EyeIcon,
-  EyeOffIcon,
-  FrameIcon,
-  SettingsIcon,
-} from '../../components/icons';
+import { CloseIcon, CursorIcon, EyeIcon, EyeOffIcon } from '../../components/icons';
 import { noDrag } from '../lib/style';
 import { Btn } from './Btn';
 import { EqualizerBars } from './EqualizerBars';
 
-/** Header / drag handle: status dot, title, and the window-level buttons
- *  (privacy, click-through, solve/capture, compact/expanded, settings, info,
- *  hide). Marked interactive so it stays clickable when click-through is on
- *  (only the answer area below passes clicks through). */
+/** What the session is doing right now, in one or two words. */
+export function liveStatus(p: { live: boolean; paused: boolean; streaming: boolean; reconnecting: boolean }): string {
+  if (!p.live) return 'Not live';
+  if (p.paused) return 'Paused';
+  if (p.reconnecting) return 'Reconnecting audio…';
+  if (p.streaming) return 'Answering';
+  return 'Listening';
+}
+
+/**
+ * Header / drag handle: what the session is doing, and the few controls a
+ * live call needs at a glance — Privacy, click-through, Pause/Resume, Stop —
+ * plus "More" for everything else (style, model, capture tools, view,
+ * settings, profile details). Marked interactive so it stays clickable when
+ * click-through is on (only the answer area passes clicks through).
+ *
+ * NOTE: the ⏸/▶/■ labels are frozen selectors (the privacy hard test
+ * matches /Stop|Pause/).
+ */
 export function HeaderBar(props: {
+  live: boolean;
   paused: boolean;
   streaming: boolean;
-  live: boolean;
   speaking: boolean;
   reconnecting: boolean;
   privacy: boolean;
   privacyUnsupported: boolean;
   clickthrough: boolean;
-  mode: 'compact' | 'expanded';
-  clientInfo: ClientInfo | null;
-  showClient: boolean;
+  /** The role/company, when the session has one. */
+  title: string | null;
+  moreOpen: boolean;
+  stopping: boolean;
   onTogglePrivacy: () => void;
   onToggleClickthrough: () => void;
-  onToggleMode: () => void;
-  onOpenSettings: () => void;
-  onToggleClient: () => void;
+  onStop: () => void;
+  onToggleMore: () => void;
 }) {
-  const { clientInfo } = props;
+  const status = liveStatus(props);
   return (
     <div
       data-ct-interactive
-      className="mb-2 flex shrink-0 items-center justify-between text-[11px] text-neutral-400"
+      className="mb-2 flex shrink-0 items-center justify-between gap-2 text-[11px] text-neutral-400"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
-      <span className="flex min-w-0 items-center gap-1.5">
+      <span className="flex min-w-0 items-center gap-1.5" role="status" aria-live="polite">
         <span
           className={`inline-block h-2 w-2 shrink-0 rounded-full ${
-            props.paused
-              ? 'bg-amber-400'
-              : props.streaming
-                ? 'animate-pulse bg-green-400'
-                : 'bg-neutral-600'
+            !props.live
+              ? 'bg-neutral-600'
+              : props.paused || props.reconnecting
+                ? 'bg-amber-400'
+                : props.streaming
+                  ? 'animate-pulse bg-green-400'
+                  : 'bg-green-500'
           }`}
+          aria-hidden
         />
-        <span className="truncate">
-          BrainCue
-          {clientInfo && (clientInfo.company || clientInfo.title)
-            ? ` · ${clientInfo.company || clientInfo.title}`
-            : ''}
+        <span className={`shrink-0 font-medium ${props.paused || props.reconnecting ? 'text-amber-300' : props.live ? 'text-neutral-200' : ''}`}>
+          {status}
         </span>
+        {props.title && <span className="truncate text-neutral-500">· {props.title}</span>}
         {props.live && !props.paused && props.speaking && <EqualizerBars />}
-        {props.live && props.reconnecting && (
-          <span className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-px text-[10px] font-medium text-amber-300">
-            reconnecting audio…
-          </span>
-        )}
       </span>
-      <div className="flex items-center gap-0.5" style={noDrag}>
+      <div className="flex shrink-0 items-center gap-0.5" style={noDrag}>
         <Btn
           active={!props.privacy || props.privacyUnsupported}
           tone={props.privacy && !props.privacyUnsupported ? 'default' : 'warn'}
@@ -81,52 +81,35 @@ export function HeaderBar(props: {
                 : 'VISIBLE to screen share — click to hide'
           }
         >
-          {props.privacy && !props.privacyUnsupported ? (
-            <EyeOffIcon className="h-3.5 w-3.5" />
-          ) : (
-            <EyeIcon className="h-3.5 w-3.5" />
-          )}
+          {props.privacy && !props.privacyUnsupported ? <EyeOffIcon className="h-3.5 w-3.5" /> : <EyeIcon className="h-3.5 w-3.5" />}
         </Btn>
-        <Btn
-          active={props.clickthrough}
-          onClick={props.onToggleClickthrough}
-          title="Click-through (mouse passes through)"
-        >
+        <Btn active={props.clickthrough} onClick={props.onToggleClickthrough} title="Click-through (mouse passes through) — Ctrl+Shift+\">
           <CursorIcon className="h-3.5 w-3.5" />
         </Btn>
-        <span className="mx-0.5 h-4 w-px bg-neutral-700" />
-        <Btn onClick={() => api.capture.quickSolve()} title="Solve from clipboard (Ctrl+Shift+Enter)">
-          <BoltIcon className="h-3.5 w-3.5" />
-        </Btn>
-        <Btn
-          onClick={() => api.capture.openSelector()}
-          title="Capture the problem (scroll & repeat for long ones, then Solve)"
-        >
-          <FrameIcon className="h-3.5 w-3.5" />
-        </Btn>
-        <span className="mx-0.5 h-4 w-px bg-neutral-700" />
-        <Btn
-          onClick={props.onToggleMode}
-          title={props.mode === 'compact' ? 'Expand (more controls)' : 'Compact view'}
-        >
-          {props.mode === 'compact' ? (
-            <ExpandIcon className="h-3.5 w-3.5" />
-          ) : (
-            <CompactIcon className="h-3.5 w-3.5" />
-          )}
-        </Btn>
-        <Btn onClick={props.onOpenSettings} title="Settings (audio device, appearance)">
-          <SettingsIcon className="h-3.5 w-3.5" />
-        </Btn>
-        {clientInfo && (
-          <Btn
-            active={props.showClient}
-            onClick={props.onToggleClient}
-            title="Profile & interview details"
-          >
-            <span className="text-[12px] font-bold leading-none">ⓘ</span>
-          </Btn>
+        {props.live && (
+          <>
+            <span className="mx-0.5 h-4 w-px bg-neutral-700" />
+            <button
+              type="button"
+              onClick={() => void api.session.togglePauseActive()}
+              className="rounded-md bg-neutral-800 px-2 py-0.5 font-medium text-neutral-200 transition-colors hover:bg-neutral-700"
+            >
+              {props.paused ? '▶ Resume' : '⏸ Pause'}
+            </button>
+            <button
+              type="button"
+              onClick={props.onStop}
+              disabled={props.stopping}
+              className="rounded-md bg-red-600/90 px-2 py-0.5 font-medium text-white transition-colors hover:bg-red-600 disabled:opacity-50"
+            >
+              ■ Stop
+            </button>
+          </>
         )}
+        <span className="mx-0.5 h-4 w-px bg-neutral-700" />
+        <Btn active={props.moreOpen} onClick={props.onToggleMore} title={props.moreOpen ? 'Hide more' : 'More: answer style, model, capture, view, settings'}>
+          <span className="text-[12px] font-semibold leading-none">⋯</span>
+        </Btn>
         <Btn onClick={() => api.overlay.hide()} title="Hide Cue Card">
           <CloseIcon className="h-3.5 w-3.5" />
         </Btn>
