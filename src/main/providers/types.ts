@@ -73,7 +73,9 @@ export interface EmbeddingIdentity {
 
 export interface EmbeddingProvider {
   embed(texts: string[]): Promise<Float32Array[]>;
-  embedOne(text: string): Promise<Float32Array>;
+  /** `signal` aborts the request (the live answer path bounds it — see
+   *  rag/liveEmbed.ts). */
+  embedOne(text: string, opts?: { signal?: AbortSignal }): Promise<Float32Array>;
   identity(): EmbeddingIdentity;
 }
 

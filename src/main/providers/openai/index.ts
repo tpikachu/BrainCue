@@ -95,7 +95,7 @@ export const openaiChat: ChatProvider = {
 
 export const openaiEmbedding: EmbeddingProvider = {
   embed: (texts) => embed(texts),
-  embedOne: (text) => embedOne(text),
+  embedOne: (text, opts) => embedOne(text, opts),
   identity: () => ({ provider: 'openai', model: model('embedding'), dim: EMBEDDING_DIM }),
 };
 

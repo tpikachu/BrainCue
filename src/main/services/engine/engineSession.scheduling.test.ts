@@ -47,7 +47,7 @@ vi.mock('../../db/repositories/profiles.repo', () => ({
   profilesRepo: { get: () => ({ id: 'p1', name: 'Test User', language: 'en' }) },
 }));
 vi.mock('../security/logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
-vi.mock('../memory/recall', () => ({ recallMemories: async () => [] }));
+vi.mock('../memory/recall', () => ({ recallMemories: async () => [], markRecalled: () => {} }));
 vi.mock('./grounding', () => ({ ground: async () => [] }));
 vi.mock('./persistence/enginePersistence', () => {
   let tc = 0;

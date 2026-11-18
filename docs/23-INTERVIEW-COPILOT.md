@@ -561,14 +561,96 @@ Coding gets a separate justified budget. The historical results below do
 not close these items. UI-01/UI-02 (the Cue Card popover fixes) are committed
 with M7.2a.
 
-**Instrumentation** (`engine/metrics/latency.ts`): per answered question,
-speech end → final, final → decision, decision → grounded, final → first token,
-and final → **first visible** (the overlay reports after two animation frames,
-i.e. after paint). p50/p95, cold (first answer of the process) vs warm. Each
-completed record is appended to `<userData>/metrics/latency.jsonl` — ids and
-timestamps only, never text; `api.metrics.latency()` returns the summary plus
-hardware. Speech end is the server VAD's speech-stopped (OpenAI Realtime) or
-the last interim delta (the local engine has no VAD event).
+**Instrumentation** (`engine/metrics/latency.ts`, M7.2b). One record per
+automatically detected question, each stage on its own:
+
+| Stage | What it measures |
+| --- | --- |
+| speech end → final | the transcriber's endpoint wait. `speechEndSource`: `vad` (the server VAD's speech-stopped, OpenAI Realtime) or `last-delta` (the last interim word — the local engine has no VAD event; approximate) |
+| final → decision | question detection; also kept for EVERY evaluated turn, question or not |
+| decision → dispatch | waiting for the answer slot (queue) |
+| dispatch → request | waiting for documents and memory. `retrievalMs` / `recallMs` are each one's own run time, which may have started on the interim |
+| request → first token | the provider: connection, queueing, first token |
+| final → **first useful** paint | the acceptance measure: the overlay reports after paint (two animation frames), and only once the painted text holds a real word (`renderer/lib/usefulText.ts`) — a bare `**` or `- ` is not an answer |
+| speech end → first useful, final → complete | so slow endpointing or long answers cannot hide behind fast generation |
+
+- **Every question ends with an outcome:** `answered`, `empty`,
+  `failed` (with the error kind: auth, quota, model, network…), `aborted`
+  (Stop, a manual Ask or regenerate took the slot), `superseded` (a
+  revision re-answered it — written to the file; the latest take is the
+  sample) or `missed` (a missed card: queue-full, paused, late). Each is
+  written to `<userData>/metrics/latency.jsonl` when it ends — an answered one
+  once its paint report arrives, or after 3 s without one (Cue Card hidden:
+  counted as not painted).
+- **Buckets:** General, Technical (the Technical style, or a
+  technical-concept / system-design question) and coding (a coding
+  question) are summarised apart, cold (first answer of the process) and
+  warm. `endToEnd` counts an unanswered question as slower than any
+  answer, so a failure can push p95 to "not answered" but never make it
+  look faster. Each bucket also lists its outcome counts.
+- **Takes:** a revision starts a new take; a stale stream of the earlier
+  take, finishing late, cannot write into it. Manual asks and regenerates
+  are not timed.
+- **Content:** ids, timestamps, counts (chunks, memories, tokens), route
+  names and outcome codes only — never transcript, answer text or a key.
+  `api.metrics.latency()` returns the summary plus hardware.
+
+**What M7.2b changed on the answer path** (`engineSession.gather`,
+`rag/liveEmbed.ts`):
+
+- **Memory with the documents, on the interim.** Memory recall used to start
+  only after document retrieval finished — a second query-embedding round
+  trip, in series, on every answer with memory on, and never prefetched.
+  Both now run in parallel, and both start on the interim transcript when it
+  first reads as the question. Memories are marked used only when an answer
+  uses them, so a discarded prefetch changes nothing.
+- **One embedding per question.** Retrieval and recall share the request
+  for the same text (a few entries, a few seconds, in memory only).
+- **A bounded embedding.** The live query embedding gives up after 2.5 s
+  (the indexing client retries for up to minutes). Past it, the SAME
+  documents and memories are ranked lexically for that question — the
+  knowledge base is never dropped; memory recall falls back to what the
+  question names instead of returning nothing, as it did on any embedding
+  failure before. The record and log say which side fell back.
+- **Unchanged:** the provider/model chosen, same-provider retry limits,
+  scheduling, Pause/Stop, the answer prompt and its grounding. Live answers
+  stay on the interactive `answer` task at the model's lowest reasoning
+  effort, whatever the style, interview type or question type
+  (`openai/answer.route.test.ts`); the coding solver is a separate feature.
+
+**Offline pipeline benchmark** (`engine/latency.pipeline.test.ts`; the real
+engine, scheduler, retrieval and recall on fake timers, simulated
+providers — not live numbers). Model: one embedding 700 ms, a stalled one
+6 s (every tenth question), provider first token 1 000 ms; the interim reads
+as the question 1.2 s before the final for two of every three questions.
+30 General + 30 Technical questions, final → first token:
+
+| | before M7.2b (`8d0c24d`) | after |
+| --- | --- | --- |
+| p50 | 1 700 ms | 1 000 ms |
+| p95 | 11 800 ms | 2 300 ms |
+| max | 13 000 ms | 3 500 ms |
+| embedding calls | 60 | 30 |
+
+On this model the pipeline now adds nothing to the provider's first token
+when context was gathered on the interim, one embedding round trip when
+the question is recognised only at its final, and at most the 2.5 s cap
+when an embedding stalls. Live General/Technical acceptance (warm final →
+first useful paint p50 ≤ 1.5 s, p95 ≤ 3 s, n ≥ 30 each, five or more cold
+starts) still needs the authorized live run; the provider's own first-token
+time (1.9 s / 3.2 s p50 / p95 measured on 2026-11-17, below) is the larger
+share and is not changed here.
+
+**Coding budget (proposed, not measured).** The coding solver (screen
+capture → solve, the `coding` task with deeper reasoning) is held to its own
+budget and never mixed into the interview numbers: first useful content
+(the approach, before the code) p95 ≤ 10 s, the complete solution p95 ≤
+45 s, a 90 s hard stop with Cancel available throughout and one same-provider
+retry offered, never automatic. Reasoning models spend most of their time
+before the first token, and the user is reading the problem meanwhile;
+anything slower than that stops being help during a timed exercise. A
+coding QUESTION heard in conversation is answered on the fast `answer` path
+and measured in the coding bucket above.
 
 **Detection evaluation** (`interview/eval/`):
 - `detectionSet.ts` — 115 labelled turns, the development set (rules were tuned

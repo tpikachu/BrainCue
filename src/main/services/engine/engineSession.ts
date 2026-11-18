@@ -17,22 +17,34 @@ import { QuestionScheduler, type QuestionJob, type MissReason } from './intervie
 import { assessUtterance } from './interview/questionHeuristics';
 import type { Detection } from './interview/detector';
 import { latency } from './metrics/latencyStore';
+import { latencyCategory, type Outcome, type QuestionTiming } from './metrics/latency';
 import type { ClassifierTurn } from '../openai/questions';
 import { normalizeProviderError } from '../../providers/normalizeError';
 import { profilesRepo } from '../../db/repositories/profiles.repo';
 import { log } from '../security/logger';
-import { recallMemories } from '../memory/recall';
+import { markRecalled, recallMemories } from '../memory/recall';
 import { ground } from './grounding';
 import { enginePersistence as persist } from './persistence/enginePersistence';
 import { EchoGuard, sameWords, turnWords } from './echoGuard';
 import { evaluateTurnHeuristics } from './trigger/meetingHeuristics';
-import type { AnswerRoute, RetrievedChunk } from '@shared/types';
+import type { AnswerRoute, RetrievedChunk, RetrievedMemory } from '@shared/types';
 import { summonedPolicy } from './trigger/summonedPolicy';
 import type { AudioSource, Speaker } from '@shared/types';
 import type { RealtimeSttSession } from '../../providers/types';
 import { ConversationContext } from './interview/conversationContext';
-import type { ContextEvent } from './contextEvent';
+import type { ContextEvent, TurnTiming } from './contextEvent';
 import type { AmbientPolicy, ModeDefinition, RuntimeSettings } from './modeDefinition';
+
+/** Everything an answer is grounded on, gathered in parallel: documents and
+ *  approved memory. Each one's own run time is kept for the latency record. */
+interface Gathered {
+  chunks: RetrievedChunk[];
+  memories: RetrievedMemory[];
+  retrievalMs: number;
+  recallMs: number;
+  /** Which of the two had to rank lexically (embedding late or failed). */
+  lexical: ('documents' | 'memory')[];
+}
 
 /** A question we answered, kept so the Cue Card can re-generate it (e.g. after
  *  toggling length/format/pronunciation) by reusing the SAME question row — no
@@ -95,10 +107,11 @@ export class EngineSession {
   readonly levels: Record<AudioSource, number> = { system: 0, mic: 0 };
   /** Drops the microphone's copy of what the call just said (laptop
    *  speakers → the mic hears the call). See echoGuard.ts. */
-  /** Grounding started on the INTERIM transcript, before the turn's final
-   *  (see prefetchGrounding). Consumed by the next generateContribution whose
-   *  question says the same words; otherwise discarded. */
-  private prefetch: { words: string[]; promise: Promise<RetrievedChunk[]> } | null = null;
+  /** Grounding and memory recall started on the INTERIM transcript, before
+   *  the turn's final (see prefetchGrounding). Consumed by the next
+   *  generateContribution whose question says the same words; otherwise
+   *  discarded. */
+  private prefetch: { words: string[]; promise: Promise<Gathered> } | null = null;
   private readonly echo = new EchoGuard({
     onDrop: (words) => {
       // Word count only — transcript text never goes to the log.
@@ -118,8 +131,9 @@ export class EngineSession {
   /** Recent interviewer turns with their transcript row — what the manual
    *  "Answer that" button answers when detection missed. */
   private readonly remoteTurns: { text: string; tcId: string; at: number }[] = [];
-  /** Speech-end time per transcript row, for the latency record. */
-  private readonly speechEnds = new Map<string, number>();
+  /** Speech-end time (and which anchor it is) per transcript row, for the
+   *  latency record. */
+  private readonly speechEnds = new Map<string, { at: number; source?: TurnTiming['speechEndSource'] }>();
   /** Missed-question cards waiting for the answer slot to free. */
   private readonly pendingMissed: { job: QuestionJob; why: MissReason }[] = [];
 
@@ -289,7 +303,7 @@ export class EngineSession {
   async onTranscriptFinal(
     text: string,
     speaker: Speaker = this.mode.remoteSpeaker,
-    timing: { speechEndAt?: number; finalAt?: number } = {},
+    timing: TurnTiming = {},
   ): Promise<void> {
     if (!text || this.stopped || this.paused) return;
     const finalAt = timing.finalAt ?? Date.now();
@@ -318,7 +332,8 @@ export class EngineSession {
     }
     this.echo.remoteTurn(text);
     const tcId = this.commitTurn(text, speaker, finalAt, captured);
-    if (timing.speechEndAt) this.speechEnds.set(tcId, timing.speechEndAt);
+    if (timing.speechEndAt) this.speechEnds.set(tcId, { at: timing.speechEndAt, source: timing.speechEndSource });
+    if (this.speechEnds.size > 64) this.speechEnds.delete(this.speechEnds.keys().next().value!);
     this.remoteTurns.push({ text, tcId, at: finalAt });
     if (this.remoteTurns.length > 12) this.remoteTurns.shift();
 
@@ -352,7 +367,7 @@ export class EngineSession {
     const q = { type: job.type, confidence: job.confidence, strategy: job.strategy };
     const tcId = job.transcriptChunkIds[job.transcriptChunkIds.length - 1] ?? null;
     // Speech end of the turn that completed the question.
-    const speechEndAt = tcId ? this.speechEnds.get(tcId) : undefined;
+    const speechEnd = tcId ? this.speechEnds.get(tcId) : undefined;
     if (job.questionId) {
       // A split/corrected question: same row, same card, new wording. Only
       // the scheduler's own stale stream is stopped — a manual Ask holding
@@ -366,10 +381,12 @@ export class EngineSession {
       job.questionId = this.registerQuestion(job.text, q, tcId);
     }
     const route = taskRoute('answer');
-    latency.begin({
+    const take = latency.begin({
       questionId: job.questionId,
       sessionId: this.sessionId,
-      speechEndAt,
+      ...this.latencyClass(job.type),
+      speechEndAt: speechEnd?.at,
+      speechEndSource: speechEnd?.source,
       finalAt: job.finalAt,
       decidedAt: job.decidedAt,
       detection: `${job.detection.source}/${job.detection.reason}`,
@@ -378,7 +395,7 @@ export class EngineSession {
     });
     // generateContribution claims the slot synchronously, before its first
     // await — remember which stream is the scheduler's.
-    const stream = this.generateContribution(job.questionId, job.text, job.type);
+    const stream = this.generateContribution(job.questionId, job.text, job.type, { take });
     this.scheduledAbort = this.answerAbort;
     await stream;
   }
@@ -431,6 +448,19 @@ export class EngineSession {
       // On screen now: a later revision of it marks this card, not a new one.
       job.questionId = questionId;
     }
+    // In the latency sample as an unanswered question — never left out.
+    const speechEnd = tcId ? this.speechEnds.get(tcId) : undefined;
+    latency.missed({
+      questionId,
+      sessionId: this.sessionId,
+      ...this.latencyClass(job.type),
+      speechEndAt: speechEnd?.at,
+      speechEndSource: speechEnd?.source,
+      finalAt: job.finalAt,
+      decidedAt: job.decidedAt,
+      detection: `${job.detection.source}/${job.detection.reason}`,
+      reason: why,
+    });
     // `missed` lets the Cue Card keep this card (and its retry) visible
     // as a missed question, apart from the answers.
     emitContributionMeta(questionId, { questionId, riskWarning, missed: why });
@@ -470,14 +500,50 @@ export class EngineSession {
     if (evaluateTurnHeuristics(interim).type !== 'question') return;
     const session = persist.sessionRow(this.sessionId);
     if (!session) return;
-    this.prefetch = {
-      words,
-      promise: ground(session.profileId, this.retrievalQuery(interim), session.packId, this.mode.id).catch(() => []),
+    // Memory recall rides along (M7.2b): it used to start only after the
+    // final's documents were ready — a second embedding round trip, in
+    // series, on every answer with memory on.
+    const promise = this.gather(session.profileId, interim, session.packId);
+    promise.catch(() => {}); // a failed prefetch is gathered afresh on the final
+    this.prefetch = { words, promise };
+  }
+
+  /** Documents and memory for a question, in PARALLEL — they used to run one
+   *  after the other. Memories are not marked used here (a prefetch may be
+   *  discarded); generateContribution marks the ones an answer uses. */
+  private gather(profileId: string, questionText: string, packId: string | null): Promise<Gathered> {
+    const lexical: Gathered['lexical'] = [];
+    const timed = async <T>(work: () => Promise<T>) => {
+      const start = Date.now();
+      const value = await work();
+      return { value, ms: Date.now() - start };
+    };
+    const docs = timed(() =>
+      ground(profileId, this.retrievalQuery(questionText), packId, this.mode.id, { onLexical: () => lexical.push('documents') }),
+    );
+    const memory = timed(() =>
+      recallMemories(profileId, questionText, packId, Date.now(), { markUsed: false, onLexical: () => lexical.push('memory') }),
+    );
+    return Promise.all([docs, memory]).then(([d, m]) => ({
+      chunks: d.value,
+      memories: m.value,
+      retrievalMs: d.ms,
+      recallMs: m.ms,
+      lexical,
+    }));
+  }
+
+  /** The latency bucket of a question (General / Technical / coding). */
+  private latencyClass(questionType: string): Pick<QuestionTiming, 'category' | 'format' | 'questionType'> {
+    return {
+      category: latencyCategory(questionType, this.settings.answerFormat),
+      format: this.settings.answerFormat,
+      questionType,
     };
   }
 
   /** The prefetched context when it was for THIS question, else null. */
-  private takePrefetch(questionText: string): Promise<RetrievedChunk[]> | null {
+  private takePrefetch(questionText: string): Promise<Gathered> | null {
     const p = this.prefetch;
     this.prefetch = null;
     if (!p) return null;
@@ -603,6 +669,9 @@ export class EngineSession {
     questionId: string,
     questionText: string,
     questionType?: string,
+    /** The latency take of an automatically detected question (answerScheduled).
+     *  Manual asks and regenerates are not timed. */
+    timed?: { take: number },
   ): Promise<{ questionId: string }> {
     const session = persist.sessionRow(this.sessionId);
     if (!session) throw new Error('Session not found');
@@ -619,8 +688,11 @@ export class EngineSession {
     const abort = new AbortController();
     this.answering = true;
     this.answerAbort = abort;
-    let context: Awaited<ReturnType<typeof ground>> = [];
-    let memories: Awaited<ReturnType<typeof recallMemories>> = [];
+    let context: RetrievedChunk[] = [];
+    let memories: RetrievedMemory[] = [];
+    const mark = (patch: Partial<QuestionTiming>) => timed && latency.mark(questionId, patch, timed.take);
+    const finish = (outcome: Outcome, patch: Partial<QuestionTiming> = {}) =>
+      timed && latency.finish(questionId, outcome, patch, timed.take);
     try {
       // Retrieval (an embeddings call) is INSIDE the try so a failure here is
       // surfaced + un-wedges the card too — not just generate failures.
@@ -628,16 +700,27 @@ export class EngineSession {
       // streams cannot change the context it is built on.
       const conversation = this.context.snapshot(questionText);
       const t0 = Date.now();
-      const prefetched = this.takePrefetch(questionText);
-      context = prefetched
-        ? await prefetched
-        : await ground(profile.id, this.retrievalQuery(questionText), session.packId, this.mode.id);
-      const tGround = Date.now();
-      // Approved memory joins the grounding (consent-gated; [] when off —
-      // recall never throws). Cited separately from documents as [M1]….
-      memories = await recallMemories(profile.id, questionText, session.packId);
-      const tRecall = Date.now();
-      latency.mark(questionId, { groundedAt: tRecall, prefetched: !!prefetched });
+      mark({ dispatchAt: t0 });
+      // Documents and approved memory (consent-gated; [] when off — recall
+      // never throws; cited separately as [M1]…), gathered in parallel —
+      // usually already on the interim. A failed prefetch gathers afresh.
+      const pending = this.takePrefetch(questionText);
+      const early = pending ? await pending.catch(() => null) : null;
+      const gathered = early ?? (await this.gather(profile.id, questionText, session.packId));
+      context = gathered.chunks;
+      memories = gathered.memories;
+      markRecalled(memories);
+      const tReady = Date.now();
+      if (gathered.lexical.length)
+        log.warn(`answer grounding ranked lexically (${gathered.lexical.join(', ')}): the query embedding was late or failed`);
+      mark({
+        prefetched: !!early,
+        retrievalMs: gathered.retrievalMs,
+        recallMs: gathered.recallMs,
+        chunks: context.length,
+        memories: memories.length,
+        ...(gathered.lexical.length ? { lexical: [...gathered.lexical] } : {}),
+      });
       let firstToken = 0;
       // The route is captured HERE, before anything is sent, and travels with
       // the request; settings changed from now on apply to the NEXT question.
@@ -668,6 +751,7 @@ export class EngineSession {
       for (let attempt = 0; ; attempt++) {
         // Diagnostics: provider/model per attempt — never a key or any text.
         log.info(`answer attempt ${attempt + 1} → ${attemptRoute ? `${attemptRoute.provider}/${attemptRoute.model}` : 'unrouted'}`);
+        mark({ requestAt: Date.now() }); // the first attempt's (one-shot)
         try {
       for await (const ev of this.mode.generate({
         ...(attemptRoute ? { route: attemptRoute } : {}),
@@ -684,14 +768,14 @@ export class EngineSession {
           if (!firstToken) {
             firstToken = Date.now();
             // The answering attempt's route, not the one seeded at dispatch.
-            latency.mark(questionId, {
+            mark({
               firstTokenAt: firstToken,
               ...(attemptRoute ? { provider: attemptRoute.provider, model: attemptRoute.model } : {}),
               ...(failedAttempts.length ? { failedAttempts: failedAttempts.length } : {}),
             });
             // Where the wait before the first token goes (no transcript text).
             log.info(
-              `answer latency: ground ${tGround - t0} ms${prefetched ? ' (prefetched on interim)' : ''}, recall ${tRecall - tGround} ms, first token ${firstToken - tRecall} ms`,
+              `answer latency: context ${tReady - t0} ms (documents ${gathered.retrievalMs} ms, memory ${gathered.recallMs} ms${early ? ', started on the interim' : ''}), first token ${firstToken - tReady} ms`,
             );
           }
           answer += ev.token;
@@ -741,9 +825,11 @@ export class EngineSession {
       // cursor. (With per-card regenerate + history, the aborted card may be a
       // DIFFERENT, still-visible one than the card being regenerated.)
       if (abort.signal.aborted) {
+        finish('aborted');
         emitContributionDone(questionId);
         return { questionId };
       }
+      finish('failed', { reason: providerErrorKind(e) });
       // A real failure (auth, quota, network drop, model-not-found): surface it and
       // clear the Cue Card's streaming state, instead of leaving the card spinning
       // forever with no error (the most common live failure — e.g. an expired key).
@@ -768,6 +854,10 @@ export class EngineSession {
       }
     }
 
+    finish(answer.trim() ? 'answered' : 'empty', {
+      completedAt: Date.now(),
+      ...(tokens ? { promptTokens: tokens.prompt, completionTokens: tokens.completion } : {}),
+    });
     if (answer.trim()) this.context.addSuggestion(questionId, questionText, answer);
     persist.replaceAnswer({
       questionId,

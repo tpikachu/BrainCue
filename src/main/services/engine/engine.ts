@@ -32,6 +32,7 @@ import type {
   Speaker,
 } from '@shared/types';
 import type { ModeDefinition } from './modeDefinition';
+import type { TurnTiming } from './contextEvent';
 
 /** Mode registry: SessionMode → definition. Practice/mock rehearse through
  *  the interview pipeline; the flagged-off modes land with their prompts. */
@@ -197,9 +198,10 @@ class Engine {
               interim = '';
               const finalAt = Date.now();
               const speechEndAt = speechStopAt || lastDeltaAt || undefined;
+              const speechEndSource = speechStopAt ? ('vad' as const) : lastDeltaAt ? ('last-delta' as const) : undefined;
               speechStopAt = 0;
               lastDeltaAt = 0;
-              void this.processFinalTranscript(opts.sessionId, text, speaker, { speechEndAt, finalAt });
+              void this.processFinalTranscript(opts.sessionId, text, speaker, { speechEndAt, speechEndSource, finalAt });
             },
             onError: (message) => broadcast(EVENTS.sessionError, { message }),
             // Socket lifecycle → a subtle "reconnecting audio…" pill in the Cue Card
@@ -377,7 +379,7 @@ class Engine {
     sessionId: string,
     text: string,
     speaker?: Speaker,
-    timing?: { speechEndAt?: number; finalAt?: number },
+    timing?: TurnTiming,
   ): Promise<void> {
     const s = this.current;
     if (!text || !s || s.sessionId !== sessionId || s.paused) return;

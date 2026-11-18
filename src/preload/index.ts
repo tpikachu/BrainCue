@@ -224,11 +224,16 @@ const api = {
   },
   /** Live latency instrumentation — ids and timestamps only. */
   metrics: {
-    firstVisible: (contributionId: string, at: number) =>
-      invoke<{ ok: true }>(IPC.metrics.firstVisible, { contributionId, at }),
+    /** The first painted text of a card that holds a real answer word. */
+    firstUseful: (contributionId: string, at: number) =>
+      invoke<{ ok: true }>(IPC.metrics.firstUseful, { contributionId, at }),
     latency: () =>
       invoke<{
-        summary: Record<'cold' | 'warm' | 'all', Record<string, { n: number; p50: number | null; p95: number | null }>>;
+        /** See main/services/engine/metrics/latency.ts (LatencySummary). */
+        summary: {
+          decisions: { n: number; p50: number | null; p95: number | null };
+          byCategory: Record<string, Record<'cold' | 'warm' | 'all', unknown>>;
+        };
         samples: number;
         hardware: { cpu: string; cores: number; memoryGb: number; platform: string };
       }>(IPC.metrics.latency),

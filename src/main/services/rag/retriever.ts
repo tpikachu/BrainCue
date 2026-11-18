@@ -1,5 +1,6 @@
 import { providerFor } from '../../providers/registry';
 import { bm25 } from './lexical';
+import { embedLiveQuery } from './liveEmbed';
 import { sqliteVectorStore } from './vectorStore';
 import { STORY_CUE_MIN_SCORE, type ChunkSource, type RetrievedChunk } from '@shared/types';
 
@@ -128,7 +129,13 @@ export async function retrieve(
   query: string,
   k = 5,
   jobId: string | null = null,
-  opts: { storyCue?: boolean; tailoredResume?: boolean } = {},
+  opts: {
+    storyCue?: boolean;
+    tailoredResume?: boolean;
+    /** Called when the query could not be embedded in time (or at all) and
+     *  the documents were ranked lexically instead. */
+    onLexical?: () => void;
+  } = {},
 ): Promise<RetrievedChunk[]> {
   const allowTailored = opts.tailoredResume === true;
   // Everything in scope, with the embedding space each chunk was embedded in.
@@ -153,9 +160,11 @@ export async function retrieve(
   let vector: Float32Array | null = null;
   if (scope.some(comparable)) {
     try {
-      vector = await embedder.embedOne(query);
+      // Bounded and shared with memory recall (rag/liveEmbed.ts).
+      vector = await embedLiveQuery(query);
     } catch {
       vector = null; // degrade to lexical for this question
+      opts.onLexical?.();
     }
   }
   const lexicalPool = vector ? scope.filter((c) => !comparable(c)) : scope;

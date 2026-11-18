@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createSettingsFeed } from '../lib/settingsFeed';
 import { api } from '../lib/api';
+import { hasUsefulText } from '../lib/usefulText';
 import { FLAGS } from '@shared/flags';
 import type { ClientInfo } from '@shared/ipc';
 import type {
@@ -155,21 +156,30 @@ export default function Overlay() {
   const prevLive = useRef(false);
 
   const cleanup = useRef<(() => void)[]>([]);
-  // Contributions whose first painted words were already reported to main
-  // (the latency record's "first visible" — measured after a frame, so it is
-  // what the user saw, not when a token arrived). Cleared on reset/regenerate.
+  // Contributions whose first USEFUL painted words were already reported to
+  // main (the latency record's acceptance measure — measured after paint, so
+  // it is what the user saw, not when a token arrived; and only once the text
+  // holds a real word, never a bare "**" or "- "). Cleared on reset/regenerate.
   const reportedVisible = useRef(new Set<string>());
+  // Text streamed so far for cards not yet reported (usually a few chars).
+  const unreported = useRef(new Map<string, string>());
   // rAF-coalesced token buffer, one lane per contribution id (see lib/streamBuffer).
   const buffer = useRef(
     createStreamBuffer((chunks) => {
       useOverlayStore.getState().append(chunks);
       for (const [id, chunk] of chunks) {
-        if (!chunk.trim() || reportedVisible.current.has(id)) continue;
+        if (reportedVisible.current.has(id)) continue;
+        const sofar = (unreported.current.get(id) ?? '') + chunk;
+        if (!hasUsefulText(sofar)) {
+          unreported.current.set(id, sofar);
+          continue;
+        }
+        unreported.current.delete(id);
         reportedVisible.current.add(id);
         // Two frames: the first runs before React commits this append, the
         // second after the browser has painted it.
         requestAnimationFrame(() =>
-          requestAnimationFrame(() => void api.metrics.firstVisible(id, Date.now()).catch(() => {})),
+          requestAnimationFrame(() => void api.metrics.firstUseful(id, Date.now()).catch(() => {})),
         );
       }
     }),
@@ -202,6 +212,7 @@ export default function Overlay() {
       // only this stream's buffered tokens are dropped — concurrent streams keep theirs.
       api.events.onContributionReset((p: ContributionResetEvent) => {
         reportedVisible.current.delete(p.contributionId);
+        unreported.current.delete(p.contributionId);
         buf.drop(p.contributionId);
         feed().reset(p.contributionId);
       }),

@@ -233,8 +233,10 @@ describe('detected question → retrieval → streamed answer → persistence', 
     // whole opts object keeps the interview path from silently losing its
     // "Story to tell" cue, and keeps a future option from defaulting itself on
     // for every mode the way `tailoredResume` used to.
+    // (onLexical: the live path is told when a late query embedding made
+    // retrieval rank lexically — M7.2b, rag/liveEmbed.ts.)
     expect(h.retrieveCalls).toEqual([
-      [profileId, q, 5, null, { storyCue: true, tailoredResume: true }],
+      [profileId, q, 5, null, { storyCue: true, tailoredResume: true, onLexical: expect.any(Function) }],
     ]);
 
     // Transparency + stream events, in pipeline order

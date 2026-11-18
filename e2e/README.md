@@ -103,6 +103,9 @@ Three tiers, kept apart:
   - `cue-card.spec.ts` — the current question dominates; missed questions stay with why and
     a retry; earlier cards behind a toggle; sources name the provider; an unconfirmed Stop
     after a failed rollback is said in the Cue Card.
+  - `useful-paint.spec.ts` (M7.2b, PERF-01) — the Cue Card reports the first USEFUL paint
+    only once the painted text holds a real word. A bare `**` or a bullet marker split
+    across tokens is not reported; one report per card, and again after a regenerate.
   - `keyboard-drafts.spec.ts` — focus contained and restored, dropdown keys and ARIA state,
     Escape closes the inner control first, edited drafts and busy saves survive dismissal,
     readiness detail reachable by keyboard.

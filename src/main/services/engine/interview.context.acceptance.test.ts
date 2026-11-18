@@ -53,7 +53,7 @@ vi.mock('../openai/followup', () => ({ predictFollowup: vi.fn(async () => null) 
 vi.mock('../openai/questions', () => ({
   classifyQuestion: async (text: string) => ({ isQuestion: false, text, type: 'followup', confidence: 0, strategy: '' }),
 }));
-vi.mock('../memory/recall', () => ({ recallMemories: async () => [] }));
+vi.mock('../memory/recall', () => ({ recallMemories: async () => [], markRecalled: () => {} }));
 // The report's Sparring branch (not exercised here) reaches Electron-only modules.
 vi.mock('../mock/sparringManager', () => ({ buildSparringReport: () => null }));
 // Profile/Space-scoped documents: each profile has its own résumé and JD.

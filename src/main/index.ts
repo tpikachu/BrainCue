@@ -167,8 +167,9 @@ app.whenReady().then(() => {
     // its session row 'live' — finalize such strays before any UI reads counts.
     sparringManager.healStrays();
     registerIpc();
-    // Live latency evidence: one JSON line per answered question (ids and
-    // timestamps only, never text) in <userData>/metrics/latency.jsonl.
+    // Live latency evidence: one JSON line per finished question — answered,
+    // failed, aborted, superseded or missed (ids, timestamps, counts and
+    // outcome codes only, never text) in <userData>/metrics/latency.jsonl.
     try {
       const dir = join(app.getPath('userData'), 'metrics');
       mkdirSync(dir, { recursive: true });

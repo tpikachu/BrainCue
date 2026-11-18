@@ -2,6 +2,7 @@ import { contextPacksRepo } from '../../db/repositories/jobs.repo';
 import { memoriesRepo } from '../../db/repositories/memories.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
 import { providerFor } from '../../providers/registry';
+import { embedLiveQuery } from '../rag/liveEmbed';
 import { bufferToVector, cosineSimilarity } from '../rag/vectorMath';
 import { buildIndex, hasExactAnchor, lexicalScore, tokenize } from './lexical';
 import type { MemoryCategory, RetrievedMemory } from '@shared/types';
@@ -43,6 +44,15 @@ export async function recallMemories(
   query: string,
   packId: string | null,
   now = Date.now(),
+  opts: {
+    /** false: return the memories without marking them used — the caller
+     *  marks them (markRecalled) only if the answer actually uses them. The
+     *  live engine recalls while the question is still being spoken. */
+    markUsed?: boolean;
+    /** The query could not be embedded in time (or at all): memories were
+     *  matched lexically only — by what the question names. */
+    onLexical?: () => void;
+  } = {},
 ): Promise<RetrievedMemory[]> {
   try {
     if (settingsRepo.get(SETTINGS_KEYS.memoryEnabled) !== '1') return []; // consent off
@@ -64,7 +74,16 @@ export async function recallMemories(
     );
     if (usable.length === 0) return [];
 
-    const queryVector = await providerFor('embedding').embedOne(query);
+    // Bounded and shared with document retrieval (rag/liveEmbed.ts). Past
+    // the deadline, or on a failed call, memories are still matched by what
+    // the question names (the lexical + exact-anchor rule below) instead of
+    // all being dropped.
+    let queryVector: Float32Array | null = null;
+    try {
+      queryVector = await embedLiveQuery(query);
+    } catch {
+      opts.onLexical?.();
+    }
     const queryTokens = tokenize(query);
     // Indexed over THIS profile's memories: rarity is relative to what the user
     // actually stores, so a word common in their corpus stops being a signal.
@@ -72,7 +91,7 @@ export async function recallMemories(
 
     const scored = usable
       .map((r) => {
-        const semantic = cosineSimilarity(queryVector, bufferToVector(r.embedVector as Buffer));
+        const semantic = queryVector ? cosineSimilarity(queryVector, bufferToVector(r.embedVector as Buffer)) : 0;
         const lexical = lexicalScore(queryTokens, r.content, index);
         const recent =
           (r.lastUsedAt ?? r.updatedAt) >= now - RECENCY_WINDOW_MS ? RECENCY_WEIGHT : 0;
@@ -93,10 +112,11 @@ export async function recallMemories(
       .sort((a, b) => b.blended - a.blended)
       .slice(0, MEMORY_TOP_K);
 
-    memoriesRepo.markUsed(
-      scored.map((s) => s.row.id),
-      now,
-    );
+    if (opts.markUsed !== false)
+      memoriesRepo.markUsed(
+        scored.map((s) => s.row.id),
+        now,
+      );
     return scored.map((s) => ({
       id: s.row.id,
       category: s.row.category as MemoryCategory,
@@ -108,5 +128,18 @@ export async function recallMemories(
     }));
   } catch {
     return []; // recall must never break an answer
+  }
+}
+
+/** Mark memories recalled with `markUsed: false` as used, once an answer
+ *  actually uses them. Never throws. */
+export function markRecalled(memories: RetrievedMemory[], now = Date.now()): void {
+  try {
+    memoriesRepo.markUsed(
+      memories.map((m) => m.id),
+      now,
+    );
+  } catch {
+    /* recency bookkeeping must never break an answer */
   }
 }

@@ -135,7 +135,7 @@ export const IPC = {
   },
   // Live latency instrumentation (engine/metrics/latency.ts). No text.
   metrics: {
-    firstVisible: 'metrics:first-visible', // overlay → main: a card's first words were painted
+    firstUseful: 'metrics:first-useful', // overlay → main: a card's first real answer words were painted
     latency: 'metrics:latency', // p50/p95 per stage, cold vs warm
   },
   // Local memory (v2): candidates + items live in ONE lifecycle; only approved

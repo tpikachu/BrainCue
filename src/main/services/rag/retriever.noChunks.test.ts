@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
   searchCalls: 0,
   searchIdentity: undefined as unknown,
   embedFails: false,
+  embedHangs: false,
   identity: { provider: 'openai', model: 'text-embedding-3-small', dim: 3 },
 }));
 
@@ -34,15 +35,18 @@ vi.mock('./vectorStore', () => ({
 vi.mock('../../providers/registry', () => ({
   providerFor: () => ({
     identity: () => h.identity,
-    embedOne: async () => {
+    embedOne: async (_text: string, opts?: { signal?: AbortSignal }) => {
       h.embedCalls++;
       if (h.embedFails) throw new Error('OpenAI needs an API key');
+      if (h.embedHangs)
+        return new Promise<Float32Array>((_, reject) => opts?.signal?.addEventListener('abort', () => reject(new Error('aborted'))));
       return new Float32Array([1, 0, 0]);
     },
   }),
 }));
 
 import { retrieve } from './retriever';
+import { LIVE_EMBED_DEADLINE_MS, clearLiveEmbedCache } from './liveEmbed';
 
 const emb = (model = 'text-embedding-3-small') => ({ provider: 'openai', model, dim: 3 });
 
@@ -52,6 +56,8 @@ beforeEach(() => {
   h.searchCalls = 0;
   h.searchIdentity = undefined;
   h.embedFails = false;
+  h.embedHangs = false;
+  clearLiveEmbedCache();
 });
 
 describe('retrieve — empty Space', () => {
@@ -92,6 +98,23 @@ describe('retrieve — without a usable embedder', () => {
     const out = await retrieve('p1', 'database migration', 5, null, { storyCue: false });
     expect(h.searchCalls).toBe(0);
     expect(out[0].id).toBe('r1');
+  });
+
+  it('an embedding that hangs is cut at the live deadline → the same lexical ranking, and the caller is told', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      h.scope = corpus.map((r) => ({ ...r, embedded: emb() }));
+      h.embedHangs = true;
+      let lexical = 0;
+      const p = retrieve('p1', 'database migration', 5, null, { storyCue: false, onLexical: () => lexical++ });
+      await vi.advanceTimersByTimeAsync(LIVE_EMBED_DEADLINE_MS);
+      const out = await p;
+      expect(h.searchCalls).toBe(0);
+      expect(out[0].id).toBe('r1'); // the same documents, ranked lexically
+      expect(lexical).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('chunks from ANOTHER embedding model are never vector-compared — they rank lexically', async () => {

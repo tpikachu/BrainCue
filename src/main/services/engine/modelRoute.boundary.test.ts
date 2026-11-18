@@ -82,7 +82,7 @@ vi.mock('../security/logger', () => ({
     error: vi.fn(),
   },
 }));
-vi.mock('../memory/recall', () => ({ recallMemories: async () => [] }));
+vi.mock('../memory/recall', () => ({ recallMemories: async () => [], markRecalled: () => {} }));
 vi.mock('./grounding', () => ({ ground: async () => [] }));
 vi.mock('./persistence/enginePersistence', () => ({
   enginePersistence: {
@@ -245,9 +245,9 @@ describe('same-provider failover: every attempt, the answering route, and the re
       },
     ];
     // What answerScheduled seeds at dispatch, before any attempt.
-    latency.begin({ questionId: 'qf', sessionId: 's1', finalAt: Date.now(), provider: 'anthropic', model: 'claude-sonnet-5-5' });
+    const take = latency.begin({ questionId: 'qf', sessionId: 's1', finalAt: Date.now(), provider: 'anthropic', model: 'claude-sonnet-5-5' });
 
-    await session().generateContribution('qf', 'Walk me through your last role.');
+    await session().generateContribution('qf', 'Walk me through your last role.', undefined, { take });
     off();
 
     expect(streams()).toEqual([
