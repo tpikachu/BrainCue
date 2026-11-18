@@ -3,7 +3,7 @@ import { profilesRepo } from '../../db/repositories/profiles.repo';
 import { jobsRepo } from '../../db/repositories/jobs.repo';
 import { parseResume, parseJobDescription } from '../openai/parsing';
 import { reindexProfile, indexJob } from '../rag/indexProfile';
-import { apiKeyStore } from '../security/apiKey';
+import { chatTaskReady } from '../readiness';
 import { isInterviewSpace, modeFor } from '@shared/activities';
 import type { ContextPackKind } from '@shared/types';
 
@@ -356,7 +356,10 @@ export async function loadSampleData(): Promise<{
   jobs: number;
   conversations: number;
 }> {
-  const hasKey = apiKeyStore.isPresent();
+  // Parsing runs on whichever provider the parsing task resolves to — an
+  // Anthropic-only setup gets a parsed sample résumé too, so the sample
+  // interview can actually start (it needs one).
+  const hasKey = chatTaskReady('parsing');
 
   const profile = profilesRepo.create({
     name: 'Alex Rivera (sample)',

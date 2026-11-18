@@ -315,16 +315,47 @@ reason and the fix.
 Still OpenAI-only: embeddings, cloud transcription, voice (and so the spoken
 half of practice), résumé tailoring.
 
+**The renderer reads readiness from ONE place** (M5, `store/useReadiness.ts`):
+first-run setup (`onboardingEntry`, the Done summary), Home's Finish-setup
+card (`setupChecklistState.ts`), the start flow and the Interview page's
+gate. It is refreshed whenever the settings store reloads (every key, preset,
+override or engine change does) and when a model download finishes. There is
+no OpenAI-key gate left on the default path: Anthropic (or any keyed
+provider) with on-device transcription is complete; cloud transcription says
+it needs an OpenAI key, and the onboarding provider tiles say what an OpenAI
+key adds instead of marking it required. Sample data parses its résumé on the
+parsing task's provider, so the sample interview can start on any provider.
+
 ## 7. Interview-first UI
 
 - `DEFAULT_ACTIVITY` is `job` (Interview) and leads `ACTIVITY_ORDER`; stored
   Spaces and sessions keep their kinds; an unknown kind still reads `custom`.
-- Home leads with **Start interview**; **Other conversation** opens the same
-  start flow on Meeting. There is still one start flow and one activity list.
-- The start modal ("Start an interview") adds a **readiness checklist**:
-  candidate + résumé, interview Space + JD, audio, AI model (with its
-  explanation), transcription, and the lexical-retrieval note — each problem
-  with a link to its fix.
+- **Home** (M5): one dominant **Start interview**; Other conversation,
+  Practice, Solve from screen (and Talk to BrainCue, when on) are small
+  secondary actions; recent sessions; everything else — status chips, the
+  other activities, Labs — under a collapsed "More ways to use BrainCue".
+- **One start flow** (M5, `StartSessionModal`). For an interview it asks
+  nothing but the **role**, then shows four one-line rows — Résumé, Role & JD,
+  Audio (what is heard + which engine), AI (provider · model; keyword
+  matching noted, not blocking) — each gap with its fix (a missing JD opens
+  that role's form in place). The activity question appears only for Other
+  conversation or a Space of another kind. Practice is one quiet link. What
+  is captured and sent — naming the engine and the provider that will
+  actually run — is a collapsed disclosure above Start; nothing is recorded
+  before Start. A gap is said once (on its row), not again under the form.
+- **Returning user: two actions.** The role defaults to the one this
+  profile last interviewed for (`defaultSpaceFor`; the only role if there is
+  one; never a guess among several), derived each time from the active
+  profile's Spaces and sessions — a deleted role or a profile switch can't
+  leave a stale default (`nextSpaceChoice`). Home → Start interview → Start
+  interview. On Windows the call audio needs no OS picker (loopback); the
+  first microphone use may show the OS permission prompt.
+- **Interview-only lists.** `jobs.page` takes an `activity` filter
+  (server-side, exact totals); the Interview page lists roles only, and
+  Resume is offered only for a real interview (`isResumableInterview`: a
+  live, interview-mode session — never a meeting, companion session, mock or
+  sparring drill). The page's Start opens the same start flow with the role
+  chosen; roles are created as interview Spaces (kind fixed, "New role").
 - The Cue Card during an interview: status, Pause/Stop, the current question
   and answer, the General | Technical chip, **Answer that** + Ask, and a compact
   transcript (latest line; one tap for the full one). Model, history,

@@ -10,21 +10,19 @@ import {
   shouldAutoStartTour,
 } from './onboardingFlow';
 
-const settings = (over: Partial<{ onboardingDone: boolean; sttReady: boolean; apiKeyPresent: boolean }> = {}) => ({
+const settings = (over: Partial<{ onboardingDone: boolean }> = {}) => ({
   onboardingDone: false,
-  sttReady: false,
-  apiKeyPresent: false,
   ...over,
 });
 
 describe('onboardingEntry — when the first-run flow opens, and where', () => {
   it('waits until both settings and the profile list have loaded', () => {
-    expect(onboardingEntry({ profilesLoaded: false, profileCount: 0, settings: settings() })).toEqual({ kind: 'wait' });
-    expect(onboardingEntry({ profilesLoaded: true, profileCount: 0, settings: null })).toEqual({ kind: 'wait' });
+    expect(onboardingEntry({ profilesLoaded: false, profileCount: 0, settings: settings(), ready: false })).toEqual({ kind: 'wait' });
+    expect(onboardingEntry({ profilesLoaded: true, profileCount: 0, settings: null, ready: false })).toEqual({ kind: 'wait' });
   });
 
   it('fresh install: no profiles → the full flow from the name', () => {
-    expect(onboardingEntry({ profilesLoaded: true, profileCount: 0, settings: settings() })).toEqual({
+    expect(onboardingEntry({ profilesLoaded: true, profileCount: 0, settings: settings(), ready: false })).toEqual({
       kind: 'open',
       step: 'name',
     });
@@ -34,42 +32,45 @@ describe('onboardingEntry — when the first-run flow opens, and where', () => {
     // Danger zone deletes every profile but keeps preferences. An app with
     // nobody in it cannot show anything, whatever the flag says.
     expect(
-      onboardingEntry({ profilesLoaded: true, profileCount: 0, settings: settings({ onboardingDone: true }) }),
+      onboardingEntry({ profilesLoaded: true, profileCount: 0, settings: settings({ onboardingDone: true }), ready: false }),
     ).toEqual({ kind: 'open', step: 'name' });
   });
 
   it('never shows once done, when a profile exists', () => {
     expect(
-      onboardingEntry({ profilesLoaded: true, profileCount: 2, settings: settings({ onboardingDone: true }) }),
+      onboardingEntry({ profilesLoaded: true, profileCount: 2, settings: settings({ onboardingDone: true }), ready: false }),
     ).toEqual({ kind: 'none' });
     // …regardless of how set up they are: the Home checklist handles that.
     expect(
       onboardingEntry({
         profilesLoaded: true,
         profileCount: 1,
-        settings: settings({ onboardingDone: true, sttReady: false, apiKeyPresent: false }),
+        settings: settings({ onboardingDone: true }),
+        ready: false,
       }),
     ).toEqual({ kind: 'none' });
   });
 
   it('upgrading install that is already set up: marks done silently', () => {
-    expect(
-      onboardingEntry({
-        profilesLoaded: true,
-        profileCount: 1,
-        settings: settings({ sttReady: true, apiKeyPresent: true }),
-      }),
-    ).toEqual({ kind: 'mark-done' });
+    expect(onboardingEntry({ profilesLoaded: true, profileCount: 1, settings: settings(), ready: true })).toEqual({
+      kind: 'mark-done',
+    });
+  });
+
+  it('"set up" is main readiness — e.g. Anthropic + on-device transcription with no OpenAI key — and waits for it', () => {
+    // The caller passes readiness.chat.ready && readiness.transcription.ready;
+    // there is no OpenAI-key input left to consult.
+    expect(onboardingEntry({ profilesLoaded: true, profileCount: 1, settings: settings(), ready: null })).toEqual({
+      kind: 'wait',
+    });
   });
 
   it('upgrading install missing either piece: opens at Transcription, skipping the name', () => {
-    expect(
-      onboardingEntry({ profilesLoaded: true, profileCount: 1, settings: settings({ apiKeyPresent: true }) }),
-    ).toEqual({ kind: 'open', step: 'transcription' });
-    expect(
-      onboardingEntry({ profilesLoaded: true, profileCount: 1, settings: settings({ sttReady: true }) }),
-    ).toEqual({ kind: 'open', step: 'transcription' });
-    expect(onboardingEntry({ profilesLoaded: true, profileCount: 3, settings: settings() })).toEqual({
+    expect(onboardingEntry({ profilesLoaded: true, profileCount: 1, settings: settings(), ready: false })).toEqual({
+      kind: 'open',
+      step: 'transcription',
+    });
+    expect(onboardingEntry({ profilesLoaded: true, profileCount: 3, settings: settings(), ready: false })).toEqual({
       kind: 'open',
       step: 'transcription',
     });

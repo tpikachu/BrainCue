@@ -21,6 +21,7 @@ import type {
   ContributionOpenEvent,
   ContributionPatchEvent,
   ContributionResetEvent,
+  ContextPackKind,
   InterviewBrief,
   Job,
   MeetingReport,
@@ -127,12 +128,14 @@ const api = {
   },
   jobs: {
     list: (profileId: string) => invoke(IPC.jobs.list, { profileId }),
-    page: (profileId: string, query: string, limit: number, offset: number) =>
+    /** `activity` narrows to Spaces of that activity, server-side. */
+    page: (profileId: string, query: string, limit: number, offset: number, activity?: ContextPackKind) =>
       invoke<{ items: unknown[]; total: number }>(IPC.jobs.page, {
         profileId,
         query,
         limit,
         offset,
+        ...(activity ? { activity } : {}),
       }),
     get: (id: string) => invoke(IPC.jobs.get, { id }),
     save: (input: {

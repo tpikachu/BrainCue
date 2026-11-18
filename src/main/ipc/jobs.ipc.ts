@@ -25,8 +25,10 @@ export function registerJobsIpc(): void {
       query: z.string().default(''),
       limit: z.number().int().min(1).max(100).default(5),
       offset: z.number().int().min(0).default(0),
+      /** Only Spaces of this activity (server-side, so paging stays exact). */
+      activity: zSpaceKind.optional(),
     }),
-    ({ profileId, query, limit, offset }) => jobsRepo.page({ profileId, query, limit, offset }),
+    ({ profileId, query, limit, offset, activity }) => jobsRepo.page({ profileId, query, limit, offset, activity }),
   );
 
   handle(IPC.jobs.get, zId, ({ id }) => {

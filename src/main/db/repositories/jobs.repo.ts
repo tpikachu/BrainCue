@@ -1,6 +1,7 @@
-import { and, desc, eq, inArray, like, notInArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, like, notInArray, or, sql } from 'drizzle-orm';
 import { db, schema } from '../index';
 import type { ContextPack, ContextPackKind } from '@shared/types';
+import { ACTIVITY_ORDER } from '@shared/activities';
 
 type Row = typeof schema.contextPacks.$inferSelect;
 
@@ -12,6 +13,14 @@ const notApplicationOwned = () =>
     schema.contextPacks.id,
     db().select({ id: schema.applications.packId }).from(schema.applications),
   );
+
+/** Rows whose kind reads as this activity. An unknown or absent kind reads as
+ *  `custom` (shared/activities.ts `activityOf`), so `custom` matches those too. */
+function activityIs(a: ContextPackKind) {
+  if (a !== 'custom') return eq(schema.contextPacks.kind, a);
+  const known = ACTIVITY_ORDER.filter((k) => k !== 'custom');
+  return or(isNull(schema.contextPacks.kind), notInArray(schema.contextPacks.kind, known));
+}
 
 function toPack(r: Row): ContextPack {
   return {
@@ -86,13 +95,19 @@ export const contextPacksRepo = {
   },
 
   /** A page of packs for a profile, newest first, optionally filtered by a search
-   *  over title + company. Server-side LIMIT/OFFSET so the UI never loads them all. */
-  page(opts: { profileId: string; query?: string; limit: number; offset: number }): {
+   *  over title + company and by ACTIVITY (a Space is a saved activity — the
+   *  Interview page lists interviews only, never a standup or a study Space).
+   *  Server-side LIMIT/OFFSET so the UI never loads them all. */
+  page(opts: { profileId: string; query?: string; limit: number; offset: number; activity?: ContextPackKind }): {
     items: ContextPack[];
     total: number;
   } {
     const q = (opts.query ?? '').trim();
-    const base = and(eq(schema.contextPacks.profileId, opts.profileId), notApplicationOwned());
+    const base = and(
+      eq(schema.contextPacks.profileId, opts.profileId),
+      notApplicationOwned(),
+      opts.activity ? activityIs(opts.activity) : undefined,
+    );
     const where = q
       ? and(
           base,

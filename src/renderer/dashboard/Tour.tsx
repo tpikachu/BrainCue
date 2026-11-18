@@ -64,7 +64,7 @@ export const TOUR_STEPS: TourStep[] = [
     route: '/settings/models',
     target: 'settings-key',
     title: '1 · Your key, your models',
-    body: 'BrainCue has no account and no server of its own. Settings → Language Models holds your keys — OpenAI is the required one (retrieval and the default models run there); Anthropic, Google Gemini, Groq and OpenRouter are optional extras you can pick per task — and every call is billed to you directly, which is also why it is careful about making them. Keys are encrypted by your operating system’s keychain and stay in the background process; the part of the app you can see never receives them, only whether each is present. The Speech-to-Text section next to it is where you choose how BrainCue hears the room: OpenAI’s cloud transcriber, or an on-device model that never sends audio anywhere.',
+    body: 'BrainCue has no account and no server of its own. Settings → Language Models holds your keys — any one of OpenAI, Anthropic, Google Gemini, Groq or OpenRouter is enough (an OpenAI key also enables cloud transcription, meaning-based document matching and voice practice) — and every call is billed to you directly, which is also why it is careful about making them. Keys are encrypted by your operating system’s keychain and stay in the background process; the part of the app you can see never receives them, only whether each is present. The Speech-to-Text section next to it is where you choose how BrainCue hears the room: OpenAI’s cloud transcriber, or an on-device model that never sends audio anywhere.',
   },
   {
     chapter: 'Setup',
@@ -85,12 +85,12 @@ export const TOUR_STEPS: TourStep[] = [
     route: '/home',
     target: 'primary-actions',
     title: '4 · Starting a conversation',
-    body: 'Home is the launcher. “Start listening” opens one flow for every kind of conversation: say what the call IS — a meeting, an interview, a study session — and everything else follows from that answer. You never pick a mode. Before anything starts you are shown exactly what will be captured on this machine and what will leave it, for the session you are about to run.',
+    body: 'Home leads with the interview. “Start interview” opens a short setup: the role (the one you used last is already chosen), then one line each for your résumé, the job description, the audio and the AI — every gap names its fix, and nothing is recorded until you press Start. What is captured and what is sent is one click away there. Any other conversation — a meeting, a study session — starts from “Other conversation”: say what the call IS and everything else follows. You never pick a mode.',
   },
   {
     chapter: 'Using it',
     route: '/home',
-    target: 'activity-meeting',
+    target: 'more-activities',
     title: '5 · It is built to stay quiet',
     body: 'An assistant in a real conversation is judged by when it does NOT speak. Presence is an explicit threshold you set at the start — Summoned only, Quiet, Balanced, or Active — not a mood. On Balanced, the default, a question asked in the room gets a grounded answer in the Cue Card; everything else must clear a confidence bar and a cooldown before a card appears, and small talk never reaches a model at all — which is why an hour of listening costs so little. Quiet turns questions into cards instead of answers.',
   },

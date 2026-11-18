@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useSettingsStore } from '../store/useSettingsStore';
+import { useReadiness, useReadinessSync } from '../store/useReadiness';
+import { setupComplete } from './setupChecklistState';
 import { useTourStore } from '../store/useTourStore';
 import { Tour, TOUR_STEPS } from './Tour';
 import HomePage from './pages/HomePage';
@@ -99,6 +101,10 @@ const HOME_LAUNCHED: Record<string, string> = {
 
 export default function App() {
   const { settings, load: loadSettings } = useSettingsStore();
+  // Main's per-capability readiness, kept current for every surface that
+  // gates on it (first-run setup, Home, every Start).
+  useReadinessSync();
+  const readiness = useReadiness();
   const { profiles, activeId, loaded: profilesLoaded, load: loadProfiles } = useProfileStore();
   const activeProfile = profiles.find((p) => p.id === activeId);
   const { running, start, stop } = useTourStore();
@@ -145,12 +151,13 @@ export default function App() {
       profilesLoaded,
       profileCount: profiles.length,
       settings,
+      ready: readiness ? setupComplete(readiness) : null,
     });
     if (entry.kind === 'open') openOnboarding(entry.step);
     else if (entry.kind === 'mark-done') {
       void api.settings.set({ onboardingDone: true }).then(() => loadSettings());
     }
-  }, [settings, profilesLoaded, profiles.length, onboardingOpen, openOnboarding, loadSettings]);
+  }, [settings, readiness, profilesLoaded, profiles.length, onboardingOpen, openOnboarding, loadSettings]);
 
   // Auto-launch the tour once, AFTER onboarding: it used to start the moment
   // settings loaded, underneath the non-dismissable first-run dialog, where

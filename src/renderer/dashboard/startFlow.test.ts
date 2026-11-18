@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import type { Profile } from '@shared/types';
+import type { ContextPackKind, Profile, SessionMode } from '@shared/types';
 import { ACTIVITIES, ACTIVITY_ORDER } from '@shared/activities';
-import { START_ACTIVITIES, captureSummary, spacesFor, startBlocker } from './startFlow';
+import {
+  START_ACTIVITIES,
+  captureSummary,
+  defaultSpaceFor,
+  isResumableInterview,
+  lastOtherActivity,
+  nextSpaceChoice,
+  spacesFor,
+  startBlocker,
+} from './startFlow';
 
 const profile = (over: Partial<Profile> = {}): Profile =>
   ({ id: 'p1', name: 'A', parsedResume: '{"skills":[]}', ...over }) as Profile;
@@ -67,12 +76,12 @@ describe('startBlocker — the explicit-start gate', () => {
     ).toMatch(/résumé/);
   });
 
-  it('asks for a Space before an interview, and takes one', () => {
+  it('asks for a role (an interview Space) before an interview, and takes one', () => {
     // An interview is one round of several for one role. Without a Space there
     // is nowhere to keep what was asked, what you claimed, and what they pushed
     // on — so the next round starts from nothing, which is the whole loss.
-    expect(startBlocker({ ...ok, activity: 'job' })).toMatch(/Space/);
-    expect(startBlocker({ ...ok, activity: 'job', spaceId: '' })).toMatch(/Space/);
+    expect(startBlocker({ ...ok, activity: 'job' })).toMatch(/role/);
+    expect(startBlocker({ ...ok, activity: 'job', spaceId: '' })).toMatch(/role/);
     expect(startBlocker({ ...ok, activity: 'job', spaceId: 'space-1' })).toBeNull();
   });
 
@@ -202,5 +211,108 @@ describe('captureSummary — the transparency contract', () => {
     // Cost honesty: silence/mute/DND/cooldowns never spend a model call.
     expect(s.sent.join(' ')).toMatch(/never spend a model call/);
     expect(s.sent.join(' ')).toMatch(/APPROVED memories/);
+  });
+});
+
+// ---- M5: a returning user's path, interview-only choices, honest disclosure ----
+
+type S = { kind: 'live' | 'mock' | 'sparring'; mode: SessionMode; activity: ContextPackKind | null; jobId: string | null };
+const sess = (over: Partial<S> = {}): S => ({ kind: 'live', mode: 'interview', activity: 'job', jobId: 'r1', ...over });
+const role = (id: string) => ({ id, kind: 'job' });
+
+describe('isResumableInterview — only real interviews are offered for Resume', () => {
+  it('a live interview in a role is resumable (v1 rows with no activity too)', () => {
+    expect(isResumableInterview(sess())).toBe(true);
+    expect(isResumableInterview(sess({ activity: null }))).toBe(true);
+  });
+  it('meetings, companion sessions, mock interviews and sparring drills are not', () => {
+    expect(isResumableInterview(sess({ mode: 'meeting', activity: 'meeting' }))).toBe(false);
+    expect(isResumableInterview(sess({ mode: 'meeting', activity: 'project' }))).toBe(false);
+    expect(isResumableInterview(sess({ mode: 'companion', activity: 'solo' }))).toBe(false);
+    expect(isResumableInterview(sess({ kind: 'mock', mode: 'practice', activity: null }))).toBe(false);
+    expect(isResumableInterview(sess({ kind: 'sparring', mode: 'practice', activity: null }))).toBe(false);
+    expect(isResumableInterview(sess({ jobId: null }))).toBe(false);
+  });
+});
+
+describe('defaultSpaceFor — the role a returning user does not have to choose again', () => {
+  it('opens on the role of the most recent interview (sessions are newest first)', () => {
+    const spaces = [role('r1'), role('r2'), role('r3')];
+    expect(defaultSpaceFor('job', spaces, [sess({ jobId: 'r2' }), sess({ jobId: 'r1' })])).toBe('r2');
+  });
+  it('skips sessions that are not interviews when finding it', () => {
+    const spaces = [role('r1'), role('r2'), { id: 'm1', kind: 'meeting' }];
+    const history = [sess({ mode: 'meeting', activity: 'meeting', jobId: 'm1' }), sess({ kind: 'mock', mode: 'practice', jobId: 'r1' }), sess({ jobId: 'r2' })];
+    expect(defaultSpaceFor('job', spaces, history)).toBe('r2');
+  });
+  it('with no history: the only role there is, but never a guess among several', () => {
+    expect(defaultSpaceFor('job', [role('r1')], [])).toBe('r1');
+    expect(defaultSpaceFor('job', [role('r1'), role('r2')], [])).toBe('');
+    expect(defaultSpaceFor('job', [], [])).toBe('');
+  });
+  it('a role that no longer exists is never the default', () => {
+    expect(defaultSpaceFor('job', [role('r1'), role('r2')], [sess({ jobId: 'gone' }), sess({ jobId: 'r1' })])).toBe('r1');
+  });
+  it('other activities default to their last-used Space, and to none rather than the only one', () => {
+    const meetings = [{ id: 'm1', kind: 'meeting' }, { id: 'm2', kind: 'meeting' }];
+    expect(defaultSpaceFor('meeting', meetings, [sess({ mode: 'meeting', activity: 'meeting', jobId: 'm2' })])).toBe('m2');
+    expect(defaultSpaceFor('meeting', [{ id: 'm1', kind: 'meeting' }], [])).toBe('');
+  });
+});
+
+describe('nextSpaceChoice — the start flow keeps a real choice and drops a stale one', () => {
+  const spaces = [role('r1'), role('r2')];
+  const history = [sess({ jobId: 'r2' })];
+  it('decides nothing while either list is loading or belongs to another profile', () => {
+    expect(nextSpaceChoice({ activity: 'job', spaces: null, sessions: history, spaceId: '', chosen: false })).toBeNull();
+    expect(nextSpaceChoice({ activity: 'job', spaces, sessions: null, spaceId: '', chosen: false })).toBeNull();
+  });
+  it('applies the default once both are loaded', () => {
+    expect(nextSpaceChoice({ activity: 'job', spaces, sessions: history, spaceId: '', chosen: false })).toEqual({ spaceId: 'r2', chosen: false });
+  });
+  it("keeps the user's own pick while it exists", () => {
+    expect(nextSpaceChoice({ activity: 'job', spaces, sessions: history, spaceId: 'r1', chosen: true })).toBeNull();
+  });
+  it('drops a pick that was deleted, back to the default', () => {
+    expect(nextSpaceChoice({ activity: 'job', spaces: [role('r2')], sessions: history, spaceId: 'r1', chosen: true })).toEqual({
+      spaceId: 'r2',
+      chosen: false,
+    });
+  });
+  it("after a profile switch, the other profile's role is never kept", () => {
+    // Profile B's lists: none of A's roles, and its own history.
+    const bSpaces = [role('b1'), role('b2')];
+    const bHistory = [sess({ jobId: 'b1' })];
+    expect(nextSpaceChoice({ activity: 'job', spaces: bSpaces, sessions: bHistory, spaceId: 'r1', chosen: true })).toEqual({
+      spaceId: 'b1',
+      chosen: false,
+    });
+    // …and a stale default (not chosen) is replaced the same way.
+    expect(nextSpaceChoice({ activity: 'job', spaces: bSpaces, sessions: [], spaceId: 'r2', chosen: false })).toEqual({
+      spaceId: '',
+      chosen: false,
+    });
+  });
+});
+
+describe('lastOtherActivity — "Other conversation" opens on what this profile last did', () => {
+  it('the last non-interview activity, else a meeting', () => {
+    expect(lastOtherActivity([sess(), { kind: 'live', activity: 'subject' }, { kind: 'live', activity: 'meeting' }])).toBe('subject');
+    expect(lastOtherActivity([sess()])).toBe('meeting');
+    expect(lastOtherActivity([{ kind: 'mock', activity: null }])).toBe('meeting');
+  });
+});
+
+describe('captureSummary — names the engine and provider that will actually run', () => {
+  it('on-device transcription: no audio leaves the machine, said plainly', () => {
+    const s = captureSummary({ listensTo: 'system', spaceTitle: null, activity: 'job', sttEngine: 'local', chatProvider: 'Anthropic' });
+    expect(s.sent[0]).toBe('No audio — it is transcribed on this device.');
+    expect(s.sent.join(' ')).toMatch(/question text \+ the top-5 matching chunks from your profile, to Anthropic\./);
+    expect(s.sent.join(' ')).not.toMatch(/OpenAI/);
+  });
+  it('cloud transcription names OpenAI Realtime and both streams', () => {
+    expect(captureSummary({ listensTo: 'system', spaceTitle: null, activity: 'job', sttEngine: 'cloud' }).sent[0]).toBe(
+      'Audio — both streams — to OpenAI Realtime, for transcription.',
+    );
   });
 });

@@ -11,6 +11,7 @@ import type {
   ContextPackKind,
   Presence,
   Profile,
+  Session,
   SessionMode,
 } from '@shared/types';
 
@@ -137,9 +138,10 @@ export function startBlocker(a: {
   if (!a.profile) return 'Pick a profile.';
   const config = ACTIVITIES[a.activity ?? DEFAULT_ACTIVITY];
   if (config?.needsResume && !a.profile.parsedResume)
-    return 'Interviews answer from your résumé — add one to this profile in the Library.';
+    return 'Interviews answer from your résumé — add one to this profile.';
   if (config?.needsSpace && !a.spaceId)
-    return 'Pick the Space this interview is for, or create one — otherwise there is nowhere to keep what it learns.';
+    // Said as a role: that is what an interview Space is to the person using it.
+    return 'Choose the role this interview is for, or add one — each round builds on the last.';
   return null;
 }
 
@@ -152,10 +154,15 @@ export function captureSummary(a: {
   listensTo: 'system' | 'mic';
   spaceTitle: string | null;
   activity?: ContextPackKind;
+  /** The transcription engine that will run, when known (readiness). */
+  sttEngine?: 'cloud' | 'local';
+  /** The AI provider answers go to, by name, when known (readiness). */
+  chatProvider?: string;
 }): { captured: string[]; sent: string[]; neverSent: string[] } {
   const scope = a.spaceTitle
     ? `your profile and the “${a.spaceTitle}” Space`
     : 'your profile';
+  const to = a.chatProvider ? `, to ${a.chatProvider}` : '';
   // The pipeline differs by MODE, not by activity — a project call and a
   // standup send exactly the same things.
   const mode: SessionMode = a.activity ? activity(a.activity).mode : 'interview';
@@ -175,9 +182,16 @@ export function captureSummary(a: {
         : 'Afterwards: nothing is summarised or remembered — pick a Space for that (you can still choose one when it ends).',
     ],
     sent: [
-      a.listensTo === 'system' && mode !== 'companion'
-        ? 'Audio — both streams — to the transcription engine (OpenAI Realtime with your key, or nothing at all with the local engine).'
-        : 'Audio to the transcription engine (OpenAI Realtime with your key, or nothing at all with the local engine).',
+      // Said for the engine that will actually run, when it is known.
+      a.sttEngine === 'local'
+        ? 'No audio — it is transcribed on this device.'
+        : a.sttEngine === 'cloud'
+          ? a.listensTo === 'system' && mode !== 'companion'
+            ? 'Audio — both streams — to OpenAI Realtime, for transcription.'
+            : 'Audio to OpenAI Realtime, for transcription.'
+          : a.listensTo === 'system' && mode !== 'companion'
+            ? 'Audio — both streams — to the transcription engine (OpenAI Realtime with your key, or nothing at all with the local engine).'
+            : 'Audio to the transcription engine (OpenAI Realtime with your key, or nothing at all with the local engine).',
       ...(mode === 'meeting'
         ? [
             'Ambiguous turns: the turn + a few recent turns, for salience scoring (deterministic rules filter greetings/small talk first).',
@@ -188,7 +202,7 @@ export function captureSummary(a: {
               'Ambiguous turns: the turn + a few recent turns, for salience scoring (silence, small talk, mute, DND, and cooldowns never spend a model call).',
               `When a card is made: the turn + the top-5 matching chunks from ${scope}, plus any APPROVED memories that matched.`,
             ]
-          : [`Per detected question: the question text + the top-5 matching chunks from ${scope}.`]),
+          : [`Per detected question: the question text + the top-5 matching chunks from ${scope}${to}.`]),
     ],
     neverSent: [
       'Your API key (main process only).',
@@ -196,4 +210,71 @@ export function captureSummary(a: {
       'Your screen (unless you explicitly capture a region to solve).',
     ],
   };
+}
+
+/**
+ * Is this session an interview the user can pick up again? A real (`live`)
+ * interview-mode session in an interview Space. Meetings and companion
+ * sessions run other modes; mock interviews and sparring drills are
+ * rehearsals (`kind` mock/sparring) — none of them is resumable as an
+ * interview, and offering "Resume" on a standup's Space was a real bug.
+ * v1 rows carry no activity; their mode decides.
+ */
+export function isResumableInterview(s: Pick<Session, 'kind' | 'mode' | 'activity' | 'jobId'>): boolean {
+  return s.kind === 'live' && s.mode === 'interview' && (s.activity == null || s.activity === 'job') && !!s.jobId;
+}
+
+/**
+ * The Space a start flow opens on, so a returning user does not choose again:
+ *  1. the Space of the most recent session of this activity (newest first)
+ *     — what the user actually chose last time;
+ *  2. for an activity that needs a Space, the only one there is;
+ *  3. otherwise none — never a guess among several.
+ *
+ * Derived from the CURRENT profile's Spaces and sessions every time, so it
+ * cannot go stale: a deleted Space is no longer in `spaces`, and a profile
+ * switch replaces both lists.
+ */
+export function defaultSpaceFor(
+  act: ContextPackKind,
+  spaces: { id: string; kind?: string | null }[],
+  sessions: Pick<Session, 'kind' | 'mode' | 'activity' | 'jobId'>[],
+): string {
+  const ofActivity = spacesFor(spaces, act);
+  const ids = new Set(ofActivity.map((s) => s.id));
+  const used = sessions.find((s) =>
+    act === 'job' ? isResumableInterview(s) && ids.has(s.jobId!) : s.kind === 'live' && !!s.jobId && ids.has(s.jobId) && activityOf(s.activity) === act,
+  );
+  if (used?.jobId) return used.jobId;
+  if (ACTIVITIES[act]?.needsSpace && ofActivity.length === 1) return ofActivity[0].id;
+  return '';
+}
+
+/** The activity "Other conversation" opens on: the last non-interview
+ *  activity this profile actually used, else a meeting. */
+export function lastOtherActivity(sessions: Pick<Session, 'kind' | 'activity'>[]): ContextPackKind {
+  const s = sessions.find((x) => x.kind === 'live' && x.activity && x.activity !== 'job' && startableActivities().includes(x.activity));
+  return s?.activity ?? 'meeting';
+}
+
+/**
+ * The start flow's Space choice, one step at a time — what the modal does
+ * whenever its lists change. `null` = leave the choice as it is.
+ *  - Nothing decided until BOTH lists belong to the current profile and
+ *    activity (`spaces`/`sessions` null while loading or stale).
+ *  - A choice the user made stands while it is still in the list.
+ *  - A choice that is gone (deleted, or another profile's after a switch) is
+ *    dropped, and the default applies — never started against.
+ */
+export function nextSpaceChoice(a: {
+  activity: ContextPackKind;
+  spaces: { id: string; kind?: string | null }[] | null;
+  sessions: Pick<Session, 'kind' | 'mode' | 'activity' | 'jobId'>[] | null;
+  spaceId: string;
+  chosen: boolean;
+}): { spaceId: string; chosen: boolean } | null {
+  if (!a.spaces || !a.sessions) return null;
+  if (a.chosen && a.spaces.some((s) => s.id === a.spaceId)) return null;
+  const next = { spaceId: defaultSpaceFor(a.activity, a.spaces, a.sessions), chosen: false };
+  return next.spaceId === a.spaceId && next.chosen === a.chosen ? null : next;
 }

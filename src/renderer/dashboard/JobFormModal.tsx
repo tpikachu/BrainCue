@@ -20,6 +20,7 @@ export function JobFormModal({
   profileId,
   job,
   initialKind,
+  lockKind = false,
   onClose,
   onSaved,
   onDeleted,
@@ -31,6 +32,9 @@ export function JobFormModal({
    *  user already picked, so creating a Space mid-start does not ask the same
    *  question a second time (and cannot answer it differently). */
   initialKind?: ContextPackKind;
+  /** The caller already knows what this is (the interview path creates
+   *  interview roles): the kind is fixed and its picker is not shown. */
+  lockKind?: boolean;
   onClose: () => void;
   onSaved: (job: Job) => void;
   onDeleted?: (id: string) => void;
@@ -236,8 +240,15 @@ export function JobFormModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title={editing ? 'Edit Space' : 'New Space'}>
+    <Modal
+      open={open}
+      onClose={onClose}
+      // An interview Space is, to the person using it, a role they are
+      // interviewing for — named that way rather than as storage.
+      title={isInterviewSpace(kind) ? (editing ? 'Edit role' : 'New role') : editing ? 'Edit Space' : 'New Space'}
+    >
       <div className="space-y-3">
+        {!lockKind && (
         <Field label="What is this Space for?" hint={copy.hint}>
           <Select
             value={kind}
@@ -251,7 +262,8 @@ export function JobFormModal({
             ))}
           </Select>
         </Field>
-        {editing && (
+        )}
+        {editing && !lockKind && (
           <p className="text-xs text-neutral-500">
             A Space&rsquo;s kind is fixed after it is created — its documents are already indexed
             under it. Create a new Space if this one is really something else.
