@@ -35,18 +35,28 @@ Three tiers, kept apart:
   `fixtures.ts` strips every `*_API_KEY` from the environment (the only place the app reads
   a key outside its own database), gives the app a fresh data dir, and loads
   **`offline-guard.cjs`** into the app's main process (`NODE_OPTIONS=--require`):
-  - every outbound request is refused — main's `fetch`, `http`/`https` and Electron `net`,
-    and every page request to anything but loopback;
+  - every outbound connection is refused unless it is to loopback (`127.0.0.1`, `::1`, or
+    `::ffff:127.0.0.1` in any spelling). The check sits on every TCP socket main opens
+    (`net.Socket#connect`), so fetch, http/https, ws, SDK clients and **every redirect hop**
+    go through it; `fetch`/`http`/`https` and Electron `net` also refuse early, and page
+    requests are refused through `webRequest`;
   - capture is refused — the app's own permission and display-media handlers (which grant
     capture, and hand Chromium the call-audio loopback with no picker) are replaced by ones
-    that refuse it, pages get a `getUserMedia`/`getDisplayMedia` that reject, and Chromium's
-    fake capture device is on as a last line;
+    that refuse it; native screenshots (`desktopCapturer.getSources` — the region solver and
+    the loopback fallback) are refused before the real API runs; pages get a
+    `getUserMedia`/`getDisplayMedia` that reject; Chromium's fake capture device is on as a
+    last line;
   - windows open on a secondary display when one exists (`E2E_KEEP_PRIMARY=1` to opt out).
 
   Every attempt is logged (`offline-guard.jsonl` in the test's output dir, attached to the
   report), and the fixture **fails any test in which something was granted**.
   `offline-guard.spec.ts` proves the guard itself: no key of any kind, the microphone and
-  call audio refused, a provider call from main and a request from the page refused.
+  call audio refused, a provider call from main and a request from the page refused, the
+  app's real region capture refused — and, in plain Node with loopback servers and a fake
+  Electron (`guard-probes/`), that a forbidden host (127.0.0.2) cannot be reached directly,
+  through an IPv4-mapped IPv6 address, through a redirect from an allowed server or by a raw
+  socket, while loopback stays reachable; and that a screenshot never reaches the capture
+  transport. `E2E_GUARD_UNDER_TEST` runs those probes against another guard file.
   The renderer-harness specs need none of this — they run real components against a fake
   bridge, with no app main, DB, provider or device.
 - **Live (`playwright.live.config.ts`, `npm run test:e2e:live`).** `live-*.spec.ts` only,

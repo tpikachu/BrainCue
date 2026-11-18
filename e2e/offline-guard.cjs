@@ -5,14 +5,22 @@
 // It makes three things impossible rather than merely unlikely, and records
 // every attempt so a test can prove it (E2E_GUARD_LOG, one JSON line each):
 //
-//  1. No outbound network. Main's fetch, http/https and Electron's `net`, and
-//     every renderer request (webRequest, all sessions) to anything but
-//     loopback are refused. Provider calls fail as an offline machine's would.
+//  1. No outbound network. Every TCP connection main opens — whatever opened
+//     it: fetch (undici), http/https, ws, an SDK's own client, and EVERY hop
+//     of a redirect — is checked where it is made (net.Socket#connect), and
+//     refused unless it is to loopback (127.0.0.1, ::1, or an IPv4-mapped
+//     ::ffff:127.0.0.1). Electron's `net` and every page request (webRequest,
+//     all sessions) get the same check. Provider calls fail as an offline
+//     machine's would. Earlier layers (fetch, http/https) refuse obvious cases
+//     early with a clearer error; the socket check is the one that cannot be
+//     walked around.
 //  2. No real microphone, call audio or screen. The app's own permission and
 //     display-media handlers GRANT capture (a live session needs them; the
 //     display handler hands Chromium the call-audio loopback with no picker),
 //     so they are replaced, whenever the app installs them, by ones that
-//     refuse capture. Pages also get getUserMedia / getDisplayMedia that
+//     refuse capture. Native screenshots (desktopCapturer.getSources — the
+//     region solver and the loopback fallback) are refused before the real
+//     API is called. Pages also get getUserMedia / getDisplayMedia that
 //     reject before reaching main, and Chromium's FAKE capture device is
 //     switched on as a last line: even a leak could only hear a test tone.
 //  3. No window on the primary display when another exists (the developer's
@@ -21,6 +29,7 @@
 // The fixture reads the log after each test and fails the test if anything
 // was ever GRANTED (it never should be, by construction).
 const fs = require('fs');
+const net = require('net');
 const Module = require('module');
 
 const LOG = process.env.E2E_GUARD_LOG || '';
@@ -34,12 +43,75 @@ function record(entry) {
 }
 
 const CAPTURE = new Set(['media', 'display-capture', 'audioCapture', 'videoCapture']);
-const isLocal = (host) => {
-  const h = String(host || '').replace(/^\[|\]$/g, '').split(':')[0].toLowerCase();
-  return !h || h === '127.0.0.1' || h === 'localhost' || h === '::1';
+
+/** A host as written in a URL, an options object or "host:port" — brackets
+ *  and port removed WITHOUT cutting an IPv6 address apart. */
+function hostOnly(raw) {
+  let h = String(raw == null ? '' : raw).trim().toLowerCase();
+  if (h.startsWith('[')) {
+    const end = h.indexOf(']');
+    h = h.slice(1, end < 0 ? undefined : end);
+  } else if ((h.match(/:/g) || []).length === 1) {
+    h = h.split(':')[0]; // "host:port" — an IPv6 address has two or more colons
+  }
+  return h.replace(/\.$/, '');
+}
+
+/** Loopback only: localhost, 127.0.0.1, ::1, and ::ffff:127.0.0.1 in any
+ *  spelling. An empty or unparseable host is NOT local. */
+function isLocal(raw) {
+  const h = hostOnly(raw);
+  if (h === 'localhost') return true;
+  const v = net.isIP(h);
+  if (v === 4) return h === '127.0.0.1';
+  if (v !== 6) return false;
+  let c = h;
+  try {
+    c = new URL(`http://[${h}]/`).hostname.slice(1, -1); // canonical form
+  } catch {
+    return false;
+  }
+  if (c === '::1') return true;
+  const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(c);
+  if (hex) {
+    const a = parseInt(hex[1], 16);
+    const b = parseInt(hex[2], 16);
+    return [a >> 8, a & 255, b >> 8, b & 255].join('.') === '127.0.0.1';
+  }
+  const dotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(c);
+  return !!dotted && dotted[1] === '127.0.0.1';
+}
+
+const refusal = (host) => {
+  const err = new Error(`connect ECONNREFUSED (offline E2E: ${host} blocked)`);
+  err.code = 'ECONNREFUSED';
+  return err;
 };
 
-// ---- 1. Network: Node-level (main) -------------------------------------------
+// ---- 1a. Every socket main opens (the layer nothing above can bypass) -------
+const realConnect = net.Socket.prototype.connect;
+net.Socket.prototype.connect = function guardedConnect(...args) {
+  // net.connect / tls.connect pass Node's normalized [options, cb] array.
+  const first = Array.isArray(args[0]) ? args[0][0] : args[0];
+  let host;
+  let pipe = false;
+  if (first && typeof first === 'object') {
+    pipe = typeof first.path === 'string' && first.path.length > 0;
+    host = first.host == null ? 'localhost' : first.host; // Node's default
+  } else if (typeof first === 'string' && !/^\d+$/.test(first)) {
+    pipe = true; // connect(path)
+  } else {
+    host = typeof args[1] === 'string' ? args[1] : 'localhost'; // connect(port[, host])
+  }
+  if (!pipe && !isLocal(host)) {
+    record({ kind: 'net', via: 'socket', host: hostOnly(host), refused: true });
+    process.nextTick(() => this.destroy(refusal(hostOnly(host))));
+    return this;
+  }
+  return realConnect.apply(this, args);
+};
+
+// ---- 1b. Early, clearer refusals: fetch and http/https ----------------------
 const realFetch = globalThis.fetch;
 if (realFetch) {
   globalThis.fetch = function guardedFetch(input, init) {
@@ -50,9 +122,10 @@ if (realFetch) {
       return realFetch.call(this, input, init);
     }
     if ((url.protocol === 'http:' || url.protocol === 'https:') && !isLocal(url.hostname)) {
-      record({ kind: 'net', via: 'fetch', host: url.hostname, refused: true });
+      record({ kind: 'net', via: 'fetch', host: hostOnly(url.hostname), refused: true });
       return Promise.reject(new TypeError(`fetch failed (offline E2E: ${url.hostname} blocked)`));
     }
+    // A redirect to anywhere else is refused at its socket (1a).
     return realFetch.call(this, input, init);
   };
 }
@@ -62,18 +135,21 @@ for (const name of ['http', 'https']) {
     const orig = mod[fn];
     mod[fn] = function guardedRequest(...args) {
       const a = args[0];
-      const host =
-        typeof a === 'string' ? new URL(a).hostname : a instanceof URL ? a.hostname : a && (a.hostname || a.host);
+      let host;
+      if (typeof a === 'string') host = new URL(a).hostname;
+      else if (a instanceof URL) host = a.hostname;
+      else if (a && a.socketPath) host = 'localhost';
+      else host = a && (a.hostname != null ? a.hostname : a.host != null ? a.host : 'localhost');
       if (!isLocal(host)) {
-        record({ kind: 'net', via: name, host: String(host), refused: true });
-        const err = new Error(`connect ECONNREFUSED (offline E2E: ${host} blocked)`);
-        err.code = 'ECONNREFUSED';
-        throw err;
+        record({ kind: 'net', via: name, host: hostOnly(host), refused: true });
+        throw refusal(hostOnly(host));
       }
       return orig.apply(this, args);
     };
   }
 }
+
+module.exports = { isLocal, hostOnly };
 
 // ---- Electron hooks: attach when the app first requires 'electron' -----------
 let attached = false;
@@ -101,16 +177,26 @@ const REFUSE_IN_PAGE = `(() => {
 })()`;
 
 function attach(electron) {
-  const { app, net, session } = electron;
+  const { app, net: electronNet, session, desktopCapturer } = electron;
   app.commandLine.appendSwitch('use-fake-device-for-media-stream');
   app.commandLine.appendSwitch('use-fake-ui-for-media-stream');
 
+  // Native screenshots: refused BEFORE the real API runs, so no frame of any
+  // screen or window is ever produced. (The app reads it as
+  // `require('electron').desktopCapturer.getSources` at call time.)
+  if (desktopCapturer && typeof desktopCapturer.getSources === 'function') {
+    desktopCapturer.getSources = function refusedGetSources(options) {
+      record({ kind: 'capture', via: 'desktopCapturer', types: options && options.types, granted: false });
+      return Promise.reject(new Error('screen capture refused by the offline E2E guard'));
+    };
+  }
+
   // Electron's own network stack in main.
-  if (net) {
+  if (electronNet) {
     for (const fn of ['request', 'fetch']) {
-      const orig = net[fn];
+      const orig = electronNet[fn];
       if (typeof orig !== 'function') continue;
-      net[fn] = function guardedNet(...args) {
+      electronNet[fn] = function guardedNet(...args) {
         const a = args[0];
         let host = '';
         try {
