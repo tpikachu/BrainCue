@@ -208,6 +208,14 @@ export function assessUtterance(text: string): UtteranceAssessment {
   }
   if (head && AUX.has(head) && second && AUX_SUBJECT.has(second)) return base('question', 0.85, 'aux-inversion');
 
+  // A preamble, then the ask: "Thanks for joining. To start, tell me about
+  // yourself." Nothing above decided the WHOLE turn (its head is "thanks"),
+  // so a later sentence — or the clause after a leading "To start," — that is
+  // clearly a request decides it. (Live run 2026-11-17: the courtesy rule
+  // below dropped exactly this opener.)
+  const later = laterAsk(raw);
+  if (later) return { ...later, rule: `later-sentence/${later.rule}`, type: later.type };
+
   // Courtesy reply with no ask in it.
   if (!anyQ && COURTESY.test(lower) && n <= 14) return base('not', 0.8, 'courtesy');
 
@@ -217,9 +225,29 @@ export function assessUtterance(text: string): UtteranceAssessment {
   return base('ambiguous', 0.5, 'no-rule', leaning);
 }
 
+/** A sentence after the first (or the clause after a short leading phrase
+ *  like "To start,") that the rules read as a clear request. */
+function laterAsk(raw: string): UtteranceAssessment | null {
+  const parts = raw.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
+  const pieces: string[] = parts.slice(1);
+  for (const p of parts) {
+    const m = /^([^,]{1,24}),\s+(.+)$/.exec(p); // "To start, tell me…" / "So, walk me…"
+    if (m && words(m[1]).length <= 4) pieces.push(m[2]);
+  }
+  for (const p of pieces) {
+    if (p === raw) continue;
+    const a = assessUtterance(p);
+    if (a.verdict === 'question' && a.confidence >= 0.85) return a;
+  }
+  return null;
+}
+
 /** "Sorry, I meant…", "Actually, let me rephrase" — the utterance replaces the
- *  previous question rather than adding to it. */
+ *  previous question rather than adding to it. Never call logistics or a
+ *  backchannel: "Sorry, can you hear me okay?" is not a revised question
+ *  (live run 2026-11-17 merged exactly that into the question before it). */
 export function isCorrection(text: string): boolean {
+  if (assessUtterance(text).verdict === 'not') return false;
   return /^(sorry|actually|no,? wait|wait|let me rephrase|i mean|i meant|rather|or rather|scratch that|correction|what i meant)\b/i.test(
     text.trim().replace(/^[,.\s]+/, ''),
   );
@@ -229,6 +257,16 @@ export function isCorrection(text: string): boolean {
  *  continues the previous question (a split or multi-part question). */
 export function isContinuation(text: string): boolean {
   const t = text.trim();
+  if (assessUtterance(t).verdict === 'not') return false; // logistics / backchannel never extend a question
   if (/^[a-z]/.test(t) && !/^(i|i'm|i've|i'd)\b/.test(t)) return true; // a lower-case start resumes a sentence
-  return /^(and|or|also|plus|specifically|particularly|especially|including|as well as|along with|in particular|like,|for example)\b/i.test(t);
+  const m = /^(and|or|also|plus|specifically|particularly|especially|including|as well as|along with|in particular|like,|for example)\b[,\s]*(.*)$/i.exec(t);
+  if (!m) return false;
+  // "And why are you interested in this role?" is a complete question of its
+  // own (an inverted interrogative), not the second half of the last one —
+  // unlike "…and what you would do differently" or "and how you tested it".
+  const rest = words(m[2]);
+  const inverted =
+    rest.length >= 4 &&
+    ((WH.has(rest[0]) && AUX.has(rest[1]) && AUX_SUBJECT.has(rest[2])) || (AUX.has(rest[0]) && AUX_SUBJECT.has(rest[1])));
+  return !inverted;
 }

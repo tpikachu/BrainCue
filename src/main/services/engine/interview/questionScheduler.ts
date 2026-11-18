@@ -32,9 +32,23 @@ import type { ClassifierTurn } from '../../openai/questions';
  *  5. FRAGMENTS WAIT. An utterance that stops mid-thought ("walk me through
  *     the") is held briefly for its second half and joined with it; if
  *     nothing follows, it is evaluated as it is.
- *  6. NOTHING DISAPPEARS SILENTLY. A question that cannot be answered — the
- *     queue is full, or the user paused with questions waiting — becomes a
- *     visible card the user can answer with one tap (↻).
+ *  6. NOTHING DISAPPEARS SILENTLY. A distinct question that will not be
+ *     answered automatically becomes a visible "missed" card the user can
+ *     answer with one tap (↻): the queue overflowed (the OLDEST waiting one),
+ *     the user paused with it waiting or still being classified, or the
+ *     model recognised it only after the conversation moved on (§8). Only
+ *     STOP drops work — the session is over. While paused, new finals are
+ *     not evaluated at all (that is what Pause means).
+ *  7. DECISIONS COMMIT IN ARRIVAL ORDER — see evaluate().
+ *  8. LATE VERDICTS — see lateVerdict().
+ *
+ * Supersession, precisely: a turn REVISES an earlier question only when it
+ * repeats it (§3) or continues/corrects the LAST question within
+ * CONTINUATION_WINDOW_MS, before any candidate speech (§4). It never does
+ * when the rules read it as not-a-question (call logistics, backchannel —
+ * "Sorry, can you hear me?" is not a correction), nor when it is a complete
+ * question of its own after a conjunction ("And why are you interested in
+ * this role?"). Everything else is a NEW question in arrival order.
  *
  * Interim transcripts never reach here; only finals do (interim text may
  * prefetch grounding, never create a card).
@@ -75,6 +89,9 @@ export interface QuestionJob {
   state: 'queued' | 'answering' | 'answered' | 'missed' | 'dropped';
 }
 
+/** Why a question became a visible missed card instead of an answer. */
+export type MissReason = 'queue-full' | 'paused' | 'late';
+
 export interface SchedulerDeps {
   detect(text: string, recent: ClassifierTurn[]): Promise<Detection>;
   recent(): ClassifierTurn[];
@@ -87,7 +104,7 @@ export interface SchedulerDeps {
   /** Is an answer stream (any — manual Ask, regenerate) holding the slot? */
   slotBusy(): boolean;
   /** Surface a question that will not be answered automatically. */
-  missed(job: QuestionJob, why: 'queue-full' | 'paused'): void;
+  missed(job: QuestionJob, why: MissReason): void;
   /** Observability: one record per evaluated final (no text). */
   onDecision?(d: {
     finalAt: number;
@@ -95,7 +112,7 @@ export interface SchedulerDeps {
     act: boolean;
     source: Detection['source'] | 'scheduler';
     reason: string;
-    outcome: 'answer' | 'queued' | 'superseded' | 'coalesced' | 'duplicate' | 'held' | 'ignored' | 'stale';
+    outcome: 'answer' | 'queued' | 'superseded' | 'coalesced' | 'duplicate' | 'held' | 'ignored' | 'stale' | 'missed';
   }): void;
   now(): number;
   setTimer(fn: () => void, ms: number): unknown;
@@ -205,11 +222,84 @@ export class QuestionScheduler {
 
   // ---- internals ----
 
+  /**
+   * 7. DECISIONS COMMIT IN ARRIVAL ORDER. Detection runs concurrently (a
+   *    slow classifier call never blocks the next turn's detection), but
+   *    each turn's decision — queue, coalesce, supersede, drop — is applied
+   *    only after every EARLIER turn's decision has been. Otherwise a later
+   *    question decided by rule in 0 ms is answered before an earlier one
+   *    still with the classifier, whose answer then lands after the
+   *    conversation has moved on; and two copies of one question, classified
+   *    concurrently, both pass the duplicate check that ran before either
+   *    was decided. The repeat / continuation checks therefore run AGAIN at
+   *    commit time, against the state every earlier turn left behind.
+   *
+   *    Cost: a turn waits for earlier turns' detection — bounded by the
+   *    classifier timeout (detector.ts CLASSIFY_TIMEOUT_MS). Late verdicts
+   *    commit outside this chain (they re-check staleness themselves).
+   */
+  private commitTail: Promise<void> = Promise.resolve();
+
   private async evaluate(text: string, tcIds: string[], finalAt: number): Promise<void> {
     const epoch = this.epoch;
     const words = turnWords(text);
-    const now = this.deps.now();
+    const prior = this.commitTail;
+    let release!: () => void;
+    this.commitTail = new Promise<void>((r) => (release = r));
 
+    let follow: Promise<void> | null = null;
+    try {
+      // Skip the model call when, by the state right now, this turn is a
+      // repeat or a continuation (re-checked at commit time below).
+      const routedNow = !!this.findSame(words, this.deps.now()) || this.continuesByRule(text, this.deps.now());
+      const detection = routedNow ? null : this.deps.detect(text, this.deps.recent());
+      await prior; // earlier turns' decisions first
+      if (this.stopped) {
+        this.note(finalAt, false, 'scheduler', 'stopped', 'stale');
+        return;
+      }
+      // Paused (and maybe resumed) while this turn waited: it is not
+      // answered — but a question is never dropped silently either (§6).
+      if (epoch !== this.epoch) {
+        if (!detection) return void this.note(finalAt, false, 'scheduler', 'epoch-changed', 'stale');
+        const d = await detection;
+        if (this.stopped) return void this.note(finalAt, d.act, d.source, d.reason, 'stale');
+        if (d.act) follow = this.missNew(text, words, tcIds, finalAt, d, 'paused');
+        else this.note(finalAt, false, d.source, d.reason, 'stale');
+        return;
+      }
+      follow = this.routeKnown(text, words, tcIds, finalAt);
+      if (!follow) {
+        const d = await (detection ?? this.deps.detect(text, this.deps.recent()));
+        if (this.stopped) {
+          this.note(finalAt, d.act, d.source, d.reason, 'stale');
+          return;
+        }
+        if (epoch !== this.epoch) {
+          // Paused while THIS turn was being classified (§6, as above).
+          if (d.act) follow = this.missNew(text, words, tcIds, finalAt, d, 'paused');
+          else this.note(finalAt, false, d.source, d.reason, 'stale');
+          return;
+        }
+        // Re-check after classification too: the streaming answer may have
+        // finished (or been superseded) while the classifier ran.
+        follow = this.routeKnown(text, words, tcIds, finalAt) ?? this.routeDetected(d, text, words, tcIds, finalAt, epoch);
+      }
+    } finally {
+      release();
+    }
+    return follow ?? undefined;
+  }
+
+  private continuesByRule(text: string, now: number): boolean {
+    return !!this.continuable(now) && (isCorrection(text) || isContinuation(text));
+  }
+
+  /** 3–4: a repeat of a question in flight / waiting, or a continuation or
+   *  correction of the last one. Null when neither applies. Synchronous up to
+   *  the returned promise, so the state change is made inside the commit. */
+  private routeKnown(text: string, words: string[], tcIds: string[], finalAt: number): Promise<void> | null {
+    const now = this.deps.now();
     // 3. Repeats of a question already in flight or waiting.
     const same = this.findSame(words, now);
     if (same) {
@@ -225,45 +315,90 @@ export class QuestionScheduler {
         return this.supersede(same, text, tcIds, finalAt, 'revision');
       }
       this.note(finalAt, false, 'scheduler', 'duplicate-final', 'duplicate');
-      return;
+      return Promise.resolve();
     }
-
     // 4. Continuation / correction of the last question, by rule.
     const prev = this.continuable(now);
     if (prev && (isCorrection(text) || isContinuation(text))) {
       return this.supersede(prev, `${prev.text} ${text}`, tcIds, finalAt, isCorrection(text) ? 'correction' : 'continuation');
     }
+    return null;
+  }
 
-    const detection = await this.deps.detect(text, this.deps.recent());
-    if (epoch !== this.epoch || this.stopped) {
-      this.note(finalAt, detection.act, detection.source, detection.reason, 'stale');
-      return;
-    }
-
-    // 4b. …or by the model's judgement.
+  private routeDetected(
+    detection: Detection,
+    text: string,
+    words: string[],
+    tcIds: string[],
+    finalAt: number,
+    epoch: number,
+  ): Promise<void> {
+    // 4b. Continuation by the model's judgement.
     if (detection.continuesPrevious) {
       const p = this.continuable(this.deps.now());
       if (p) return this.supersede(p, `${p.text} ${text}`, tcIds, finalAt, 'continuation-model');
     }
+    if (detection.act) return this.enqueue(text, words, tcIds, finalAt, detection);
+    this.note(finalAt, false, detection.source, detection.reason, 'ignored');
+    // The classifier timed out and the rule lean said no — but the model
+    // may still answer within its late window.
+    return detection.late ? this.lateVerdict(detection.late, text, words, tcIds, finalAt, epoch) : Promise.resolve();
+  }
 
-    if (!detection.act) {
-      this.note(finalAt, false, detection.source, detection.reason, 'ignored');
-      // The classifier timed out and the rule lean said no — but the model
-      // may still answer within its late window. A late "yes" is acted on
-      // unless the conversation has moved on: a newer interviewer question,
-      // or the candidate already responding.
-      if (detection.late) {
-        const late = await detection.late;
-        if (!late?.act || epoch !== this.epoch || this.stopped) return;
-        if ((this.last && this.last.finalAt > finalAt) || this.lastCandidateAt > finalAt) {
-          this.note(finalAt, true, 'model', 'late-verdict-moot', 'stale');
-          return;
-        }
-        return this.enqueue(text, words, tcIds, finalAt, late, 'late-model');
-      }
+  /** 8. LATE VERDICTS. A late "yes" for a question that was meanwhile asked
+   *  again and handled produces nothing (not a distinct question). Otherwise
+   *  it is answered — unless the conversation has moved on (a newer
+   *  interviewer question, or the candidate already replying) or the session
+   *  was paused since: then it becomes a visible missed card, never an
+   *  answer arriving out of turn and never silently dropped. */
+  private async lateVerdict(
+    late: NonNullable<Detection['late']>,
+    text: string,
+    words: string[],
+    tcIds: string[],
+    finalAt: number,
+    epoch: number,
+  ): Promise<void> {
+    const v = await late;
+    if (!v?.act || this.stopped) return;
+    if (this.findSame(words, this.deps.now())) {
+      this.note(finalAt, true, 'model', 'late-verdict-duplicate', 'duplicate');
       return;
     }
-    return this.enqueue(text, words, tcIds, finalAt, detection);
+    if (epoch !== this.epoch || this.paused) return this.missNew(text, words, tcIds, finalAt, v, 'paused');
+    if ((this.last && this.last.finalAt > finalAt) || this.lastCandidateAt > finalAt) {
+      return this.missNew(text, words, tcIds, finalAt, v, 'late');
+    }
+    return this.enqueue(text, words, tcIds, finalAt, v, 'late-model');
+  }
+
+  /** A distinct question that will not be answered automatically: a visible
+   *  missed card (one tap to answer). It does not become `last` — nothing
+   *  continues or coalesces into a card that was never answered. */
+  private missNew(
+    text: string,
+    words: string[],
+    tcIds: string[],
+    finalAt: number,
+    detection: Detection,
+    why: MissReason,
+  ): Promise<void> {
+    const job: QuestionJob = {
+      seq: ++this.seq,
+      text,
+      words,
+      type: detection.type,
+      confidence: detection.confidence,
+      strategy: detection.strategy,
+      transcriptChunkIds: tcIds,
+      finalAt,
+      decidedAt: this.deps.now(),
+      detection: { source: detection.source, reason: detection.reason },
+      state: 'queued',
+    };
+    this.note(finalAt, true, detection.source, `missed-${why}`, 'missed');
+    this.miss(job, why);
+    return Promise.resolve();
   }
 
   /** A detected question becomes a job: answered now, or queued behind the
@@ -367,7 +502,7 @@ export class QuestionScheduler {
     if (next) void this.run(next);
   }
 
-  private miss(job: QuestionJob, why: 'queue-full' | 'paused'): void {
+  private miss(job: QuestionJob, why: MissReason): void {
     try {
       this.deps.missed(job, why);
     } catch {

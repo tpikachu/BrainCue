@@ -61,9 +61,32 @@ answer was transcribed and never evaluated. The scheduler's policy:
    the candidate has spoken, re-answers **the same card** (same question row)
    with the joined wording; an in-flight stream is aborted first.
 5. **Fragments wait** 1.2 s for their second half.
-6. **Nothing disappears silently.** Past 3 queued questions, or when the user
-   pauses with questions waiting, each becomes a visible card with no answer
-   and "Press ↻ to answer it".
+6. **Nothing disappears silently.** A distinct question that will not be
+   answered automatically becomes a visible card with no answer and "Press ↻
+   to answer it": past 3 queued questions (the oldest waiting one), when the
+   user pauses with it waiting **or still being classified**, or when the
+   model recognised it only after the conversation moved on (§8). Only Stop
+   drops work. While paused, new finals are not evaluated (that is Pause).
+7. **Decisions commit in arrival order** (M3). Detection runs concurrently —
+   a slow classifier call never blocks the next turn's detection — but each
+   turn's decision (queue, coalesce, supersede, drop) is applied only after
+   every earlier turn's decision. The repeat/continuation checks run again at
+   commit time, against the state earlier turns left. Cost: a turn decided by
+   rule in 0 ms can wait for an earlier turn's classifier, bounded by the
+   1.2 s classifier timeout.
+8. **Late verdicts.** A late model "yes" for a question meanwhile asked again
+   and handled produces nothing; otherwise it is answered — unless a newer
+   interviewer question was asked, the candidate has started replying, or
+   the session was paused since, in which case it becomes a missed card
+   ("Recognised as a question only after the conversation moved on").
+
+**Supersession, precisely.** A turn revises an earlier question only when it
+repeats it (3) or continues/corrects the LAST question within the window,
+before candidate speech (4). Never when the rules read it as not-a-question
+("Sorry, can you hear me okay?" is logistics, not a correction), and never
+when it is a complete question after a conjunction ("And why are you
+interested in this role?" is a new card). Everything else is a new question,
+in arrival order.
 
 Interim transcripts never create a card (they only prefetch grounding). The
 candidate's own microphone turns are recorded and close the continuation

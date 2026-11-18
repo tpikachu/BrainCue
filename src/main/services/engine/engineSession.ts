@@ -13,7 +13,7 @@ import {
 } from '../../ipc/contributionBridge';
 import { retryRouteAfterModelError, taskRoute } from '../../providers/taskRoute';
 import { providerErrorKind } from '../../providers/errorKind';
-import { QuestionScheduler, type QuestionJob } from './interview/questionScheduler';
+import { QuestionScheduler, type QuestionJob, type MissReason } from './interview/questionScheduler';
 import { assessUtterance } from './interview/questionHeuristics';
 import type { Detection } from './interview/detector';
 import { latency } from './metrics/latencyStore';
@@ -115,7 +115,7 @@ export class EngineSession {
   /** Speech-end time per transcript row, for the latency record. */
   private readonly speechEnds = new Map<string, number>();
   /** Missed-question cards waiting for the answer slot to free. */
-  private readonly pendingMissed: { job: QuestionJob; why: 'queue-full' | 'paused' }[] = [];
+  private readonly pendingMissed: { job: QuestionJob; why: MissReason }[] = [];
 
   /** Set on teardown/replacement: an in-flight classify/stream/prediction that
    *  wakes up afterwards must act as if the old module-level `live` changed. */
@@ -356,7 +356,7 @@ export class EngineSession {
 
   /** A question that will not be answered automatically still gets a card —
    *  no answer, and one tap (↻) to answer it. Never silently dropped. */
-  private surfaceMissed(job: QuestionJob, why: 'queue-full' | 'paused'): void {
+  private surfaceMissed(job: QuestionJob, why: MissReason): void {
     if (this.stopped) return;
     // Never while an answer streams: opening a card collapses the streaming
     // one in the Cue Card. Shown as soon as the slot frees instead.
@@ -375,7 +375,9 @@ export class EngineSession {
       riskWarning:
         why === 'paused'
           ? 'Asked while paused — not answered. Press ↻ to answer it.'
-          : 'Asked while other answers were waiting — not answered. Press ↻ to answer it.',
+          : why === 'late'
+            ? 'Recognised as a question only after the conversation moved on — not answered. Press ↻ to answer it.'
+            : 'Asked while other answers were waiting — not answered. Press ↻ to answer it.',
     });
     emitContributionDone(questionId);
   }

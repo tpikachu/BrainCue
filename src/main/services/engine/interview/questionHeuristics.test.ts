@@ -95,3 +95,25 @@ describe('isCorrection / isContinuation', () => {
     expect(isContinuation('I think so.')).toBe(false);
   });
 });
+
+describe('found in the live audio run (2026-11-17)', () => {
+  it('a courtesy preamble does not hide the ask that follows it', () => {
+    expect(verdict('Thanks for joining. To start, tell me about yourself.')).toBe('question');
+    expect(verdict('Great, thanks. So, walk me through your last project.')).toBe('question');
+    expect(verdict('Okay, thanks.')).toBe('not');
+    expect(verdict('Thanks for walking me through that.')).toBe('not');
+  });
+
+  it('call logistics are never a correction or a continuation of the last question', () => {
+    expect(isCorrection('Sorry, can you hear me okay? I think my audio cut out.')).toBe(false);
+    expect(isContinuation('And can you hear me okay?')).toBe(false);
+    expect(isCorrection('Sorry, I meant the second project.')).toBe(true);
+  });
+
+  it('a conjunction + complete inverted question is a NEW question, not the second half of the last', () => {
+    expect(isContinuation('And why are you interested in this role at Google?')).toBe(false);
+    expect(isContinuation('And do you have experience with Kafka?')).toBe(false);
+    expect(isContinuation('And what you would do differently.')).toBe(true);
+    expect(isContinuation('and how you tested it')).toBe(true);
+  });
+});
