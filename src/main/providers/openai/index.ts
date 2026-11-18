@@ -126,5 +126,5 @@ export const openaiSpeech: SpeechProvider = {
 
 export const openaiVision: VisionProvider = {
   streamSolve: (input) =>
-    solveFromImages(input.imageDataUrls, input.language, input.format, input.signal),
+    solveFromImages(input.imageDataUrls, input.language, input.format, input.signal, input.route?.model),
 };

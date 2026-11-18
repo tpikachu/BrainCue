@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
+import type { AppSettings } from '@shared/types';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useReadiness, useReadinessSync } from '../store/useReadiness';
 import { setupComplete } from './setupChecklistState';
@@ -121,6 +122,13 @@ export default function App() {
   useEffect(() => {
     void loadSettings();
   }, [loadSettings]);
+
+  // A change from the Cue Card, a key added, or a task's route moving (a
+  // model found unavailable) reaches this window too — and with it readiness.
+  useEffect(
+    () => api.events.onSettingsChanged((s) => useSettingsStore.setState({ settings: s as AppSettings })),
+    [],
+  );
 
   // The shell owns the profile list, because the sidebar switcher scopes every
   // page under it — pages read the active profile, they no longer fetch to ask.

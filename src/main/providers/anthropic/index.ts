@@ -184,7 +184,7 @@ export const anthropicVision: VisionProvider = {
       ...input.imageDataUrls.map(imageBlockFromDataUrl),
       { type: 'text', text: intro },
     ];
-    yield* run('coding', system, content, undefined, input.signal);
+    yield* run('coding', system, content, undefined, input.signal, input.route?.model);
     yield { type: 'meta', riskWarning: null };
   },
 };

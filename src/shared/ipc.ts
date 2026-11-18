@@ -241,6 +241,8 @@ export const EVENTS = {
   contributionDone: 'contribution:done',
   contributionReset: 'contribution:reset',
   sessionError: 'session:error',
+  /** Settings (or what a task resolves to) changed — payload: AppSettings. */
+  settingsChanged: 'settings:changed',
   overlayApplySettings: 'overlay:apply-settings',
   shortcutFired: 'shortcut:fired',
   privacyChanged: 'privacy:changed',

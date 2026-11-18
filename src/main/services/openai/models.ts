@@ -137,7 +137,34 @@ const unavailable = new Set<string>();
  *  it from now on (this process) so the next request resolves to the next
  *  candidate on the same provider. Never switches provider. */
 export function markModelUnavailable(provider: CloudProviderId, model: string): void {
-  unavailable.add(qualifyModel(provider, model));
+  const id = qualifyModel(provider, model);
+  if (unavailable.has(id)) return;
+  unavailable.add(id);
+  notifyRoutesChanged(); // the task now resolves elsewhere — relabel every window
+}
+
+// ---- route-change notifications ----
+
+type RoutesListener = () => void;
+const routesListeners = new Set<RoutesListener>();
+
+/** Something changed what a task resolves to WITHOUT a settings write — a
+ *  model found unavailable, a fresh discovery list. The settings IPC
+ *  re-broadcasts settings on it, so the dashboard and the Cue Card never
+ *  keep naming a model the next request will not use. */
+export function onRoutesChanged(fn: RoutesListener): () => void {
+  routesListeners.add(fn);
+  return () => routesListeners.delete(fn);
+}
+
+export function notifyRoutesChanged(): void {
+  for (const fn of routesListeners) {
+    try {
+      fn();
+    } catch {
+      /* a listener never breaks resolution */
+    }
+  }
 }
 
 installUnavailableMarker((r) => markModelUnavailable(r.provider, r.model));
@@ -159,6 +186,20 @@ export function resolveTask(key: PolicyTask): TaskResolution {
     provider: chatProviderSetting(),
     preference: modelPreference(),
     override: overrides()[key] || null,
+    keys: keyPresence(),
+    discovered: discovered(),
+    unavailable,
+  });
+}
+
+/** What a task resolves to with NO per-task override — the "Automatic"
+ *  row every picker offers, so its label names the model it would really
+ *  use (on the chosen provider, filtered like any other resolution). */
+export function resolveTaskAuto(key: PolicyTask): TaskResolution {
+  return resolveChatTask(key, {
+    provider: chatProviderSetting(),
+    preference: modelPreference(),
+    override: null,
     keys: keyPresence(),
     discovered: discovered(),
     unavailable,

@@ -54,8 +54,31 @@ export function installFake(fx: any) {
     },
     emit: (event: string, payload: unknown) => (listeners[event] ?? []).forEach((cb) => cb(payload)),
     listening: (event: string) => (listeners[event] ?? []).length,
+    /** Capture requests the page made — every one refused, never a device. */
+    media: [] as string[],
   };
   w.__fake = fake;
+  // The page never reaches a real microphone, camera or screen: requests are
+  // refused here (and by the harness main's permission handler behind this).
+  const refuse = (api: string) => () => {
+    fake.media.push(api);
+    return Promise.reject(new DOMException('refused by the renderer harness', 'NotAllowedError'));
+  };
+  // The harness origin (http://harness.local) is not a secure context, so
+  // Chromium exposes no mediaDevices at all; a fake one makes a component's
+  // capture call observable (and refused) instead of a silent TypeError.
+  const fakeDevices = {
+    getUserMedia: refuse('getUserMedia'),
+    getDisplayMedia: refuse('getDisplayMedia'),
+    enumerateDevices: () => Promise.resolve([]),
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  if (navigator.mediaDevices) {
+    for (const [k, v] of Object.entries(fakeDevices)) Object.defineProperty(navigator.mediaDevices, k, { value: v });
+  } else {
+    Object.defineProperty(navigator, 'mediaDevices', { value: fakeDevices, configurable: true });
+  }
   const ok = <T,>(v: T) => Promise.resolve(v);
   const settings = fx.settings ?? {
     stt: { engine: 'local', localModelId: 'x' },

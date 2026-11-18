@@ -31,8 +31,12 @@ export interface QuestionTiming {
   cold: boolean;
   detection?: string;
   prefetched?: boolean;
+  /** The route that produced the first visible token (the answering
+   *  attempt) — seeded at dispatch, re-marked by the attempt that answers. */
   provider?: string;
   model?: string;
+  /** Attempts that failed before the answering one (same-provider failover). */
+  failedAttempts?: number;
 }
 
 export interface StageSummary {

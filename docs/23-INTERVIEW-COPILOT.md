@@ -280,6 +280,51 @@ retry to another provider; a network/5xx error retries once after
 400 ms; auth and quota errors surface with the provider named. Cross-provider
 failover is deliberately not built: it needs an explicit consent setting first.
 
+**What the UI names (M7.2a, AI-01).** Two tasks are visible during an
+interview, and each control says which one it sets: **Interview answers**
+(`answer`, every spoken question, in every interview, coding included) and
+**Coding solver** (`coding`, Solve clipboard and Capture). A coding-only
+setting never reads as the answer setting.
+
+- **What a control shows.** Each control shows main's route for the next
+  request: `effectiveModels`, after override checks, discovery and runtime
+  unavailability. It does not show the stored override, and it does not
+  show the OpenAI preset table (`modelDefaults`), which named an OpenAI
+  model for a user whose answers ran on another provider.
+- **Automatic.** Its first row clears the override. It is labelled with the
+  model it would use (`autoModels`), and any `modelNotices` text is shown in
+  the control's detail.
+- **Where the controls are.**
+  - **Cue Card ⋯ tray:** the Interview answers chip always. In a coding
+    interview, a Coding solver chip beside the solve tools.
+  - **Cue Card settings:** the solver through the same shared picker. The old
+    hard-coded list is gone.
+  - **Dashboard:** the Advanced table uses the same names.
+- **What a pick does.** Changing the answer model re-answers the current
+  question. Changing the solver applies to the next solve.
+- **Refresh.** `settings:changed` carries the fresh settings (key presence
+  only) to every window. It is sent:
+  - after any settings write or key change;
+  - whenever a route moves without a write: a model marked unavailable, a
+    new discovery list (`onRoutesChanged`).
+- **Next request versus existing answer.** The chips describe the next
+  request. An existing answer is described by its own route, captured when it
+  was sent:
+  - Each card says "Answered by …" (`AnswerMetaEvent.answeredBy`). Its detail
+    gives the provider and any attempt that failed over first.
+  - "Sources sent to …" names the provider that card's context went to
+    (`ContextSentEvent.sentTo`).
+  - The saved contribution keeps `answeredBy` in its meta.
+- **Route pinning.** A settings change while an answer streams applies to the
+  next question; it never relabels or moves the one in flight. The coding
+  solver now captures its route the same way (`streamToOverlay` →
+  `solveFromOcr` / `streamSolve` `route`); before, it re-resolved inside
+  each adapter.
+- **Diagnostics.** Each attempt logs `answer attempt N → provider/model` and
+  `answer served by …`, plus `coding solve → …`. These lines never include a
+  key or any transcript text. The latency record's provider/model is the
+  attempt that answered, with `failedAttempts`, not the dispatch seed.
+
 ## 6. Readiness (`services/readiness.ts`)
 
 The start gate used to be "is there an OpenAI key?". It is now three separate
@@ -402,6 +447,9 @@ parsing task's provider, so the sample interview can start on any provider.
   never dropped, even with answer history off. Arrival order, manual-Ask
   ownership and same-card revisions are main's and the reducer's — the
   layout only arranges them. Coding keeps its listen-only toggle visible.
+  The ⋯ tray closes on an outside press, Escape or window blur; its inner
+  model list consumes Escape first. Settings replaces the tray. Open controls
+  suspend click-through so their outside press reaches the Cue Card.
 - **Readable history** (M6, `SessionsPage`, `SessionDetailModal`,
   `sessionTimeline.ts`). Sessions are paged on the server (`session:page`).
   Opening one reads the persisted session only (`session:get`) — no key, no
@@ -429,6 +477,10 @@ parsing task's provider, so the sample interview can start on any provider.
   exposed; options keep focus on the combobox. Hover detail is also shown on
   keyboard focus (`TooltipShield`), and a readiness row with detail is
   focusable. The role form and the new-profile form are guarded.
+  Dropdown outside presses are observed in capture phase, including inside
+  dialogs that stop bubbling; moving focus away also dismisses the list.
+  Tooltips wrap to the viewport and use their measured size to stay inside
+  the protected window, with an eight-pixel inset. Resizing hides stale tips.
 - **Capture truth**: the dashboard reports which audio streams actually flow,
   and again when a track ends; the Cue Card names a missing stream and what it
   costs ("Call audio is not captured — questions can't be heard").
@@ -461,6 +513,17 @@ parsing task's provider, so the sample interview can start on any provider.
   still a running session with a notice that names the missing side.
 
 ## 8. Evidence and how to re-measure
+
+**Open user-reported acceptance items (2026-11-18):** [BOARD.md — user
+follow-ups](./BOARD.md#user-follow-ups--model-clarity-interview-speed-and-cue-card-polish-2026-11-18)
+tracks AI-01 (task-specific model clarity and proof of the actual request
+route) and PERF-01 (slow General/simple Technical answers). M7.2a resolves
+model clarity first; M7.2b requires warm final-to-first-useful-answer paint
+p50 <=1.5 s / p95 <=3 s for General and simple Technical separately, with
+full retrieval/context, cold results and speech-end latency reported too.
+Coding gets a separate justified budget. The historical results below do
+not close these items. UI-01/UI-02 (the Cue Card popover fixes) are committed
+with M7.2a.
 
 **Instrumentation** (`engine/metrics/latency.ts`): per answered question,
 speech end → final, final → decision, decision → grounded, final → first token,

@@ -7,6 +7,8 @@ export function Btn(props: {
   active?: boolean;
   tone?: 'default' | 'warn' | 'danger';
   title?: string;
+  expanded?: boolean;
+  controls?: string;
 }) {
   const base =
     'inline-flex h-6 min-w-6 items-center justify-center rounded-md px-1.5 transition-colors';
@@ -22,6 +24,8 @@ export function Btn(props: {
     <button
       title={props.title}
       aria-label={props.title}
+      aria-expanded={props.expanded}
+      aria-controls={props.controls}
       onClick={props.onClick}
       className={`${base} ${tone}`}
     >

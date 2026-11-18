@@ -768,8 +768,15 @@ export interface AppSettings {
   chatProvider: CloudProviderId | null;
   /** Fast / Balanced / Quality — picks a model per task on chatProvider. */
   modelPreference: 'fast' | 'balanced' | 'quality';
-  /** What each chat task resolves to right now (qualified ids). */
+  /** What each chat task resolves to right now (qualified ids) — the model
+   *  the NEXT request for that task is sent to. */
   effectiveModels: Record<string, string>;
+  /** What each chat task resolves to with no per-task override (qualified
+   *  ids): the model the "Automatic" choice would use. */
+  autoModels?: Record<string, string>;
+  /** Why a task's effective model differs from what was asked (an override
+   *  that cannot run, a preferred model not served). User-safe. */
+  modelNotices?: Record<string, string>;
   modelDefaults: Record<string, string>; // effective per-task defaults (the active preset's table)
   reasoningEfforts: Record<string, string>; // user reasoning-effort overrides per task
   reasoningEffortDefaults: Record<string, string>; // built-in reasoning effort per task
@@ -870,9 +877,21 @@ export interface AnswerDeltaEvent {
 /** Why a question became a visible missed card instead of an answer. */
 export type MissReason = 'queue-full' | 'paused' | 'late';
 
+/** Which provider and model a request went to. No keys, no text. */
+export interface AnswerRoute {
+  provider: string;
+  model: string;
+  /** Attempts that failed before this one (bounded same-provider failover),
+   *  oldest first. Absent when the first attempt answered. */
+  failed?: { provider: string; model: string; reason: 'model' | 'network' }[];
+}
+
 export interface AnswerMetaEvent {
   questionId: string;
   riskWarning: string | null;
+  /** The route that produced this answer — captured when the request was
+   *  sent, never re-read from settings, so a later change cannot relabel it. */
+  answeredBy?: AnswerRoute | null;
   /** Set on a missed card: it was NOT answered, and why. Cleared when it is
    *  answered (regenerate resets the card's meta). */
   missed?: MissReason | null;
@@ -893,6 +912,8 @@ export interface ContextSentEvent {
   /** Memories that grounded this answer (cited as [M1]… — separate from
    *  documents). Present only when memory recall returned something. */
   memories?: RetrievedMemory[];
+  /** Where this context was sent (the attempt's captured route). */
+  sentTo?: { provider: string; model: string };
 }
 
 // --- Generic contribution events (EVENTS.contribution*) ---------------------

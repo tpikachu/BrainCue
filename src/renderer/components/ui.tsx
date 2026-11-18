@@ -7,6 +7,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
 } from 'react';
@@ -382,6 +383,9 @@ export function Dropdown({
 }) {
   const [open, setOpen] = useState(false);
   const [openUp, setOpenUp] = useState(false);
+  /** Horizontal offset that keeps the open list inside the window (px). */
+  const [shiftX, setShiftX] = useState(0);
+  const listRef = useRef<HTMLUListElement>(null);
   /** The highlighted option (keyboard / pointer) while open. */
   const [active, setActive] = useState(-1);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -405,6 +409,7 @@ export function Dropdown({
       const room = 240;
       setOpenUp(r.bottom + room > window.innerHeight && r.top > window.innerHeight - r.bottom);
     }
+    setShiftX(0); // measured once the list is laid out (below)
     const start =
       at === 'last'
         ? enabled[enabled.length - 1]
@@ -494,9 +499,26 @@ export function Dropdown({
     }
   };
 
+  // The list is as wide as its longest option and starts at the button's
+  // left edge: a control toward the right of a compact Cue Card would push
+  // it past the window. Measure the laid-out list and shift it back inside.
+  useLayoutEffect(() => {
+    if (!open || !listRef.current) return;
+    const r = listRef.current.getBoundingClientRect();
+    const margin = 8;
+    const left = r.left - shiftX;
+    let s = Math.min(0, window.innerWidth - margin - (left + r.width));
+    if (left + s < margin) s = margin - left;
+    if (s !== shiftX) setShiftX(s);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
-    const onDocMouseDown = (e: MouseEvent) => {
+    const onDocPointerDown = (e: PointerEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) close();
+    };
+    const onFocusIn = (e: FocusEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) close();
     };
     // Escape with focus elsewhere (the list was opened by pointer and focus
@@ -513,11 +535,15 @@ export function Dropdown({
     // non-interactive region is forwarded to the app behind, so the mousedown
     // above never reaches this document.
     const onWindowBlur = () => close();
-    document.addEventListener('mousedown', onDocMouseDown);
+    // Capture before a dialog stops propagation. Pointer events cover mouse,
+    // touch and pen; dismissal must not cancel the outside control's action.
+    document.addEventListener('pointerdown', onDocPointerDown, true);
+    document.addEventListener('focusin', onFocusIn, true);
     document.addEventListener('keydown', onDocKeyDown);
     window.addEventListener('blur', onWindowBlur);
     return () => {
-      document.removeEventListener('mousedown', onDocMouseDown);
+      document.removeEventListener('pointerdown', onDocPointerDown, true);
+      document.removeEventListener('focusin', onFocusIn, true);
       document.removeEventListener('keydown', onDocKeyDown);
       window.removeEventListener('blur', onWindowBlur);
     };
@@ -567,8 +593,11 @@ export function Dropdown({
       </button>
       {open && (
         <ul
+          ref={listRef}
           id={listId}
+          data-ct-popover
           role="listbox"
+          style={{ left: shiftX, maxWidth: 'min(22rem, calc(100vw - 16px))' }}
           className={`absolute left-0 z-[60] max-h-64 w-full min-w-max max-w-[22rem] overflow-y-auto rounded-lg border border-neutral-700 bg-neutral-900 py-1 shadow-xl shadow-black/50 ${
             openUp ? 'bottom-full mb-1' : 'top-full mt-1'
           }`}
@@ -641,7 +670,24 @@ export function Dropdown({
  * ordinary `title` attribute.
  */
 export function TooltipShield() {
-  const [tip, setTip] = useState<{ text: string; x: number; y: number; up: boolean } | null>(null);
+  const [tip, setTip] = useState<{ text: string; anchor: HTMLElement } | null>(null);
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!tip || !tipRef.current) return;
+    const anchor = tip.anchor.getBoundingClientRect();
+    const box = tipRef.current.getBoundingClientRect();
+    const margin = 8;
+    const below = window.innerHeight - anchor.bottom - 6;
+    const above = anchor.top - 6;
+    const up = box.height > below && above > below;
+    // Clamp the measured box, not just its anchor: a long tip on the first
+    // or last control must remain readable in a compact/resized Cue Card.
+    setPosition({
+      left: Math.max(margin, Math.min(anchor.left + anchor.width / 2 - box.width / 2, window.innerWidth - box.width - margin)),
+      top: Math.max(margin, Math.min(up ? anchor.top - box.height - 6 : anchor.bottom + 6, window.innerHeight - box.height - margin)),
+    });
+  }, [tip]);
   useEffect(() => {
     let curEl: HTMLElement | null = null;
     const titled = (n: EventTarget | null): HTMLElement | null => {
@@ -665,14 +711,8 @@ export function TooltipShield() {
         text = el.getAttribute('data-tip');
       }
       if (!text) return setTip(null);
-      const r = el.getBoundingClientRect();
-      const up = r.bottom + 44 > window.innerHeight;
-      setTip({
-        text,
-        x: Math.min(Math.max(r.left + r.width / 2, 8), window.innerWidth - 8),
-        y: up ? r.top - 6 : r.bottom + 6,
-        up,
-      });
+      setPosition(null);
+      setTip({ text, anchor: el });
     };
     const onOver = (e: Event): void => {
       const el = titled(e.target);
@@ -698,6 +738,7 @@ export function TooltipShield() {
     document.addEventListener('mousedown', hide, true);
     window.addEventListener('scroll', hide, true);
     window.addEventListener('blur', hide);
+    window.addEventListener('resize', hide);
     return () => {
       document.removeEventListener('focusin', onFocusIn, true);
       document.removeEventListener('focusout', hide, true);
@@ -705,17 +746,22 @@ export function TooltipShield() {
       document.removeEventListener('mousedown', hide, true);
       window.removeEventListener('scroll', hide, true);
       window.removeEventListener('blur', hide);
+      window.removeEventListener('resize', hide);
     };
   }, []);
   if (!tip) return null;
   return (
     <div
+      ref={tipRef}
       role="tooltip"
       style={{
         position: 'fixed',
-        left: tip.x,
-        top: tip.y,
-        transform: `translate(-50%, ${tip.up ? '-100%' : '0'})`,
+        left: position?.left ?? 0,
+        top: position?.top ?? 0,
+        visibility: position ? 'visible' : 'hidden',
+        width: 'max-content',
+        maxWidth: 'min(20rem, calc(100vw - 16px))',
+        overflowWrap: 'anywhere',
         zIndex: 9999,
         pointerEvents: 'none',
       }}

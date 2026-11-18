@@ -2,28 +2,62 @@ import { describe, expect, it } from 'vitest';
 import {
   ADD_KEY_PREFIX,
   addKeyProvider,
+  answeredByText,
+  AUTOMATIC,
   currentModel,
   modelGroupsFor,
+  overrideFor,
   pickerRows,
-  pickerTask,
+  taskPickerRows,
+  TASK_NAME,
   withModel,
 } from './modelChoice';
 
 const keys = { openai: true, anthropic: true, google: false, groq: false, openrouter: false };
 
-describe('the Cue Card picker task', () => {
-  it('controls the coding solver in a coding interview and the live cue otherwise', () => {
-    expect(pickerTask('coding')).toBe('coding');
-    expect(pickerTask('technical')).toBe('answer');
-    expect(pickerTask('general')).toBe('answer');
-    expect(pickerTask(null)).toBe('answer');
+describe('which model a task control names (AI-01)', () => {
+  it('names each task, so the solver never reads as the interview answer setting', () => {
+    expect(TASK_NAME).toEqual({ answer: 'Interview answers', coding: 'Coding solver' });
   });
 
-  it('reads the override first, then the preset default', () => {
+  it("names main's route for the next request — not the override, not the OpenAI preset table", () => {
+    // Anthropic chosen; the answer override cannot run; coding overridden to OpenAI.
+    const s = {
+      models: { answer: 'anthropic/claude-fable-5-2', coding: 'gpt-6.2-astra' },
+      modelDefaults: { answer: 'gpt-6-luna', coding: 'gpt-6.2-astra' },
+      effectiveModels: { answer: 'anthropic/claude-sonnet-5-5', coding: 'gpt-6.2-astra' },
+    };
+    expect(currentModel(s, 'answer')).toBe('anthropic/claude-sonnet-5-5');
+    expect(currentModel(s, 'coding')).toBe('gpt-6.2-astra');
+  });
+
+  it('falls back to the override, then the preset table, only when main sends no route', () => {
     const s = { models: { coding: 'anthropic/claude-opus-5' }, modelDefaults: { coding: 'gpt-5-mini', answer: 'gpt-4.1-mini' } };
     expect(currentModel(s, 'coding')).toBe('anthropic/claude-opus-5');
     expect(currentModel(s, 'answer')).toBe('gpt-4.1-mini');
     expect(currentModel(null, 'answer')).toBe('');
+  });
+
+  it("offers Automatic first, labelled with the model it would use, and selects it when there's no override", () => {
+    const s = { models: { coding: 'gpt-6.2-astra' }, providerKeys: keys, autoModels: { answer: 'anthropic/claude-sonnet-5-5', coding: 'anthropic/claude-opus-5-5' } };
+    const answer = taskPickerRows('answer', s, { addKeyDisabled: true });
+    expect(answer[0]).toMatchObject({ value: AUTOMATIC, label: 'Automatic — Claude Sonnet 5.5' });
+    expect(overrideFor(s, 'answer')).toBe(AUTOMATIC);
+    const coding = taskPickerRows('coding', s, { addKeyDisabled: true });
+    expect(coding[0].label).toBe('Automatic — Claude Opus 5.5');
+    expect(overrideFor(s, 'coding')).toBe('gpt-6.2-astra');
+    // The rest is the shared grouped catalog (both keyed providers listed).
+    expect(new Set(coding.slice(1).map((r) => r.group))).toEqual(new Set(['OpenAI', 'Anthropic', 'Google Gemini', 'Groq', 'OpenRouter']));
+  });
+
+  it("describes an answer by its own captured route, failover included", () => {
+    expect(answeredByText({ provider: 'anthropic', model: 'claude-sonnet-5-5' })).toEqual({
+      label: 'Answered by Claude Sonnet 5.5',
+      detail: 'Anthropic · Claude Sonnet 5.5.',
+    });
+    expect(
+      answeredByText({ provider: 'openai', model: 'gpt-4.1-mini', failed: [{ provider: 'openai', model: 'gpt-6-luna', reason: 'model' }] }),
+    ).toEqual({ label: 'Answered by GPT-4.1 Mini', detail: 'OpenAI · GPT-4.1 Mini. Tried first: GPT-6 Luna (not available).' });
   });
 });
 

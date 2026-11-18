@@ -64,7 +64,7 @@ export function createRouted(lookup: Lookup): {
 
   const routedVision: VisionProvider = {
     async *streamSolve(input) {
-      yield* pick('coding', 'vision').streamSolve(input);
+      yield* pick('coding', 'vision', input.route).streamSolve(input);
     },
   };
 

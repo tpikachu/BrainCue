@@ -10,7 +10,16 @@ import type { AppSettings, AudioPrefs, OverlayPrefs } from '@shared/types';
 import { handle, NoInput } from './helpers';
 import { apiKeyStore } from '../services/security/apiKey';
 import { listModels, testApiKey } from '../services/openai/client';
-import { chatProviderSetting, defaultEfforts, modelPreference, modelPreset, presetModels, resolveTask } from '../services/openai/models';
+import {
+  chatProviderSetting,
+  defaultEfforts,
+  modelPreference,
+  modelPreset,
+  onRoutesChanged,
+  presetModels,
+  resolveTask,
+  resolveTaskAuto,
+} from '../services/openai/models';
 import { qualifyModel } from '@shared/providers';
 import { POLICY_TASKS } from '@shared/modelPolicy';
 import { clearDiscovery, refreshDiscovery, storeDiscovery } from '../services/models/discovery';
@@ -45,6 +54,27 @@ const activeProfileId = (): string | null =>
     profilesRepo.list().map((p) => p.id),
   );
 
+/** Per chat task: the route the next request uses, the "Automatic" route,
+ *  and why the two differ from what was asked. */
+function routeFields(): Pick<AppSettings, 'effectiveModels' | 'autoModels' | 'modelNotices'> {
+  const effectiveModels: Record<string, string> = {};
+  const autoModels: Record<string, string> = {};
+  const modelNotices: Record<string, string> = {};
+  for (const t of POLICY_TASKS) {
+    const r = resolveTask(t);
+    effectiveModels[t] = qualifyModel(r.provider, r.model);
+    if (r.notice) modelNotices[t] = r.notice;
+    const a = resolveTaskAuto(t);
+    autoModels[t] = qualifyModel(a.provider, a.model);
+  }
+  return { effectiveModels, autoModels, modelNotices };
+}
+
+/** Tell every window. Settings carry key PRESENCE only, never a key. */
+function settingsChanged(): void {
+  broadcast(EVENTS.settingsChanged, readSettings());
+}
+
 function readSettings(): AppSettings {
   return {
     apiKeyPresent: apiKeyStore.isPresent(),
@@ -52,12 +82,7 @@ function readSettings(): AppSettings {
     modelPreset: modelPreset(),
     chatProvider: chatProviderSetting(),
     modelPreference: modelPreference(),
-    effectiveModels: Object.fromEntries(
-      POLICY_TASKS.map((t) => {
-        const r = resolveTask(t);
-        return [t, qualifyModel(r.provider, r.model)];
-      }),
-    ),
+    ...routeFields(),
     modelDefaults: { ...presetModels() }, // effective per-task defaults for the active preset
     reasoningEfforts: settingsRepo.getJson(SETTINGS_KEYS.reasoningEfforts, {}),
     reasoningEffortDefaults: { ...defaultEfforts },
@@ -150,6 +175,10 @@ const settingsPatch = z.object({
 const providerId = z.enum(['openai', 'anthropic', 'google', 'groq', 'openrouter']);
 
 export function registerSettingsIpc(): void {
+  // A route that moves without a settings write (model unavailable, new
+  // discovery list) relabels the dashboard and the Cue Card too.
+  onRoutesChanged(settingsChanged);
+
   handle(IPC.app.getInfo, NoInput, () => ({
     version: app.getVersion(),
     platform: process.platform,
@@ -209,7 +238,9 @@ export function registerSettingsIpc(): void {
       writeSttPrefs({ ...patch.stt, localModelId: localSttModel(patch.stt.localModelId) ? patch.stt.localModelId : DEFAULT_STT_PREFS.localModelId });
       applySttSelection();
     }
-    return readSettings();
+    const next = readSettings();
+    broadcast(EVENTS.settingsChanged, next);
+    return next;
   });
 
   // Per-provider keys: same isolation as the OpenAI key (main only, encrypted,
@@ -221,12 +252,14 @@ export function registerSettingsIpc(): void {
       providerKeys.set(provider, key);
       // Learn what the new key can see — in the background, off any answer path.
       void refreshDiscovery([provider], true);
+      settingsChanged();
       return { providerKeys: providerKeys.presence() };
     },
   );
   handle(IPC.settings.clearProviderKey, z.object({ provider: providerId }), ({ provider }) => {
     providerKeys.clear(provider);
-    clearDiscovery(provider);
+    clearDiscovery(provider); // also re-broadcasts (routes changed)
+    settingsChanged();
     return { providerKeys: providerKeys.presence() };
   });
   handle(IPC.settings.testProviderKey, z.object({ provider: providerId }), ({ provider }) =>
@@ -235,11 +268,13 @@ export function registerSettingsIpc(): void {
 
   handle(IPC.settings.setApiKey, z.object({ key: z.string().min(1) }), ({ key }) => {
     apiKeyStore.set(key);
+    settingsChanged();
     return { apiKeyPresent: true };
   });
 
   handle(IPC.settings.clearApiKey, NoInput, () => {
     apiKeyStore.clear();
+    settingsChanged();
     return { apiKeyPresent: false };
   });
 

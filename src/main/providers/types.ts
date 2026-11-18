@@ -112,6 +112,8 @@ export interface VisionProvider {
     language: string;
     format: AnswerFormat;
     signal?: AbortSignal;
+    /** The solve's captured route (see ChatStreamRequest.route). */
+    route?: TaskRoute;
   }): AsyncGenerator<ChatStreamEvent | { type: 'meta'; riskWarning: string | null }>;
 }
 

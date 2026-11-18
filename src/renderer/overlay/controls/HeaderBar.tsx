@@ -107,7 +107,7 @@ export function HeaderBar(props: {
           </>
         )}
         <span className="mx-0.5 h-4 w-px bg-neutral-700" />
-        <Btn active={props.moreOpen} onClick={props.onToggleMore} title={props.moreOpen ? 'Hide more' : 'More: answer style, model, capture, view, settings'}>
+        <Btn active={props.moreOpen} expanded={props.moreOpen} controls="cue-more-controls" onClick={props.onToggleMore} title={props.moreOpen ? 'Hide more' : 'More: answer style, model, capture, view, settings'}>
           <span className="text-[12px] font-semibold leading-none">⋯</span>
         </Btn>
         <Btn onClick={() => api.overlay.hide()} title="Hide Cue Card">

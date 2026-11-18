@@ -20,8 +20,8 @@ import { PRESET_OPTIONS, PresetPicker, ProviderKeyBlock, ProviderTiles } from '.
 const MODEL_FIELDS: { key: string; label: string; hint: string; chat: boolean; suggest: string[] }[] = [
   {
     key: 'answer',
-    label: 'Live answer',
-    hint: 'Writes the cue that streams into the Cue Card (latency matters).',
+    label: 'Interview answers',
+    hint: 'The live answer to each question, in every session — interviews and meetings (latency matters).',
     chat: true,
     suggest: [],
   },
@@ -267,9 +267,10 @@ function ModelsCard({
    *  beyond the catalog; keyless providers collapse to "Add key"), then the
    *  free-text OpenRouter entry when that key exists. */
   const chatRows = (key: string, def: string, current: string): DropdownOption[] => {
-    // The policy's pick for this task on the chosen provider (not the OpenAI
-    // preset table — a Claude user's default is a Claude model).
-    const effective = settings.effectiveModels?.[key] ?? def;
+    // The policy's pick for this task on the chosen provider with NO
+    // override (not the OpenAI preset table — a Claude user's default is a
+    // Claude model; not the override either, which this row would clear).
+    const effective = settings.autoModels?.[key] ?? settings.effectiveModels?.[key] ?? def;
     const rows: DropdownOption[] = [
       { value: '', label: `Default — ${modelLabel(effective)}`, description: 'Picked for your provider and preference' },
       ...pickerRows(key, settings.providerKeys, current, { addKeyDisabled: false }, account),

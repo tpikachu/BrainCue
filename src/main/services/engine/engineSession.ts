@@ -26,7 +26,7 @@ import { ground } from './grounding';
 import { enginePersistence as persist } from './persistence/enginePersistence';
 import { EchoGuard, sameWords, turnWords } from './echoGuard';
 import { evaluateTurnHeuristics } from './trigger/meetingHeuristics';
-import type { RetrievedChunk } from '@shared/types';
+import type { AnswerRoute, RetrievedChunk } from '@shared/types';
 import { summonedPolicy } from './trigger/summonedPolicy';
 import type { AudioSource, Speaker } from '@shared/types';
 import type { RealtimeSttSession } from '../../providers/types';
@@ -639,6 +639,14 @@ export class EngineSession {
       const tRecall = Date.now();
       latency.mark(questionId, { groundedAt: tRecall, prefetched: !!prefetched });
       let firstToken = 0;
+      // The route is captured HERE, before anything is sent, and travels with
+      // the request; settings changed from now on apply to the NEXT question.
+      let attemptRoute = taskRoute('answer');
+      const failedAttempts: NonNullable<AnswerRoute['failed']> = [];
+      const answeredBy = (): AnswerRoute | null =>
+        attemptRoute
+          ? { provider: attemptRoute.provider, model: attemptRoute.model, ...(failedAttempts.length ? { failed: [...failedAttempts] } : {}) }
+          : null;
       // Transparency: tell the UI exactly what was sent to the provider —
       // memories included, so "data sent" always shows every memory used.
       emitContributionContext(questionId, {
@@ -646,6 +654,7 @@ export class EngineSession {
         question: questionText,
         chunks: context,
         ...(memories.length ? { memories } : {}),
+        ...(attemptRoute ? { sentTo: { provider: attemptRoute.provider, model: attemptRoute.model } } : {}),
       });
       // Bounded failover (docs/06 §Failover): at most ONE retry, and only
       // before any token was shown — a partly streamed answer is never
@@ -656,8 +665,9 @@ export class EngineSession {
       // Each attempt's route is captured BEFORE it is sent and travels with
       // it; a failure is attributed to that route (never to whatever the
       // task resolves to when the error arrives).
-      let attemptRoute = taskRoute('answer');
       for (let attempt = 0; ; attempt++) {
+        // Diagnostics: provider/model per attempt — never a key or any text.
+        log.info(`answer attempt ${attempt + 1} → ${attemptRoute ? `${attemptRoute.provider}/${attemptRoute.model}` : 'unrouted'}`);
         try {
       for await (const ev of this.mode.generate({
         ...(attemptRoute ? { route: attemptRoute } : {}),
@@ -673,7 +683,12 @@ export class EngineSession {
         if (ev.type === 'delta') {
           if (!firstToken) {
             firstToken = Date.now();
-            latency.mark(questionId, { firstTokenAt: firstToken });
+            // The answering attempt's route, not the one seeded at dispatch.
+            latency.mark(questionId, {
+              firstTokenAt: firstToken,
+              ...(attemptRoute ? { provider: attemptRoute.provider, model: attemptRoute.model } : {}),
+              ...(failedAttempts.length ? { failedAttempts: failedAttempts.length } : {}),
+            });
             // Where the wait before the first token goes (no transcript text).
             log.info(
               `answer latency: ground ${tGround - t0} ms${prefetched ? ' (prefetched on interim)' : ''}, recall ${tRecall - tGround} ms, first token ${firstToken - tRecall} ms`,
@@ -685,9 +700,13 @@ export class EngineSession {
           tokens = { prompt: ev.prompt, completion: ev.completion };
         } else if (ev.type === 'meta') {
           meta = ev;
-          emitContributionMeta(questionId, { questionId, ...ev });
+          emitContributionMeta(questionId, { questionId, ...ev, answeredBy: answeredBy() });
         }
       }
+          meta = { ...meta, answeredBy: answeredBy() };
+          log.info(
+            `answer served by ${attemptRoute ? `${attemptRoute.provider}/${attemptRoute.model}` : 'unrouted'}${failedAttempts.length ? ` after ${failedAttempts.length} failed attempt(s)` : ''}`,
+          );
           break;
         } catch (e) {
           if (abort.signal.aborted || answer || attempt >= 1) throw e;
@@ -698,6 +717,7 @@ export class EngineSession {
             // the MODEL, never the provider (an override's provider included).
             const next = failed ? retryRouteAfterModelError('answer', failed) : null;
             if (!next || !failed) throw e;
+            failedAttempts.push({ provider: failed.provider, model: failed.model, reason: 'model' });
             attemptRoute = next;
             log.warn(`answer model unavailable (${failed?.provider}/${failed?.model}) — retrying on ${next.provider}/${next.model}`);
             broadcast(EVENTS.sessionError, {
@@ -707,6 +727,7 @@ export class EngineSession {
           }
           if (kind === 'network') {
             log.warn('answer stream failed before its first token (network) — retrying once');
+            if (attemptRoute) failedAttempts.push({ provider: attemptRoute.provider, model: attemptRoute.model, reason: 'network' });
             await new Promise((r) => setTimeout(r, 400));
             if (abort.signal.aborted) throw e;
             continue;
@@ -761,7 +782,13 @@ export class EngineSession {
       kind: 'answer',
       title: questionText,
       body: answer,
-      meta: { questionId, riskWarning: (meta.riskWarning as string) ?? null, tokens },
+      meta: {
+        questionId,
+        riskWarning: (meta.riskWarning as string) ?? null,
+        tokens,
+        // Which provider/model produced this saved answer (no keys, no text).
+        ...(meta.answeredBy ? { answeredBy: meta.answeredBy } : {}),
+      },
       sourceRefs: [
         { type: 'question', id: questionId },
         ...context.map((c) => ({ type: 'chunk', id: c.id })),

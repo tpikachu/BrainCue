@@ -179,6 +179,7 @@ export function openaiCompatibleProvider(info: CloudProviderInfo): {
             ],
             undefined,
             input.signal,
+            input.route?.model,
           );
           yield { type: 'meta', riskWarning: null };
         },

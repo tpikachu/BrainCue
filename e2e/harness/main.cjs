@@ -2,13 +2,22 @@
 // HIDDEN window (nothing appears on any screen), a CDP port for Playwright, no
 // app code, no database, no audio, no network. The spec routes the page's URL
 // to the harness bundle itself.
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, session } = require('electron');
 
 app.commandLine.appendSwitch('remote-debugging-port', process.env.HARNESS_CDP_PORT || '9339');
+// No real capture device, ever: Chromium's fake devices as the last line
+// behind the refusals below and the page's fake mediaDevices (harness.ts).
+app.commandLine.appendSwitch('use-fake-device-for-media-stream');
 app.commandLine.appendSwitch('remote-allow-origins', '*');
 app.setPath('userData', process.env.HARNESS_USER_DATA || require('path').join(require('os').tmpdir(), 'braincue-harness'));
 
 app.whenReady().then(() => {
+  // Electron GRANTS every permission request by default. Components under
+  // test probe the microphone (Cue Card settings lists devices that way) —
+  // refuse media, and everything else, before any page loads.
+  session.defaultSession.setPermissionRequestHandler((_wc, _permission, cb) => cb(false));
+  session.defaultSession.setPermissionCheckHandler(() => false);
+  session.defaultSession.setDisplayMediaRequestHandler((_req, cb) => cb({}));
   const win = new BrowserWindow({
     show: false,
     width: 1100,

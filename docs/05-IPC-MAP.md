@@ -318,6 +318,7 @@ correct/forget the memory in place.
 | `session:rollback-result` | `RollbackResult` | all (a failed start's rollback settled — from whichever window pressed Stop — so the dashboard and the Cue Card say the same thing; M6) |
 | `session:context` | `{ questionId, question, chunks }` | dashboard (debug: retrieved chunks) |
 | `session:error` | `{ message }` | dashboard + overlay |
+| `settings:changed` | `AppSettings` (key presence only, never a key) | dashboard + overlay — after any settings write or key change, and when a task's route moves without one (a model marked unavailable, new discovery) |
 | `capture:buffer` | `{ images: string[] }` | overlay (current multi-image problem captures, for the Cue Card thumbnail strip) |
 | `overlay:apply-settings` | `{ opacity, fontSize, mode }` | overlay |
 | `shortcut:fired` | `{ action }` | dashboard |

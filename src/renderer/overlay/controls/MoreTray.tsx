@@ -1,9 +1,7 @@
 import type { AnswerFormat, AppSettings, InterviewType } from '@shared/types';
 import type { ClientInfo } from '@shared/ipc';
-import type { CloudProviderId } from '@shared/providers';
 import { api } from '../../lib/api';
 import { BoltIcon, CompactIcon, ExpandIcon, FrameIcon, SettingsIcon, TrashIcon } from '../../components/icons';
-import { pickerTask } from '../../lib/modelChoice';
 import { noDrag } from '../lib/style';
 import { ModelChip } from './ModelChip';
 
@@ -34,7 +32,8 @@ export function MoreTray(props: {
   settings: AppSettings | null;
   mode: 'compact' | 'expanded';
   clientInfo: ClientInfo | null;
-  onPickModel: (task: 'answer' | 'coding', provider: CloudProviderId, id: string) => void;
+  /** A qualified model id for the task, or null = Automatic. */
+  onPickModel: (task: 'answer' | 'coding', value: string | null) => void;
   onChangeFormat: (f: AnswerFormat) => void;
   onTogglePronunciation: () => void;
   onToggleHistory: () => void;
@@ -69,13 +68,10 @@ export function MoreTray(props: {
               </button>
             ))}
           </span>
-          {/* Which model answers THIS session's questions: the solver in a
-              coding interview, the live cue otherwise. Picking re-answers. */}
-          <ModelChip
-            settings={props.settings}
-            task={pickerTask(props.interviewType)}
-            onPick={(provider, id) => props.onPickModel(pickerTask(props.interviewType), provider, id)}
-          />
+          {/* The model for spoken questions — in EVERY interview, coding
+              included (their verbal questions are answers too). Picking
+              re-answers the current question. */}
+          <ModelChip settings={props.settings} task="answer" onPick={(v) => props.onPickModel('answer', v)} />
         </div>
       )}
       {props.live && (
@@ -107,6 +103,12 @@ export function MoreTray(props: {
           {props.mode === 'compact' ? <ExpandIcon className="mr-1 inline h-3 w-3" /> : <CompactIcon className="mr-1 inline h-3 w-3" />}
           {props.mode === 'compact' ? 'Expand' : 'Compact'}
         </button>
+        {/* The solver's model sits with the solve tools, in a coding
+            interview; it applies to the next solve (↻ on a code card
+            re-solves). Cue Card settings has it for every session. */}
+        {props.live && props.interviewType === 'coding' && (
+          <ModelChip settings={props.settings} task="coding" onPick={(v) => props.onPickModel('coding', v)} />
+        )}
         <button type="button" className={quiet} onClick={props.onOpenSettings} title="Audio device, appearance">
           <SettingsIcon className="mr-1 inline h-3 w-3" />
           Settings

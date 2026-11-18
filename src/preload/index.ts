@@ -510,6 +510,9 @@ const api = {
     onContributionReset: (cb: (p: ContributionResetEvent) => void) =>
       on(EVENTS.contributionReset, cb),
     onSessionError: (cb: (p: unknown) => void) => on(EVENTS.sessionError, cb),
+    /** Settings changed in any window, or a task's route moved (a model found
+     *  unavailable, new discovery). Payload: the fresh AppSettings. */
+    onSettingsChanged: (cb: (p: unknown) => void) => on(EVENTS.settingsChanged, cb),
     onOverlayApplySettings: (cb: (p: unknown) => void) => on(EVENTS.overlayApplySettings, cb),
     onShortcutFired: (cb: (p: unknown) => void) => on(EVENTS.shortcutFired, cb),
     onPrivacyChanged: (cb: (p: unknown) => void) => on(EVENTS.privacyChanged, cb),

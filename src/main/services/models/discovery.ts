@@ -3,7 +3,7 @@ import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo
 import { listProviderModels } from '../../providers/listModels';
 import { providerKeys } from '../security/providerKeys';
 import { log } from '../security/logger';
-import type { DiscoveryEntry } from '../openai/models';
+import { notifyRoutesChanged, type DiscoveryEntry } from '../openai/models';
 
 /**
  * Model discovery: which model ids each configured provider actually serves
@@ -29,12 +29,14 @@ function read(): Record<string, DiscoveryEntry> {
 export function storeDiscovery(provider: CloudProviderId, ids: string[]): void {
   if (ids.length === 0) return; // an empty list would disqualify everything
   settingsRepo.setJson(SETTINGS_KEYS.modelDiscovery, { ...read(), [provider]: { ids, at: Date.now() } });
+  notifyRoutesChanged();
 }
 
 export function clearDiscovery(provider: CloudProviderId): void {
   const all = read();
   delete all[provider];
   settingsRepo.setJson(SETTINGS_KEYS.modelDiscovery, all);
+  notifyRoutesChanged();
 }
 
 export function discoveryAge(provider: CloudProviderId): number | null {

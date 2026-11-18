@@ -3,6 +3,7 @@ import { api } from '../../lib/api';
 import type { AppSettings, VoicePrefs } from '@shared/types';
 import { Dropdown, Modal, Switch } from '../../components/ui';
 import { noDrag } from '../lib/style';
+import { addKeyProvider, currentModel, modelLabel, overrideFor, taskPickerRows } from '../../lib/modelChoice';
 
 /** Cue Card settings: audio device, voice output, coding-solver
  *  model/effort/language, and appearance. Owns its own persisted state —
@@ -24,12 +25,14 @@ export function SettingsModal(props: {
 }) {
   const [micDeviceId, setMicDeviceId] = useState<string | null>(null);
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
-  // Coding-solver model + reasoning effort (persisted overrides; '' = use default).
-  // Switchable live so a hard problem can be bumped to a stronger model on the spot.
+  // Coding-solver model + reasoning effort (persisted overrides; '' =
+  // Automatic). Switchable live so a hard problem can be bumped to a stronger
+  // model on the spot. The model list is the shared per-task picker (the same
+  // rows as the dashboard and the Cue Card's chip) over these settings.
+  const [snap, setSnap] = useState<AppSettings | null>(null);
   const [codingModel, setCodingModel] = useState('');
   const [codingEffort, setCodingEffort] = useState('');
   const [codingLanguage, setCodingLanguage] = useState('javascript');
-  const [codingDefaults, setCodingDefaults] = useState({ model: 'gpt-5-mini', effort: 'low' });
   // Voice output devices + quick-ask Spaces (loaded on open, voice section only).
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
   const [spaces, setSpaces] = useState<{ id: string; label: string }[]>([]);
@@ -40,13 +43,10 @@ export function SettingsModal(props: {
     void api.settings.get().then((s) => {
       const ss = s as AppSettings;
       if (ss.audio) setMicDeviceId(ss.audio.micDeviceId);
-      setCodingModel(ss.models?.coding ?? '');
+      setSnap(ss);
+      setCodingModel(overrideFor(ss, 'coding'));
       setCodingEffort(ss.reasoningEfforts?.coding ?? '');
       setCodingLanguage(ss.codingLanguage ?? 'javascript');
-      setCodingDefaults({
-        model: ss.modelDefaults?.coding ?? 'gpt-5-mini',
-        effort: ss.reasoningEffortDefaults?.coding ?? 'low',
-      });
     });
     // Device labels only populate after a mic-permission grant — briefly probe
     // the mic to unlock them, then release it (main auto-allows 'media').
@@ -84,6 +84,18 @@ export function SettingsModal(props: {
     }
   }, [props.open, props.voicePrefs !== null]);
 
+  // While open, follow changes made elsewhere (the dashboard, a chip, a
+  // failover moving the route) — the picker never shows a stale model.
+  useEffect(() => {
+    if (!props.open) return;
+    return api.events.onSettingsChanged((s) => {
+      const ss = s as AppSettings;
+      setSnap(ss);
+      setCodingModel(overrideFor(ss, 'coding'));
+      setCodingEffort(ss.reasoningEfforts?.coding ?? '');
+    });
+  }, [props.open]);
+
   // A session hears the call AND the microphone (there is no source to pick);
   // the one audio preference left is WHICH microphone.
   const saveAudio = (device: string | null) => {
@@ -108,7 +120,8 @@ export function SettingsModal(props: {
       const efforts = { ...(fresh.reasoningEfforts ?? {}) };
       if (e) efforts.coding = e;
       else delete efforts.coding;
-      await api.settings.set({ models, reasoningEfforts: efforts });
+      // Main's reply carries the re-resolved route for the next solve.
+      setSnap((await api.settings.set({ models, reasoningEfforts: efforts })) as AppSettings);
     } catch {
       // Persistence failed — the pickers still show the chosen value; the next
       // successful save (or app restart) reconciles.
@@ -237,12 +250,25 @@ export function SettingsModal(props: {
               <span className="mb-1 block text-xs font-medium text-neutral-400">Model</span>
               <Dropdown
                 value={codingModel}
-                options={[
-                  { value: '', label: `Default (${codingDefaults.model})` },
-                  ...['gpt-5-mini', 'gpt-5', 'gpt-4.1', 'o4-mini'].map((m) => ({ value: m, label: m })),
-                ]}
-                onChange={(v) => void saveCoding({ model: v })}
+                ariaLabel="Coding solver model"
+                disabled={!snap}
+                options={taskPickerRows('coding', snap, {
+                  addKeyDisabled: false,
+                  addKeyTitle: 'Opens Settings → Language Models',
+                })}
+                onChange={(v) => {
+                  if (addKeyProvider(v)) {
+                    void api.window.openDashboard('/settings/models');
+                    return;
+                  }
+                  void saveCoding({ model: v });
+                }}
               />
+              {snap?.modelNotices?.coding && (
+                <p className="mt-1 text-xs text-amber-300" data-model-notice="coding">
+                  ⚠ Next solve: {modelLabel(currentModel(snap, 'coding'))}. {snap.modelNotices.coding}
+                </p>
+              )}
             </div>
             <div>
               <span className="mb-1 block text-xs font-medium text-neutral-400">
@@ -251,7 +277,7 @@ export function SettingsModal(props: {
               <Dropdown
                 value={codingEffort}
                 options={[
-                  { value: '', label: `Default (${codingDefaults.effort})` },
+                  { value: '', label: `Default (${snap?.reasoningEffortDefaults?.coding ?? 'low'})` },
                   { value: 'low', label: 'Low — fastest, cheapest' },
                   { value: 'medium', label: 'Medium — balanced' },
                   { value: 'high', label: 'High — hardest problems' },
@@ -260,8 +286,8 @@ export function SettingsModal(props: {
               />
             </div>
             <p className="text-xs text-neutral-500">
-              Used by both “Solve from clipboard” and “Solve a region.” Bump a hard problem up
-              to a stronger model or higher effort — it applies to your next solve.
+              Used by “Solve clipboard” and “Capture”, not by interview answers (those have
+              their own model, under ⋯). Applies to your next solve.
             </p>
           </div>
 

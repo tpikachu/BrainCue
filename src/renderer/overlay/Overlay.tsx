@@ -14,10 +14,10 @@ import type {
   CaptureStatus,
   InterviewType,
 } from '@shared/types';
-import { cloudProvider, type CloudProviderId } from '@shared/providers';
+import { cloudProvider } from '@shared/providers';
 import { HeadphonesIcon } from '../components/icons';
 import { rollbackMessage } from '../lib/rollbackCopy';
-import { withModel, type PickerTask } from '../lib/modelChoice';
+import type { PickerTask } from '../lib/modelChoice';
 import { splitPronunciation } from './pronunciation';
 import type { CardModel } from './cards/model';
 import { ContributionCard } from './cards/ContributionCard';
@@ -73,6 +73,7 @@ export default function Overlay() {
   const [clientInfo, setClientInfo] = useState<ClientInfo | null>(null);
   /** The ⋯ tray: everything a live call does not need at a glance. */
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
   /** Earlier cards, behind one toggle (missed questions stay visible). */
   const [showEarlier, setShowEarlier] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -86,18 +87,21 @@ export default function Overlay() {
 
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // Persisted settings, for the model chip (which model answers, which
-  // providers have keys). Re-read whenever a session goes live and when the
-  // engine pushes answer prefs, so a change made in the dashboard meanwhile is
-  // picked up — there is no settings-changed push event.
+  // Persisted settings, for the model chips (which model each task's NEXT
+  // request uses, which providers have keys). Main pushes them on every
+  // change from any window and whenever a task's route moves (a model found
+  // unavailable, new discovery) — EVENTS.settingsChanged.
   const [settings, setSettings] = useState<AppSettings | null>(null);
-  /** Who answers (main's route for the answer task), for "Sources sent to …". */
+  /** Main's route for the answer task — only for a card whose context event
+   *  predates `sentTo`; a card names where ITS sources went. */
   const [answerProvider, setAnswerProvider] = useState<string | null>(null);
-  const loadSettings = () => {
+  const loadRoute = () =>
     void api.settings
       .readiness()
       .then((r) => setAnswerProvider(cloudProvider(r.routes.answer)?.name ?? r.routes.answer))
       .catch(() => {});
+  const loadSettings = () => {
+    loadRoute();
     return api.settings
       .get()
       .then((s) => setSettings(s as AppSettings))
@@ -265,6 +269,10 @@ export default function Overlay() {
       api.events.onSessionRollback((r) => {
         if (!r.stopped || r.removed === false) setSessionError(rollbackMessage(r));
       }),
+      api.events.onSettingsChanged((s) => {
+        setSettings(s as AppSettings);
+        loadRoute();
+      }),
       api.events.onAnswerPrefs((p) => {
         setInterviewType(p.interviewType);
         setAnswerFormat(p.format);
@@ -342,20 +350,24 @@ export default function Overlay() {
     await api.session.setAnswerPrefs({ pronunciation: next });
     if (question) await api.session.regenerate();
   };
-  // The model chip: persist the pick for this task (read-modify-write against
-  // FRESH settings — the dashboard may have written other tasks meanwhile),
-  // then re-answer the current question with it.
-  const pickModel = async (task: PickerTask, provider: CloudProviderId, id: string) => {
+  // A model chip: persist the pick for THIS task (read-modify-write against
+  // FRESH settings — the dashboard may have written other tasks meanwhile;
+  // null clears the override). Main's reply carries the re-resolved routes,
+  // so the chip names what the next request will really use. Only the answer
+  // task re-answers the current question: the solver applies to the next
+  // solve, and re-running a spoken answer would not use it at all.
+  const pickModel = async (task: PickerTask, value: string | null) => {
     try {
       const fresh = (await api.settings.get()) as AppSettings;
-      const models = withModel(fresh.models, task, provider, id);
-      await api.settings.set({ models });
-      setSettings({ ...fresh, models });
+      const models = { ...(fresh.models ?? {}) };
+      if (value) models[task] = value;
+      else delete models[task];
+      setSettings((await api.settings.set({ models })) as AppSettings);
     } catch (e) {
       setSessionError((e as Error).message);
       return;
     }
-    if (question) await api.session.regenerate();
+    if (task === 'answer' && question) await api.session.regenerate();
   };
   // Regenerate ONE card (its per-card ↻ button). Live-session questions re-run
   // via the answer pipeline; a coding-solve card isn't a persisted question, so
@@ -435,19 +447,45 @@ export default function Overlay() {
   // The global shortcut (Ctrl+Shift+\) toggles click-through via the main process.
   useEffect(() => api.events.onOverlayClickthrough(() => setClickthrough((c) => !c)), []);
 
+  useEffect(() => {
+    if (!moreOpen) return;
+    const close = () => setMoreOpen(false);
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Element;
+      if (!moreRef.current?.contains(target) && !target.closest('[aria-controls="cue-more-controls"]')) close();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      // An inner dropdown consumes its Escape first.
+      if (e.key === 'Escape' && !e.defaultPrevented) {
+        e.preventDefault();
+        close();
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('blur', close);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('blur', close);
+    };
+  }, [moreOpen]);
+
   // Per-region click-through. Electron ignores the mouse per-WINDOW, so making the
   // whole Cue Card click-through would trap its own buttons. Instead, while it's on
   // we flip ignore as the cursor enters/leaves the control bar — mouse-move is still
   // forwarded while ignoring ({forward:true}) — so the header stays clickable and
   // only the answer area passes clicks through to the app behind.
   useEffect(() => {
-    if (!clickthrough) {
+    // An open tray/dialog must receive the outside press that dismisses it;
+    // forwarding that press to another app can leave controls stuck open.
+    if (!clickthrough || moreOpen || settingsOpen) {
       void api.overlay.setClickthrough(false);
       return;
     }
     let ignoring = false;
     const onMove = (e: MouseEvent) => {
-      const overUI = !!(
+      const overUI = !!document.querySelector('[data-ct-popover]') || !!(
         document.elementFromPoint(e.clientX, e.clientY) as Element | null
       )?.closest('[data-ct-interactive]');
       if (!overUI !== ignoring) {
@@ -460,7 +498,7 @@ export default function Overlay() {
       document.removeEventListener('mousemove', onMove);
       void api.overlay.setClickthrough(false);
     };
-  }, [clickthrough]);
+  }, [clickthrough, moreOpen, settingsOpen]);
 
   const cardProps = (c: CardModel, isCurrent: boolean) => ({
     card: c,
@@ -502,23 +540,28 @@ export default function Overlay() {
       />
 
       {moreOpen && (
-        <MoreTray
-          live={live}
-          interviewType={interviewType}
-          answerFormat={answerFormat}
-          pronunciation={pronunciation}
-          historyEnabled={historyEnabled}
-          settings={settings}
-          mode={mode}
-          clientInfo={clientInfo}
-          onPickModel={(task, provider, id) => void pickModel(task, provider, id)}
-          onChangeFormat={(f) => void changeFormat(f)}
-          onTogglePronunciation={() => void togglePronunciation()}
-          onToggleHistory={() => useOverlayStore.getState().setHistoryEnabled(!historyEnabled)}
-          onClear={clearAnswer}
-          onToggleMode={() => applyMode(mode === 'compact' ? 'expanded' : 'compact')}
-          onOpenSettings={() => setSettingsOpen(true)}
-        />
+        <div ref={moreRef} id="cue-more-controls" className="shrink-0">
+          <MoreTray
+            live={live}
+            interviewType={interviewType}
+            answerFormat={answerFormat}
+            pronunciation={pronunciation}
+            historyEnabled={historyEnabled}
+            settings={settings}
+            mode={mode}
+            clientInfo={clientInfo}
+            onPickModel={(task, value) => void pickModel(task, value)}
+            onChangeFormat={(f) => void changeFormat(f)}
+            onTogglePronunciation={() => void togglePronunciation()}
+            onToggleHistory={() => useOverlayStore.getState().setHistoryEnabled(!historyEnabled)}
+            onClear={clearAnswer}
+            onToggleMode={() => applyMode(mode === 'compact' ? 'expanded' : 'compact')}
+            onOpenSettings={() => {
+              setMoreOpen(false);
+              setSettingsOpen(true);
+            }}
+          />
+        </div>
       )}
 
       {captures.length > 0 && <CapturesPanel captures={captures} />}
@@ -630,7 +673,7 @@ export default function Overlay() {
             {context && (
               <DataSentPanel
                 context={context}
-                provider={answerProvider}
+                provider={context.sentTo ? (cloudProvider(context.sentTo.provider)?.name ?? context.sentTo.provider) : answerProvider}
                 show={showData}
                 onToggle={() => setShowData((s) => !s)}
               />

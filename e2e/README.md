@@ -83,7 +83,11 @@ Three tiers, kept apart:
   — no app code, DB, audio or network). The preload bridge is a fake that records every
   call and whose replies a test can script, hold or fail; startNew / resumeExisting record
   what they were asked to start. Each load proves the page takes input (a hidden window
-  occasionally hands a fresh document none) and reloads if not. `HARNESS_ROOT` bundles
+  occasionally hands a fresh document none) and reloads if not. Nothing in it can capture:
+  harness main refuses every permission request (Electron grants them by default), Chromium's
+  fake devices are on, and the page gets a `mediaDevices` whose calls are recorded
+  (`__fake.media`) and rejected. The harness origin is not a secure context, so before this
+  a component's mic probe failed with a TypeError instead. `HARNESS_ROOT` bundles
   from another checkout (an earlier commit's worktree) for before/after runs. Screenshots
   are opt-in: `HARNESS_CAPTURE_PORT` serves Electron's own capture of the window on
   127.0.0.1 (CDP captures wait for frames a hidden window does not always paint), and
@@ -102,6 +106,16 @@ Three tiers, kept apart:
   - `keyboard-drafts.spec.ts` — focus contained and restored, dropdown keys and ARIA state,
     Escape closes the inner control first, edited drafts and busy saves survive dismissal,
     readiness detail reachable by keyboard.
+  - `popovers.spec.ts` (UI-01/UI-02) — tooltips and the compact model list stay inside a
+    467 × 462 Cue Card (and after resize); dropdowns close on an outside press inside a
+    dialog, More on an outside press, Escape and blur (inner list first); Settings replaces
+    More; click-through waits until open controls have had their outside press.
+  - `model-labels.spec.ts` (AI-01) — each chip names its task (Interview answers / Coding
+    solver) and the model main resolved, not the coding override or the OpenAI table; a
+    solver pick does not re-answer, an answer pick does; a pushed route change relabels the
+    chip while existing answers keep "Answered by …" and their sources' provider; Cue Card
+    settings uses the shared picker (Automatic names the real pick) and its mic probe is
+    refused.
 - ✅ History in the real app (`history.spec.ts`, no key): a sample conversation opens from
   the DB with no report; `session:remember` reports a failed summary as failed and keeps
   the transcript; a missing or other-profile Space is refused in main.
