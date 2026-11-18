@@ -104,8 +104,14 @@ answer was transcribed and never evaluated. The scheduler's policy:
 repeats it (3) or continues/corrects the LAST question within the window,
 before candidate speech (4). The LAST question is the newest one decided —
 answered, waiting, streaming or shown missed (a question missed across a
-Pause is continued after Resume) — and only a newer one replaces it: a
-queued question starting later, or an older late verdict, never does. Never when the rules read it as not-a-question
+Pause is continued after Resume) — newest by arrival order, since two finals
+can share a millisecond — and only a newer one replaces it: a queued
+question starting later, or an older late verdict, never does. Every
+revision (a longer copy coalescing into a queued question, a continuation,
+a correction, a revision across Pause) refreshes the same metadata: wording,
+transcript chunks, timing (so the continuation window runs from the
+revision), arrival order and the continuation target, keeping the card and
+its queue position. Never when the rules read it as not-a-question
 ("Sorry, can you hear me okay?" is logistics, not a correction), and never
 when it is a complete question after a conjunction ("And why are you
 interested in this role?" is a new card, in any capitalisation — the

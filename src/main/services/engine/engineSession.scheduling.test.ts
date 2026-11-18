@@ -478,4 +478,51 @@ describe('EngineSession + scheduler', () => {
     expect(h.metas).toEqual([]);
     expect(h.generated).toEqual([L]);
   });
+  // ---- M3 review round 6: revision metadata and arrival order ----
+  it('M3 review 6: a longer revision of a queued question takes its follow-up — answered before the next queued question', async () => {
+    const A = 'Tell me about yourself.';
+    const B = 'Why did you leave Acme?';
+    const C = 'What is your notice period?';
+    const B2 = 'Why did you leave Acme and what did you do next?';
+    const F = 'And how you tested it.';
+    const s = session();
+    openGate();
+    void s.onTranscriptFinal(A); // streaming, held
+    for (const t of [B, C, B2, F]) {
+      await vi.advanceTimersByTimeAsync(10);
+      void s.onTranscriptFinal(t);
+    }
+    await tick();
+    h.gate!.release();
+    h.gate = null;
+    for (let i = 0; i < 6; i++) await tick();
+    expect(h.generated).toEqual([A, `${B2} ${F}`, C]); // never "C + follow-up"
+    expect(h.questions.map((q) => q.text)).toEqual([A, `${B2} ${F}`, C]);
+  });
+
+  it('M3 review 6: finals in the SAME millisecond — the follow-up continues the newest question, not the older one that started', async () => {
+    const A = 'Tell me about yourself.';
+    const B = 'Why did you leave Acme?';
+    const C = 'What is your notice period?';
+    const F = 'And how you tested it.';
+    const s = session();
+    openGate();
+    void s.onTranscriptFinal(A); // fake clock: A, B and C share one millisecond
+    void s.onTranscriptFinal(B);
+    void s.onTranscriptFinal(C);
+    await tick();
+    const first = h.gate!;
+    openGate(); // B will stream (held) once A finishes
+    first.release();
+    await tick();
+    await tick();
+    expect(h.generated).toEqual([A, B]);
+    void s.onTranscriptFinal(F);
+    await tick();
+    expect(h.aborted).toEqual([]); // B is not superseded
+    h.gate!.release();
+    h.gate = null;
+    for (let i = 0; i < 4; i++) await tick();
+    expect(h.generated).toEqual([A, B, `${C} ${F}`]);
+  });
 });

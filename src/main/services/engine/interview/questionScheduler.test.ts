@@ -925,6 +925,90 @@ describe('M3 acceptance — questions answered in the right order', () => {
       expect(texts(h)).toEqual([A, B, `${C} ${F}`]);
     });
 
+    // ---- round 6: revision metadata and arrival order ----
+    it('a longer revision of a QUEUED question becomes the continuation target (B and C queued)', async () => {
+      const A = 'Tell me about yourself.';
+      const B = 'Why did you leave Acme?';
+      const C = 'What is your notice period?';
+      const B2 = 'Why did you leave Acme and what did you do next?';
+      const F = 'And how you tested it.';
+      const h = scripted({});
+      void h.s.onRemoteFinal(A, 't1'); // streaming
+      await run(10);
+      void h.s.onRemoteFinal(B, 't2');
+      await run(10);
+      void h.s.onRemoteFinal(C, 't3');
+      await run(10);
+      void h.s.onRemoteFinal(B2, 't4'); // coalesces into B, in B's place
+      await run(10);
+      void h.s.onRemoteFinal(F, 't5'); // continues B2, the newest question
+      await run(10);
+      expect(h.s.pending.map((j) => j.text)).toEqual([`${B2} ${F}`, C]); // FIFO kept
+      await h.finish();
+      await h.finish();
+      expect(texts(h)).toEqual([A, `${B2} ${F}`, C]);
+    });
+
+    it('a delayed longer revision of a question waiting behind manual Ask refreshes its continuation window', async () => {
+      const X = 'Why did you leave Acme?';
+      const X2 = 'Why did you leave Acme and what did you do next?';
+      const F = 'And how you tested it.';
+      const h = scripted({});
+      let manual = true;
+      h.deps.slotBusy = () => manual;
+      void h.s.onRemoteFinal(X, 't1'); // queued behind the manual Ask
+      await run(10);
+      vi.advanceTimersByTime(10_000); // past the 8 s continuation window, inside the 20 s duplicate window
+      void h.s.onRemoteFinal(X2, 't2');
+      await run(10);
+      void h.s.onRemoteFinal(F, 't3'); // 10 ms after the revision: continues it
+      await run(10);
+      expect(h.s.pending.map((j) => j.text)).toEqual([`${X2} ${F}`]); // one job
+      manual = false;
+      h.s.slotFreed();
+      await run(0);
+      expect(texts(h)).toEqual([`${X2} ${F}`]);
+    });
+
+    it('EQUAL timestamps: an older queued question starting never takes the continuation target from a newer one', async () => {
+      const A = 'Tell me about yourself.';
+      const B = 'Why did you leave Acme?';
+      const C = 'What is your notice period?';
+      const F = 'And how you tested it.';
+      const T = Date.now();
+      const h = scripted({});
+      void h.s.onRemoteFinal(A, 't1', T);
+      void h.s.onRemoteFinal(B, 't2', T);
+      void h.s.onRemoteFinal(C, 't3', T); // all in one millisecond
+      await run(10);
+      await h.finish(); // A done → B starts
+      expect(texts(h)).toEqual([A, B]);
+      void h.s.onRemoteFinal(F, 't4');
+      await run(10);
+      expect(h.s.pending.map((j) => j.text)).toEqual([`${C} ${F}`]); // C, by arrival order
+      await h.finish();
+      expect(texts(h)).toEqual([A, B, `${C} ${F}`]);
+    });
+
+    it('EQUAL timestamps: an older late result is a late missed card and never takes the continuation target', async () => {
+      const X = 'The thing with the queues last year.';
+      const B = 'Why did you leave Acme?';
+      const F = 'And how you tested it.';
+      const T = Date.now();
+      const l = late();
+      const h = scripted({ [X]: [10, l.d] });
+      void h.s.onRemoteFinal(X, 't1', T);
+      void h.s.onRemoteFinal(B, 't2', T); // same millisecond, arrived second
+      await run(20);
+      await h.finish(); // B answered
+      l.resolve(verdict(true)); // X's late yes
+      await run(10);
+      expect(h.missed).toEqual([{ text: X, why: 'late' }]);
+      void h.s.onRemoteFinal(F, 't3');
+      await run(10);
+      expect(texts(h)).toEqual([B, `${B} ${F}`]);
+    });
+
     it('after STOP, neither an on-time nor a late "yes" surfaces anything', async () => {
       const A = 'The thing with the queues last year.';
       const l = late();

@@ -62,8 +62,11 @@ import type { ClassifierTurn } from '../../openai/questions';
  * repeats it (§3) or continues/corrects the LAST question within
  * CONTINUATION_WINDOW_MS, before any candidate speech (§4). The LAST
  * question is the NEWEST one decided — answered, waiting, streaming or
- * shown missed — and only a newer one replaces it (setLast): a queued
- * question starting later, or an older late verdict, never does. It never does
+ * shown missed — by ARRIVAL order (the latest turn that contributed to
+ * it; timestamps can tie), and only a newer one replaces it (setLast): a
+ * queued question starting later, or an older late verdict, never does.
+ * Every revision refreshes the same metadata (revise()): wording, chunks,
+ * finalAt, decidedAt, arrival and the continuation target. It never does
  * when the rules read it as not-a-question (call logistics, backchannel —
  * "Sorry, can you hear me?" is not a correction), nor when it is a complete
  * question of its own after a conjunction ("And why are you interested in
@@ -99,8 +102,11 @@ export interface QuestionJob {
   transcriptChunkIds: string[];
   /** When the (last part of the) question was finalized — latency anchor. */
   finalAt: number;
-  /** When it was detected. */
+  /** When it was detected (or last revised). */
   decidedAt: number;
+  /** Arrival order of the latest turn that contributed to it — "newer"
+   *  means a higher arrival, never a later timestamp (finals can tie). */
+  arrival: number;
   detection: Pick<Detection, 'source' | 'reason'>;
   /** The question row/card once answering began; a superseding revision
    *  re-answers on the same row. */
@@ -141,6 +147,16 @@ export interface SchedulerDeps {
   clearTimer(t: unknown): void;
 }
 
+/** One interviewer turn as routing sees it. */
+interface Turn {
+  text: string;
+  words: string[];
+  tcIds: string[];
+  finalAt: number;
+  /** Stable arrival order, assigned when the final reaches evaluate(). */
+  arrival: number;
+}
+
 interface Held {
   text: string;
   tcIds: string[];
@@ -157,6 +173,8 @@ export class QuestionScheduler {
   private held: Held | null = null;
   private lastCandidateAt = 0;
   private seq = 0;
+  /** Arrival counter for Turn.arrival. */
+  private arrivals = 0;
   /** Bumped by stop/pause: work that wakes after it is stale. */
   private epoch = 0;
   private stopped = false;
@@ -264,7 +282,9 @@ export class QuestionScheduler {
 
   private async evaluate(text: string, tcIds: string[], finalAt: number): Promise<void> {
     const epoch = this.epoch;
-    const words = turnWords(text);
+    // Arrival order is fixed HERE, synchronously, in the order finals reach
+    // the scheduler — never by wall-clock time, which can tie (§7).
+    const t: Turn = { text, words: turnWords(text), tcIds, finalAt, arrival: ++this.arrivals };
     const prior = this.commitTail;
     let release!: () => void;
     this.commitTail = new Promise<void>((r) => (release = r));
@@ -273,7 +293,7 @@ export class QuestionScheduler {
     try {
       // Skip the model call when, by the state right now, this turn is a
       // repeat or a continuation (re-checked at commit time below).
-      const routedNow = !!this.findSame(words, this.deps.now()) || this.continuesByRule(text, this.deps.now());
+      const routedNow = !!this.findSame(t.words, this.deps.now()) || this.continuesByRule(text, this.deps.now());
       const detection = routedNow ? null : this.deps.detect(text, this.deps.recent());
       await prior; // earlier turns' decisions first
       if (this.stopped) {
@@ -284,15 +304,15 @@ export class QuestionScheduler {
       // answered — but a question is never dropped silently either (§6).
       if (epoch !== this.epoch) {
         if (!detection) {
-          follow = this.settlePausedRevision(text, words, tcIds, finalAt);
+          follow = this.settlePausedRevision(t);
           return;
         }
         const d = await detection;
         if (this.stopped) return void this.note(finalAt, d.act, d.source, d.reason, 'stale');
-        follow = this.settlePaused(d, text, words, tcIds, finalAt, epoch);
+        follow = this.settlePaused(d, t, epoch);
         return;
       }
-      follow = this.routeKnown(text, words, tcIds, finalAt);
+      follow = this.routeKnown(t);
       if (!follow) {
         const d = await (detection ?? this.deps.detect(text, this.deps.recent()));
         if (this.stopped) {
@@ -301,17 +321,23 @@ export class QuestionScheduler {
         }
         if (epoch !== this.epoch) {
           // Paused while THIS turn was being classified (§6, as above).
-          follow = this.settlePaused(d, text, words, tcIds, finalAt, epoch);
+          follow = this.settlePaused(d, t, epoch);
           return;
         }
         // Re-check after classification too: the streaming answer may have
         // finished (or been superseded) while the classifier ran.
-        follow = this.routeKnown(text, words, tcIds, finalAt) ?? this.routeDetected(d, text, words, tcIds, finalAt, epoch);
+        follow = this.routeKnown(t) ?? this.routeDetected(d, t, epoch);
       }
     } finally {
       release();
     }
     return follow ?? undefined;
+  }
+
+  /** `t` joined onto `prev`'s current wording (a continuation/correction). */
+  private joined(prev: QuestionJob, t: Turn): Turn {
+    const text = `${prev.text} ${t.text}`;
+    return { ...t, text, words: turnWords(text) };
   }
 
   /** The one disposition for a turn whose detection finished in a later
@@ -320,17 +346,10 @@ export class QuestionScheduler {
    *  within its late window, and lateVerdict turns THAT into a missed card.
    *  Both go through missNew, which suppresses repeats (§3) — two copies of
    *  one question classified across a pause are one card. */
-  private settlePaused(
-    d: Detection,
-    text: string,
-    words: string[],
-    tcIds: string[],
-    finalAt: number,
-    epoch: number,
-  ): Promise<void> | null {
-    if (d.act) return this.missNew(text, words, tcIds, finalAt, d, 'paused');
-    this.note(finalAt, false, d.source, d.reason, 'stale');
-    return d.late ? this.lateVerdict(d.late, text, words, tcIds, finalAt, epoch) : null;
+  private settlePaused(d: Detection, t: Turn, epoch: number): Promise<void> | null {
+    if (d.act) return this.missNew(t, d, 'paused');
+    this.note(t.finalAt, false, d.source, d.reason, 'stale');
+    return d.late ? this.lateVerdict(d.late, t, epoch) : null;
   }
 
   /** The same, for a turn the rules routed as a repeat or a continuation /
@@ -339,20 +358,40 @@ export class QuestionScheduler {
    *  LONGER repeat ("…and the rollback plan") or a continuation/correction of
    *  the last one — and would be lost silently if dropped: it becomes a
    *  missed card with the revised wording, on that question's own card. */
-  private settlePausedRevision(text: string, words: string[], tcIds: string[], finalAt: number): Promise<void> | null {
-    const same = this.findSame(words, this.deps.now());
+  private settlePausedRevision(t: Turn): Promise<void> | null {
+    const same = this.findSame(t.words, this.deps.now());
     if (same) {
-      if (words.length > same.words.length) this.missRevision(same, text, tcIds, finalAt, 'paused', 'revision');
-      else this.note(finalAt, false, 'scheduler', 'epoch-changed', 'duplicate');
+      if (t.words.length > same.words.length) this.missRevision(same, t, 'paused', 'revision');
+      else this.note(t.finalAt, false, 'scheduler', 'epoch-changed', 'duplicate');
       return null;
     }
     const prev = this.last;
-    if (prev && (isCorrection(text) || isContinuation(text))) {
-      this.missRevision(prev, `${prev.text} ${text}`, tcIds, finalAt, 'paused', isCorrection(text) ? 'correction' : 'continuation');
+    if (prev && (isCorrection(t.text) || isContinuation(t.text))) {
+      this.missRevision(prev, this.joined(prev, t), 'paused', isCorrection(t.text) ? 'correction' : 'continuation');
       return null;
     }
-    this.note(finalAt, false, 'scheduler', 'epoch-changed', 'stale');
+    this.note(t.finalAt, false, 'scheduler', 'epoch-changed', 'stale');
     return null;
+  }
+
+  /**
+   * THE one way a question's wording changes. Every revision path — a
+   * longer copy coalescing into a queued question, a continuation or
+   * correction superseding a streaming / answered / missed one, a revision
+   * across Pause — refreshes the SAME metadata: wording, transcript chunks,
+   * `finalAt` (the continuation window runs from the revision, not the
+   * first wording), `decidedAt` (the duplicate window likewise), `arrival`,
+   * and the continuation target. Card identity (`seq`, `questionId`) and
+   * queue position are never touched here.
+   */
+  private revise(target: QuestionJob, t: Turn): void {
+    target.text = t.text;
+    target.words = t.words;
+    target.transcriptChunkIds.push(...t.tcIds);
+    target.finalAt = t.finalAt;
+    target.decidedAt = this.deps.now();
+    target.arrival = Math.max(target.arrival, t.arrival);
+    this.setLast(target);
   }
 
   /**
@@ -371,14 +410,9 @@ export class QuestionScheduler {
    *    revised wording.
    * A later continuation (after Resume) continues the CURRENT wording.
    */
-  private missRevision(target: QuestionJob, text: string, tcIds: string[], finalAt: number, why: MissReason, label: string): void {
-    target.text = text;
-    target.words = turnWords(text);
-    target.transcriptChunkIds = [...target.transcriptChunkIds, ...tcIds];
-    target.finalAt = finalAt;
-    target.decidedAt = this.deps.now();
-    this.setLast(target);
-    this.note(finalAt, true, 'scheduler', `missed-${why}-${label}`, 'missed');
+  private missRevision(target: QuestionJob, t: Turn, why: MissReason, label: string): void {
+    this.revise(target, t);
+    this.note(t.finalAt, true, 'scheduler', `missed-${why}-${label}`, 'missed');
     if (target.state === 'answering') return void this.missAfterRun.set(target.seq, why);
     if (target.state === 'queued') return;
     if (target.state === 'missed' && !target.questionId) return;
@@ -395,57 +429,48 @@ export class QuestionScheduler {
   /** 3–4: a repeat of a question in flight / waiting, or a continuation or
    *  correction of the last one. Null when neither applies. Synchronous up to
    *  the returned promise, so the state change is made inside the commit. */
-  private routeKnown(text: string, words: string[], tcIds: string[], finalAt: number): Promise<void> | null {
+  private routeKnown(t: Turn): Promise<void> | null {
     const now = this.deps.now();
     // 3. Repeats of a question already in flight or waiting.
-    const same = this.findSame(words, now);
+    const same = this.findSame(t.words, now);
     if (same) {
-      if (words.length > same.words.length && (same.state === 'queued' || same.state === 'answering')) {
+      if (t.words.length > same.words.length) {
         if (same.state === 'queued') {
-          same.text = text;
-          same.words = words;
-          same.transcriptChunkIds.push(...tcIds);
-          this.note(finalAt, true, 'scheduler', 'revision-of-queued', 'coalesced');
+          // A longer copy of a waiting question: same job, same place in the
+          // queue, current wording and timing (revise).
+          this.revise(same, t);
+          this.note(t.finalAt, true, 'scheduler', 'revision-of-queued', 'coalesced');
           return this.wait(same);
         }
-        // A longer revision of the streaming question: re-answer it.
-        return this.supersede(same, text, tcIds, finalAt, 'revision');
+        // Streaming, answered (no candidate speech since) or shown missed:
+        // the added words are a revision — re-answer THAT card, never drop
+        // them as a duplicate.
+        if (same.state === 'answering' || same.state === 'answered' || same.state === 'missed') {
+          return this.supersede(same, t, 'revision');
+        }
       }
-      if (words.length > same.words.length && (same.state === 'answered' || same.state === 'missed')) {
-        // A longer repeat of a question already answered (no candidate
-        // speech since) or shown missed: the added words are a revision —
-        // re-answer THAT card, never drop them as a duplicate.
-        return this.supersede(same, text, tcIds, finalAt, 'revision');
-      }
-      this.note(finalAt, false, 'scheduler', 'duplicate-final', 'duplicate');
+      this.note(t.finalAt, false, 'scheduler', 'duplicate-final', 'duplicate');
       return Promise.resolve();
     }
     // 4. Continuation / correction of the last question, by rule.
     const prev = this.continuable(now);
-    if (prev && (isCorrection(text) || isContinuation(text))) {
-      return this.supersede(prev, `${prev.text} ${text}`, tcIds, finalAt, isCorrection(text) ? 'correction' : 'continuation');
+    if (prev && (isCorrection(t.text) || isContinuation(t.text))) {
+      return this.supersede(prev, this.joined(prev, t), isCorrection(t.text) ? 'correction' : 'continuation');
     }
     return null;
   }
 
-  private routeDetected(
-    detection: Detection,
-    text: string,
-    words: string[],
-    tcIds: string[],
-    finalAt: number,
-    epoch: number,
-  ): Promise<void> {
+  private routeDetected(detection: Detection, t: Turn, epoch: number): Promise<void> {
     // 4b. Continuation by the model's judgement.
     if (detection.continuesPrevious) {
       const p = this.continuable(this.deps.now());
-      if (p) return this.supersede(p, `${p.text} ${text}`, tcIds, finalAt, 'continuation-model');
+      if (p) return this.supersede(p, this.joined(p, t), 'continuation-model');
     }
-    if (detection.act) return this.enqueue(text, words, tcIds, finalAt, detection);
-    this.note(finalAt, false, detection.source, detection.reason, 'ignored');
+    if (detection.act) return this.enqueue(t, detection);
+    this.note(t.finalAt, false, detection.source, detection.reason, 'ignored');
     // The classifier timed out and the rule lean said no — but the model
     // may still answer within its late window.
-    return detection.late ? this.lateVerdict(detection.late, text, words, tcIds, finalAt, epoch) : Promise.resolve();
+    return detection.late ? this.lateVerdict(detection.late, t, epoch) : Promise.resolve();
   }
 
   /** 8. LATE VERDICTS. A late "yes" for a question that was meanwhile asked
@@ -456,37 +481,31 @@ export class QuestionScheduler {
    *  answer arriving out of turn and never silently dropped. "Asked again"
    *  means a copy that adds nothing: a late LONGER copy revises the newest
    *  question's card when that is its shorter copy (no reply yet), and is
-   *  otherwise a missed card carrying the added words. */
-  private async lateVerdict(
-    late: NonNullable<Detection['late']>,
-    text: string,
-    words: string[],
-    tcIds: string[],
-    finalAt: number,
-    epoch: number,
-  ): Promise<void> {
+   *  otherwise a missed card carrying the added words. "Newer" is by ARRIVAL
+   *  order, never by timestamp (two finals can share a millisecond). */
+  private async lateVerdict(late: NonNullable<Detection['late']>, t: Turn, epoch: number): Promise<void> {
     const v = await late;
     if (!v?.act || this.stopped) return;
-    const same = this.findSame(words, this.deps.now());
-    if (same && words.length <= same.words.length) {
+    const same = this.findSame(t.words, this.deps.now());
+    if (same && t.words.length <= same.words.length) {
       // A copy that adds nothing to a question meanwhile handled.
-      this.note(finalAt, true, 'model', 'late-verdict-duplicate', 'duplicate');
+      this.note(t.finalAt, true, 'model', 'late-verdict-duplicate', 'duplicate');
       return;
     }
     // From here `same`, if any, is a SHORTER copy: this turn's added words
     // ("…and how you handled the rollback") are a revision, never dropped.
-    if (epoch !== this.epoch || this.paused) return this.missNew(text, words, tcIds, finalAt, v, 'paused');
-    if (same && same === this.last && this.lastCandidateAt <= finalAt) {
+    if (epoch !== this.epoch || this.paused) return this.missNew(t, v, 'paused');
+    if (same && same === this.last && this.lastCandidateAt <= t.finalAt) {
       // The newest question IS this one, worded shorter, and the candidate
       // has not replied: revise its card exactly as an on-time longer repeat
       // would (§3) — coalesce if waiting, re-answer if streaming or answered.
-      const routed = this.routeKnown(text, words, tcIds, finalAt);
+      const routed = this.routeKnown(t);
       if (routed) return routed;
     }
-    if ((this.last && this.last.finalAt > finalAt) || this.lastCandidateAt > finalAt) {
-      return this.missNew(text, words, tcIds, finalAt, v, 'late');
+    if ((this.last && this.last.arrival > t.arrival) || this.lastCandidateAt > t.finalAt) {
+      return this.missNew(t, v, 'late');
     }
-    return this.enqueue(text, words, tcIds, finalAt, v, 'late-model');
+    return this.enqueue(t, v, 'late-model');
   }
 
   /** A distinct question that will not be answered automatically: a visible
@@ -496,24 +515,17 @@ export class QuestionScheduler {
    *  never takes that from a newer question (setLast). A repeat of
    *  a question already in flight, waiting, answered, or already shown as
    *  missed (within DUPLICATE_WINDOW_MS) is not distinct: no second card. */
-  private missNew(
-    text: string,
-    words: string[],
-    tcIds: string[],
-    finalAt: number,
-    detection: Detection,
-    why: MissReason,
-  ): Promise<void> {
+  private missNew(t: Turn, detection: Detection, why: MissReason): Promise<void> {
     const now = this.deps.now();
     // A copy that adds no words. A LONGER one (a correction joined to its
     // question) is a revision the user has not seen — it gets the card.
-    const covers = (j: QuestionJob) => sameWords(j.words, words) && words.length <= j.words.length;
-    const same = this.findSame(words, now);
+    const covers = (j: QuestionJob) => sameWords(j.words, t.words) && t.words.length <= j.words.length;
+    const same = this.findSame(t.words, now);
     const missedRecently = this.recentMissed.filter(
-      (m) => m.state === 'missed' && now - m.decidedAt <= DUPLICATE_WINDOW_MS && sameWords(m.words, words),
+      (m) => m.state === 'missed' && now - m.decidedAt <= DUPLICATE_WINDOW_MS && sameWords(m.words, t.words),
     );
     if ((same && covers(same)) || missedRecently.some(covers)) {
-      this.note(finalAt, true, detection.source, `missed-${why}-duplicate`, 'duplicate');
+      this.note(t.finalAt, true, detection.source, `missed-${why}-duplicate`, 'duplicate');
       return Promise.resolve();
     }
     // A LONGER copy of a question already shown (or about to be shown) as
@@ -522,58 +534,44 @@ export class QuestionScheduler {
     // answered revises its card the same way.
     const prior = missedRecently[0] ?? (why === 'paused' ? same : null);
     if (prior) {
-      this.missRevision(prior, text, tcIds, finalAt, why, 'revision');
+      this.missRevision(prior, t, why, 'revision');
       return Promise.resolve();
     }
-    const job: QuestionJob = {
-      seq: ++this.seq,
-      text,
-      words,
-      type: detection.type,
-      confidence: detection.confidence,
-      strategy: detection.strategy,
-      transcriptChunkIds: tcIds,
-      finalAt,
-      decidedAt: this.deps.now(),
-      detection: { source: detection.source, reason: detection.reason },
-      state: 'queued',
-    };
-    this.note(finalAt, true, detection.source, `missed-${why}`, 'missed');
+    const job = this.newJob(t, detection, detection.reason);
+    this.note(t.finalAt, true, detection.source, `missed-${why}`, 'missed');
     this.setLast(job);
     this.miss(job, why);
     return Promise.resolve();
   }
 
-  /** A detected question becomes a job: answered now, or queued behind the
-   *  stream that holds the slot. */
-  private async enqueue(
-    text: string,
-    words: string[],
-    tcIds: string[],
-    finalAt: number,
-    detection: Detection,
-    reasonOverride?: string,
-  ): Promise<void> {
-    const reason = reasonOverride ?? detection.reason;
-    const job: QuestionJob = {
+  private newJob(t: Turn, detection: Detection, reason: string): QuestionJob {
+    return {
       seq: ++this.seq,
-      text,
-      words,
+      text: t.text,
+      words: t.words,
       type: detection.type,
       confidence: detection.confidence,
       strategy: detection.strategy,
-      transcriptChunkIds: tcIds,
-      finalAt,
+      transcriptChunkIds: [...t.tcIds],
+      finalAt: t.finalAt,
       decidedAt: this.deps.now(),
+      arrival: t.arrival,
       detection: { source: detection.source, reason },
       state: 'queued',
     };
+  }
+
+  /** A detected question becomes a job: answered now, or queued behind the
+   *  stream that holds the slot. */
+  private async enqueue(t: Turn, detection: Detection, reasonOverride?: string): Promise<void> {
+    const reason = reasonOverride ?? detection.reason;
+    const job = this.newJob(t, detection, reason);
     this.setLast(job);
 
     // 2. One stream at a time — queue behind whatever holds the slot.
     if (this.active || this.deps.slotBusy()) {
       this.queue.push(job);
-      this.note(finalAt, true, detection.source, reason, 'queued');
+      this.note(t.finalAt, true, detection.source, reason, 'queued');
       while (this.queue.length > QUEUE_MAX) {
         // The oldest waiting NEW question. A revision waiting to re-answer an
         // existing card (supersede behind a manual Ask) is not a new card to
@@ -583,25 +581,14 @@ export class QuestionScheduler {
       }
       return this.wait(job);
     }
-    this.note(finalAt, true, detection.source, reason, 'answer');
+    this.note(t.finalAt, true, detection.source, reason, 'answer');
     await this.run(job);
   }
 
   /** Re-answer `target` with new wording on the same card. */
-  private async supersede(
-    target: QuestionJob,
-    text: string,
-    tcIds: string[],
-    finalAt: number,
-    why: string,
-  ): Promise<void> {
-    target.text = text;
-    target.words = turnWords(text);
-    target.transcriptChunkIds.push(...tcIds);
-    target.finalAt = finalAt;
-    target.decidedAt = this.deps.now();
-    this.setLast(target);
-    this.note(finalAt, true, 'scheduler', why, 'superseded');
+  private async supersede(target: QuestionJob, t: Turn, why: string): Promise<void> {
+    this.revise(target, t);
+    this.note(t.finalAt, true, 'scheduler', why, 'superseded');
     this.missAfterRun.delete(target.seq); // it is answered with this wording instead
     if (target.state === 'queued') return this.wait(target);
     // A missed card not on screen yet (deferred while a stream holds the
@@ -625,7 +612,7 @@ export class QuestionScheduler {
       if (epoch !== this.epoch) {
         // Paused (maybe resumed) meanwhile: never started automatically —
         // a missed card with the revised wording, on its own card (§6).
-        this.note(finalAt, true, 'scheduler', `missed-paused-${why}`, 'missed');
+        this.note(t.finalAt, true, 'scheduler', `missed-paused-${why}`, 'missed');
         this.miss(target, 'paused');
         this.pump();
         return;
@@ -670,11 +657,12 @@ export class QuestionScheduler {
   }
 
   /** `last` is the NEWEST question — the continuation target and the
-   *  "has the conversation moved on" reference. Only a question at least as
-   *  new as the current one replaces it: a queued question starting late, or
-   *  an older late verdict, never takes it from a newer one. */
+   *  "has the conversation moved on" reference. Newest by ARRIVAL order (the
+   *  latest turn that contributed to it), never by timestamp: two finals can
+   *  share a millisecond. Only a strictly newer question replaces it, so a
+   *  queued older question starting, or an older late verdict, never does. */
   private setLast(job: QuestionJob): void {
-    if (!this.last || this.last === job || job.finalAt >= this.last.finalAt) this.last = job;
+    if (!this.last || this.last === job || job.arrival > this.last.arrival) this.last = job;
   }
 
   private pump(): void {
