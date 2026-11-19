@@ -65,6 +65,32 @@ function completeRun(): Evidence {
 const codes = (e: Evidence) => validateEvidence(e).issues.map((i) => i.code);
 
 describe('PERF-01 live evidence check', () => {
+  it('reads the real metrics IPC envelope, retaining its all-turn decision summary', () => {
+    const e = completeRun();
+    for (const s of e.summaries) s.summary = JSON.parse(JSON.stringify({ summary: s.summary, samples: 31, hardware: { cpu: 'Synthetic CPU', cores: 4, memoryGb: 16, platform: 'test' } }));
+    const v = validateEvidence(e);
+    expect(v.issues).toEqual([]);
+    expect(v.decisionsAllTurns).toMatchObject({ n: 40, p50: 300, p95: 900 }); // the worst warm block, not an invented merged percentile
+  });
+
+  it('rejects missing/empty nested decision data rather than inventing it from question records', () => {
+    const e = completeRun();
+    for (const s of e.summaries) s.summary = JSON.parse(JSON.stringify({ summary: { decisions: { n: 0, p50: null, p95: null } }, samples: 31 }));
+    expect(validateEvidence(e).issues.map(i => i.code)).toContain('decision-evidence-missing');
+  });
+
+  it('rejects incomplete and ambiguous all-turn summaries', () => {
+    for (const payload of [
+      { summary: { decisions: { n: 1, p50: 10, p95: 20 } } },
+      { decisions: { n: 40, p50: 300, p95: 900 }, summary: { decisions: { n: 40, p50: 10, p95: 20 } } },
+      { summary: { decisions: { n: 40 } } },
+    ]) {
+      const e = completeRun();
+      e.summaries[0].summary = JSON.parse(JSON.stringify(payload));
+      expect(validateEvidence(e).issues.map(i => i.code)).toContain('decision-evidence-missing');
+    }
+  });
+
   it('control: a complete run is valid, and only then can its verdicts read "met"', () => {
     const e = completeRun();
     const v = validateEvidence(e);

@@ -123,7 +123,14 @@ export interface BlockSummaryFile {
   runId: string;
   block: string;
   pid: number | null;
-  summary?: { decisions?: StageSummary };
+  summary?: {
+    /** Legacy direct summary from the old test AppPort. */
+    decisions?: StageSummary;
+    /** Real api.metrics.latency() snapshot returned by the preload bridge. */
+    summary?: { decisions?: StageSummary };
+    samples?: number;
+    hardware?: unknown;
+  };
 }
 
 /** The meter's ledger (scripts/perf01/meter-core.cjs). */
@@ -304,8 +311,13 @@ export function validateEvidence(e: Evidence): Validated {
   const noDecisions: string[] = [];
   for (const b of m.blocks.filter((x) => x.kind === 'warm')) {
     const s = e.summaries.find((x) => x.runId === m.runId && x.block === b.block);
-    const d = s?.summary?.decisions;
-    if (!s || !d || d.n === 0 || d.p95 === null) noDecisions.push(b.block);
+    const root = s?.summary;
+    const ambiguous = !!root?.decisions && !!root?.summary;
+    const d = root?.summary?.decisions ?? root?.decisions;
+    const minimumTurns = b.fixtures.length + (b.warmup ? 1 : 0);
+    if (!s || ambiguous || !d || !Number.isInteger(d.n) || d.n < minimumTurns ||
+        typeof d.p50 !== 'number' || !Number.isFinite(d.p50) || d.p50 < 0 ||
+        typeof d.p95 !== 'number' || !Number.isFinite(d.p95) || d.p95 < d.p50) noDecisions.push(b.block);
     else {
       if (s.pid !== (lastLog.get(b.block)?.pid ?? null)) noDecisions.push(`${b.block} (summary from another process)`);
       decisions.push(d);

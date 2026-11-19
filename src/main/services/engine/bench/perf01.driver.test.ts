@@ -170,7 +170,7 @@ class FakeApp implements AppPort {
   readiness = async () => ({ chat: { ready: true, provider: 'openai' }, routes: { answer: 'openai', classify: 'openai', parsing: 'openai' }, retrieval: { mode: 'embeddings' }, transcription: { engine: 'cloud' } });
   profiles = async () => [{ id: 'p1' }];
   overlayVisibility = async () => 'visible';
-  latencySummary = async () => ({ decisions: { n: 3, p50: 10, p95: 20 } });
+  latencySummary = async () => ({ summary: { decisions: { n: 3, p50: 10, p95: 20 } }, samples: 2, hardware: { cpu: 'Fake CPU', cores: 4, memoryGb: 16, platform: 'test' } });
   wait = async (ms: number) => this.advance(this.t + ms);
   now = () => this.t;
 }

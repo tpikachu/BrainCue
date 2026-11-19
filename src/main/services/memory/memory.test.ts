@@ -317,6 +317,20 @@ describe('review lifecycle', () => {
 });
 
 describe('scoped hybrid recall', () => {
+  it.each([
+    'Would you consider relocation for this role?',
+    'Could you tell me about relocation?',
+    'Please describe your relocation constraints.',
+  ])('lexical-only recall ignores question boilerplate: %s', async (query) => {
+    const pid = seedProfile();
+    const id = seedApproved(pid, 'For relocation questions: open to relocating to Rotterdam from June; not open to full-time travel.');
+    seedApproved(pid, 'For compensation questions: target base salary of 160000 euros.');
+    const out = await recallMemories(pid, query, null, T0, { lexicalOnly: true });
+    expect(out.map((m) => m.id)).toEqual([id]);
+    expect(h.embedCalls).toBe(0);
+    expect(await recallMemories(pid, 'Would you consider a quarterly budget?', null, T0, { lexicalOnly: true })).toEqual([]);
+  });
+
   it('approved-only, scope-aware, expiry- and identity-filtered, capped, floor-gated', async () => {
     const pid = seedProfile();
     const p1 = seedPack(pid);

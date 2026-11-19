@@ -23,7 +23,10 @@ const STOPWORDS = new Set(
     'i me my mine you your yours he him his she her hers it its we us our ours ' +
     'they them their theirs of for to in on at by with and or but so if then ' +
     'about into over under again further once no not only own same too very can ' +
-    'will just should now'
+    // Polite question framing is not evidence about a memory's subject.
+    // Counting it as unseen/rare diluted an exact relocation anchor below
+    // the lexical floor in "Would you consider relocation for this role?".
+    'will just should now would could might please tell describe explain discuss consider'
   ).split(' '),
 );
 

@@ -453,6 +453,21 @@ describe('PERF-01 offline benchmark — SIMULATED (perf01-v1 fixtures)', () => {
     }, 120_000);
   }
 
+  it('every General and Technical fixture keeps its fact when semantic retrieval is late and no interim is available', async () => {
+    h.format = 'scenario';
+    for (const [set, format] of [[GENERAL, 'general'], [TECHNICAL, 'technical']] as const) {
+      const sid = engine.start(profileId, 'general', packId, format).id;
+      for (const q of set) {
+        const id = `lexical-${q.id}`;
+        const r = await ask({ id, text: q.text }, { interim: false, stall: true });
+        expect(r.groundingDeadlineHit, id).toBe(true);
+        expect(section(promptFor(q.text), q.source), `${id}: ${q.source}`).toContain(q.fact);
+        await vi.advanceTimersByTimeAsync(MODEL.GAP);
+      }
+      engine.stop(sid);
+    }
+  }, 120_000);
+
   it('follow-up keeps its subject, a topic change drops it — with no interim and with a stalled embedding', async () => {
     h.format = 'scenario';
     const sid = engine.start(profileId, 'general', packId, 'general').id;

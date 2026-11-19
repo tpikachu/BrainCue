@@ -8,7 +8,7 @@ scope freeze for these requirements. The existing preview stays published.
 | Checkpoint | Required behavior | State |
 | --- | --- | --- |
 | S1 — Role résumé | Create/edit offers Default résumé or upload/paste a different résumé. Only this role uses it; saving/replacing/removing it updates grounding, including cached lookups. Setup, prep and Resume use the selected role's context. Existing roles inherit their current behavior. | Implemented and verified offline: nullable Space field/migration, isolated indexing/cache validation, actual save/brief/tailor handlers including failures, real-engine prompt/Resume test, and four renderer cases. |
-| S2 — Interview speed | Normal General/short Technical cues use low-latency defaults and a short bounded context wait; coding keeps deeper models and a longer allowance. Preserve résumé/JD/session grounding, candidate speech, ordering, consent, explicit overrides and same-provider retry. | Implemented and verified offline: 350 ms context wait with local ranking fallback; 2.5 s coding allowance. Fast policy defaults, explicit overrides and same-provider retries tested. Live provider/paint latency remains unmeasured. |
+| S2 — Interview speed | Normal General/short Technical cues use low-latency defaults and a short bounded context wait; coding keeps deeper models and a longer allowance. Preserve résumé/JD/session grounding, candidate speech, ordering, consent, explicit overrides and same-provider retry. | Offline implementation verified. The approved live run completed, but warm General/Technical both miss the latency targets, and G11 misses one memory. Recall/report corrections are under validation; provider latency remains the main bottleneck. See the live diagnostic report below. |
 | S3 — Stable release | Independently review S1/S2, run full offline checks and measured live General/Technical acceptance. Publish 2.3.0 as latest only after the two changes are validated. | Pending. The user authorized this conditional stable release; no version/tag/latest change yet. Paid live benchmark and user audio are not started implicitly. |
 
 Current owner: Codex is implementing and verifying these changes locally.
@@ -29,14 +29,17 @@ that commit (run `44616615171`). The opt-in driver's **offline dry run passes
 2/2** with the guard active, two metered processes and no provider requests;
 output: `bench-results/perf01/dry-stable23-44ad736-20261119-151340/`.
 The benchmark key is available (presence checked only, value not printed).
-Paid-run approval is pending in the user prompt; no live run has begun.
+The user subsequently approved the paid run; it completed all 72 questions.
 
-The next required step is the explicit opt-in measured run in
-`docs/benchmarks/PERF01-LIVE-PLAN.md`: synthetic data, pinned OpenAI route,
-72 questions, at most 673,000 reserved tokens / 678 requests / 900 seconds
-synthetic STT. This has not been run or authorized; no user microphone or
-capture is implied by the stable-release request. Stable promotion remains
-conditional on measured results, not these offline timings.
+The approved run used 352,731 reserved tokens, 434 requests and 384.2 seconds
+of synthetic STT, with no refusals. No microphone or native capture opened.
+The run is **not acceptance**: the evidence check rejects one grounding miss,
+and diagnostic warm p50/p95 are 2.387/3.755 seconds (General) and 2.714/4.021
+seconds (Technical). The report decoder's real-IPC envelope mismatch is fixed
+without changing raw evidence. See [the measured result](benchmarks/PERF01-2026-11-19.md).
+The original 72-question approval is consumed. Any further paid run requires
+new approval after a concrete correction/plan is ready. Stable promotion stays
+blocked; the draft PR and published preview do not change.
 
 **Current preview status (2026-11-19):**
 [2.3.0-preview.1](https://github.com/tpikachu/BrainCue/releases/tag/v2.3.0-preview.1)
