@@ -13,6 +13,8 @@ name: Release
 #
 # You can also run it manually (Actions tab -> Release -> Run workflow) to build
 # installers WITHOUT publishing — they're attached as downloadable artifacts.
+# Prerelease tags are published separately with verified, platform-specific
+# assets. Do not rebuild or publish the three-platform stable release for them.
 
 on:
   push:
@@ -29,6 +31,7 @@ concurrency:
 
 jobs:
   build:
+    if: ${{ github.event_name == 'workflow_dispatch' || !contains(github.ref_name, '-') }}
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:

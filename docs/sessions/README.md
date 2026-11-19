@@ -10,6 +10,7 @@ notes; this folder is the developer-facing running log.
 
 | Date | Summary |
 | --- | --- |
+| [2026-11-19](./2026-11-19.md) | M7.2b evidence corrections and registration; Windows 2.3.0-preview.1 release preparation with unmeasured live performance disclosed |
 | [2026-11-18](./2026-11-18.md) | M3 review rounds 6–7 (stable arrival order; one `revise()`); M4: whole spoken turns searchable past char 600 and after resume, spoken-time transcript order, coaching on captured speech not suggestions; M5: one Start interview, readiness from main everywhere (non-OpenAI + local STT is complete), two-action returning start, interview-only lists |
 | [2026-11-17](./2026-11-17.md) | Interview-first cycle: rule+model question detection with an explicit scheduling policy; bounded session context (said vs suggested); provider-aware Fast/Balanced/Quality models with discovery + bounded failover; per-capability readiness (no OpenAI key required); interview-first Home/start/Cue Card. Root cause of missed questions: retired gpt-4.1-nano classifier |
 | [2026-10-07](./2026-10-07.md) | Answer styles: General \| Technical replace the five formats + the Cue Card type dropdown; behavioral story shape automatic via `questionType`; legacy values mapped |

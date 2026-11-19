@@ -662,7 +662,7 @@ as the question 1.2 s before the final for two of every three questions.
 | p50 | 1 700 ms | 1 000 ms |
 | p95 | 11 800 ms | 2 300 ms |
 | max | 13 000 ms | 3 500 ms |
-| embedding calls | 60 | 30 |
+| embedding calls per 30-question category | 60 | 30 |
 
 On this model the pipeline now adds nothing to the provider's first token
 when context was gathered on the interim, one embedding round trip when
