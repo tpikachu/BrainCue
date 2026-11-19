@@ -515,7 +515,16 @@ export class EngineSession {
     const words = turnWords(interim);
     if (words.length < 4) return;
     if (this.prefetch && words.length < this.prefetch.words.length * 1.5) return;
-    if (evaluateTurnHeuristics(interim).type !== 'question') return;
+    // An interview's prompts are often instructions, not questions: "Tell me
+    // about a time…", "Walk me through…". The meeting rule reads those as
+    // ambiguous (no "?"), so they never prefetched and paid the embedding
+    // after the final (M7.2b fixtures: every "Tell me about…" question).
+    // Q&A modes also accept the interview rule's verdict; a fragment
+    // ("Walk me through the") still waits.
+    const reads =
+      evaluateTurnHeuristics(interim).type === 'question' ||
+      (this.scheduler !== null && assessUtterance(interim).verdict === 'question');
+    if (!reads) return;
     const session = persist.sessionRow(this.sessionId);
     if (!session) return;
     // Memory recall rides along (M7.2b): it used to start only after the

@@ -148,6 +148,19 @@ describe('prefetchGrounding', () => {
     s.prefetchGrounding('We shipped the new onboarding flow last Tuesday and it went fine');
     expect(h.groundCalls).toEqual([]);
   });
+
+  // M7.2b: interview prompts phrased as instructions, without a "?", used
+  // to wait for the final — the meeting rule read them as ambiguous.
+  it('an interview prompt without a question mark ("Tell me about…", "Walk me through…") prefetches; a fragment does not', () => {
+    const s = session();
+    s.prefetchGrounding('Walk me through the'); // a fragment — wait for the rest
+    expect(h.groundCalls).toEqual([]);
+    s.prefetchGrounding('Tell me about a time you disagreed with your manager');
+    expect(h.groundCalls).toEqual(['Tell me about a time you disagreed with your manager']);
+    const t = session();
+    t.prefetchGrounding('Walk me through how you would design a rate limiter');
+    expect(h.groundCalls).toHaveLength(2);
+  });
 });
 
 /** The classifier's question type reaches the mode's generate (so a behavioral
