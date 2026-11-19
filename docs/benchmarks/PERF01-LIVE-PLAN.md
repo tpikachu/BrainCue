@@ -189,6 +189,8 @@ Do not use `npm run test:e2e:live` for this: it also runs the other live specs. 
 
 **Stopping.** The tests run in series, so a failed test skips every later one. The driver also enforces this itself: any unsuccessful block (preflight failed, a cap, in-flight work, a driver error) saves its evidence, stops its session and then **fails its test**. No later block of the run starts once one has stopped. The report then shows the run as incomplete.
 
+**Only the active mode's tests exist.** A live run registers the seed and the 12 blocks. A dry run registers the seed and the dry check. An inactive test is never registered and then skipped: Playwright sets up a test's app fixture before its body runs, so it would launch a metered app process that belongs to no block. The evidence check rejects such a process (`process-unexpected`).
+
 ## 7. Evidence, and the check before any verdict
 
 Evidence goes to `bench-results/perf01/live-<stamp>/`. That folder is gitignored and outside `test-results/`, which Playwright clears on every run.
@@ -289,6 +291,10 @@ The handoff carries `report.md`, the commit, and `run-notes.md` (network, prices
   - the next fixture is not sent while a replacement is running;
   - a folder that already holds a manifest is refused.
 - **Playwright's serial mode**, checked on a throwaway spec with this suite's layout: after a failed block, every later test did not run.
+- **Registration** (`e2e/perf01-register.spec.ts`, in the offline E2E tier): the real registration runs under Playwright with a fake app fixture that records which tests initialize it.
+  - Live mode initializes the app only for the seed and the 12 blocks, which all run.
+  - Dry mode initializes it only for the seed and the dry check.
+  - Without the live flag or a key, nothing initializes.
 - **The dry run passes**, under the offline guard:
   - the seed in one process;
   - a fresh process on its copy, which sees the profile and has an empty latency file;
@@ -296,5 +302,6 @@ The handoff carries `report.md`, the commit, and `run-notes.md` (network, prices
   - its window snapshot from that process, with every window on the secondary display;
   - 61 audio files, 1–10 s each;
   - the report gate rejecting the unrun folder;
-  - a second run on the same folder refused before anything launches.
+  - a second run on the same folder refused before anything launches;
+  - exactly 2 metered processes (the seed and the dry check), with no test skipped.
 - **Not yet exercised:** the live session start, real STT, the paint reports in a visible Cue Card, and real provider traffic through the meter. The first live block's preflight and stop conditions cover them.

@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test, expect, hasKey, setApiKey, type Page } from './fixtures';
+import { registerPerf01 } from './perf01-register';
 import { MEMORIES, PROFILE, SPACE } from '../src/main/services/engine/bench/perf01.fixtures';
 import {
   audioFor,
@@ -148,32 +149,21 @@ function pageApp(dashboard: Page): AppPort {
 
 const git = (args: string[]) => execFileSync('git', args, { encoding: 'utf8' }).trim();
 
-test.describe('PERF-01 live benchmark', () => {
-  test.skip(!CFG.dry && (!LIVE || !hasKey), 'Live PERF-01 runs only with PERF01_LIVE=1, a key, and the approved plan.');
-  if (CFG.dry) test.use({ live: false }); // offline: the guard refuses every request
-  test.use({ mainPreloads: [METER], appEnv: meterEnv(CFG) });
-  test.describe.configure({ mode: 'serial' });
-
-  // One run, one configuration: a folder that already holds a manifest is refused.
-  test.beforeAll(() => {
-    bindRun(CFG, { commit: git(['rev-parse', 'HEAD']), dirty: git(['status', '--porcelain']).split('\n').filter(Boolean).length });
-  });
-
-  test.describe('seed', () => {
-    test.use({ userDataDir: paths(CFG).seed });
-    test('seed: the synthetic profile, Space and memories, set up once', async ({ dashboard }) => {
-      test.setTimeout(5 * 60_000);
+// Registration lives in perf01-register.ts, tested offline in
+// perf01-register.spec.ts: only the active mode's tests are registered, so an
+// inactive one never launches the app (a metered process outside any block).
+registerPerf01<Page>(
+  test,
+  { dry: CFG.dry, live: LIVE, hasKey },
+  {
+    // One run, one configuration: a folder that already holds a manifest is refused.
+    bind: () => void bindRun(CFG, { commit: git(['rev-parse', 'HEAD']), dirty: git(['status', '--porcelain']).split('\n').filter(Boolean).length }),
+    seed: async (dashboard) => {
       const seed = await seedRun(pageApp(dashboard), CFG, Date.now());
       expect(seed.profileId).toBeTruthy();
       expect(seed.packId).toBeTruthy();
-    });
-  });
-
-  test.describe('blocks', () => {
-    test.use({ seedUserData: paths(CFG).seed });
-
-    test('dry run: seed copy, meter binding, window snapshot, audio and the report gate (offline)', async ({ dashboard }, info) => {
-      test.skip(!CFG.dry, 'PERF01_DRY=1 only');
+    },
+    dry: async (dashboard, info) => {
       const ids = [WARMUP_ID, ...GENERAL.map((q) => q.id), ...TECHNICAL.map((q) => q.id)];
       const audio = audioFor(CFG, ids);
       for (const [id, b64] of Object.entries(audio)) {
@@ -203,28 +193,13 @@ test.describe('PERF-01 live benchmark', () => {
       expect(validated.issues.map((i) => i.code)).toEqual(expect.arrayContaining(['dry-run', 'block-missing', 'fixture-missing']));
       expect(report.verdicts.general.usefulP50).not.toBe('met');
       writeFileSync(join(CFG.out, 'dry.json'), JSON.stringify({ questions: Object.keys(audio).length, meter: m, windows: snap, issues: validated.issues.map((i) => i.code) }, null, 2));
-    });
-
-    test('warm General: one warm-up, then G01–G30', async ({ dashboard }, info) => {
-      test.skip(CFG.dry, 'live only');
-      test.setTimeout(45 * 60_000);
-      await runBlock(pageApp(dashboard), CFG, 'warm-general', resolve(info.outputDir, 'userData'));
-    });
-
-    test('warm Technical: one warm-up, then T01–T30', async ({ dashboard }, info) => {
-      test.skip(CFG.dry, 'live only');
-      test.setTimeout(45 * 60_000);
-      await runBlock(pageApp(dashboard), CFG, 'warm-technical', resolve(info.outputDir, 'userData'));
-    });
-
-    // Each test is a fresh app process (its own copy of the seed), so its one
-    // question is that process's first answer: a cold start.
-    for (let i = 1; i <= 10; i++) {
-      test(`cold start ${i}: a fresh process`, async ({ dashboard }, info) => {
-        test.skip(CFG.dry, 'live only');
-        test.setTimeout(5 * 60_000);
-        await runBlock(pageApp(dashboard), CFG, `cold-${i}`, resolve(info.outputDir, 'userData'));
-      });
-    }
-  });
-});
+    },
+    block: async (dashboard, info, block) => void (await runBlock(pageApp(dashboard), CFG, block, resolve(info.outputDir, 'userData'))),
+  },
+  {
+    all: { mainPreloads: [METER], appEnv: meterEnv(CFG) },
+    dry: { live: false }, // offline: the guard refuses every request
+    seed: { userDataDir: paths(CFG).seed },
+    blocks: { seedUserData: paths(CFG).seed },
+  },
+);

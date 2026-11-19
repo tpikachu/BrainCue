@@ -113,6 +113,10 @@ Three tiers, kept apart:
     called. The spec only registers tests and adapts the pages to the driver's `AppPort`; the
     driver itself (`src/main/services/engine/bench/perf01.driver.ts`) is unit-tested against a
     fake app. Every run needs a new `PERF01_OUT`.
+  - `perf01-register.spec.ts` (M7.2b): the PERF-01 suite's registration (`perf01-register.ts`,
+    which `live-perf01.spec.ts` uses), run under Playwright with a fake app fixture. Only the
+    active mode's tests may initialize the app: live, the seed and the 12 blocks; dry, the seed
+    and the dry check; neither, nothing. Launches no Electron, browser or provider.
   - `useful-paint.spec.ts` (M7.2b, PERF-01) — the Cue Card reports the first USEFUL paint
     only once the painted text holds a real word. A bare `**` or a bullet marker split
     across tokens is not reported; one report per card, and again after a regenerate.
