@@ -2,8 +2,8 @@ import type { Row } from '../metrics/report';
 
 /**
  * PERF-01 live driver: which latency record belongs to which fixture
- * (e2e/live-perf01.spec.ts). Pure, so the real collection code is tested
- * offline (perf01.collect.test.ts).
+ * (bench/perf01.driver.ts). Pure, so the real collection code is tested
+ * offline (perf01.collect.test.ts, perf01.driver.test.ts).
  *
  * A record never names its fixture: the app's latency file holds ids and
  * times only. A record is ATTRIBUTED by:
@@ -18,6 +18,14 @@ import type { Row } from '../metrics/report';
  *
  * So a late record for A that is written while B is being asked is still
  * A's. It is never "the newest row", which used to make it B's sample.
+ *
+ * **Takes.** A record is written only when a take FINISHES. A corrected
+ * question starts a new take on the same card while the earlier take's
+ * finished record stays in the file. So a question is finished only when
+ * its CURRENT take is: the latest take main announced for the card
+ * (`latencyTake`, seen by the driver in the Cue Card page), or a later one
+ * in the file. An earlier finished take is never the sample, and never
+ * makes the question look settled.
  */
 
 export interface FixtureText {
@@ -34,7 +42,13 @@ export interface FixtureWindow {
 /** A question the app detected and opened a card for. */
 export interface DetectedQuestion {
   id: string;
+  /** Its latest wording (the card title, revisions included). */
   text: string;
+  /** When the card opened (same clock as the records). */
+  at?: number;
+  /** The latest take main announced for its card (`latencyTake`). This is
+   *  how a replacement take that is still running is seen at all. */
+  take?: number;
 }
 
 export type AttributionHow = 'text' | 'window' | 'window-weak-text' | 'none';
@@ -75,9 +89,9 @@ export function matchScore(detected: string, fixtureText: string): number {
   return words.filter((w) => target.has(w)).length / words.length;
 }
 
-function windowOf(finalAt: number, windows: FixtureWindow[]): string | null {
+function windowOf(at: number, windows: FixtureWindow[]): string | null {
   const sorted = [...windows].sort((a, b) => a.audioStartAt - b.audioStartAt);
-  for (let i = sorted.length - 1; i >= 0; i--) if (finalAt >= sorted[i].audioStartAt) return sorted[i].id;
+  for (let i = sorted.length - 1; i >= 0; i--) if (at >= sorted[i].audioStartAt) return sorted[i].id;
   return null;
 }
 
@@ -101,35 +115,60 @@ export function attributeAll(rows: Row[], questions: Map<string, DetectedQuestio
   return rows.map((r) => attribute(r, questions, fixtures, windows));
 }
 
+/** A detected question's own attribution (before any record of it exists). */
+function attributeQuestion(q: DetectedQuestion, questions: Map<string, DetectedQuestion>, fixtures: FixtureText[], windows: FixtureWindow[]): Attribution {
+  return attribute({ questionId: q.id, take: q.take ?? 0, finalAt: q.at ?? Number.POSITIVE_INFINITY }, questions, fixtures, windows);
+}
+
+/** The question's current take: the latest announced, or a later one on file. */
+export function currentTake(questionId: string, rows: Row[], q?: DetectedQuestion): number {
+  return Math.max(q?.take ?? 0, ...rows.filter((r) => r.questionId === questionId).map((r) => r.take));
+}
+
+/** The finished record of the question's current take, if it has one. */
+export function currentRecord(questionId: string, rows: Row[], q?: DetectedQuestion): Row | null {
+  const take = currentTake(questionId, rows, q);
+  return rows.find((r) => r.questionId === questionId && r.take >= take && r.outcome && r.outcome !== 'superseded') ?? null;
+}
+
 export interface SamplePick {
-  /** The fixture's sample: its first detected question, that question's latest take. */
+  /** The question the fixture is sampled on: the first one detected for it. */
+  questionId: string | null;
+  /** That question's CURRENT take, finished. Null while it is still running. */
   sample: Row | null;
+  /** The chosen question's current take has not finished (a replacement in flight). */
+  pending: { questionId: string; take: number } | null;
   /** Other questions attributed to the fixture (a split final), not sampled. */
   extraQuestions: string[];
+  /** Earlier takes written as superseded, across the fixture's questions. */
   superseded: number;
 }
 
-/** The sample for one fixture among every record attributed to it. */
-export function pickSample(rows: Row[], attributions: Attribution[], fixtureId: string): SamplePick {
+/** The sample for one fixture among every record and detected question attributed to it. */
+export function pickSample(rows: Row[], attributions: Attribution[], fixtureId: string, questions: Map<string, DetectedQuestion> = new Map(), fixtures: FixtureText[] = [], windows: FixtureWindow[] = []): SamplePick {
   const mine = rows.filter((_, i) => attributions[i].fixtureId === fixtureId);
+  const ids = new Set(mine.map((r) => r.questionId));
+  for (const q of questions.values()) if (attributeQuestion(q, questions, fixtures, windows).fixtureId === fixtureId) ids.add(q.id);
   const superseded = mine.filter((r) => r.outcome === 'superseded').length;
-  const finished = mine.filter((r) => r.outcome && r.outcome !== 'superseded');
-  const byQuestion = new Map<string, Row[]>();
-  for (const r of finished) byQuestion.set(r.questionId, [...(byQuestion.get(r.questionId) ?? []), r]);
-  const firstFinal = (rs: Row[]) => Math.min(...rs.map((r) => r.finalAt));
-  const ordered = [...byQuestion.entries()].sort((a, b) => firstFinal(a[1]) - firstFinal(b[1]));
-  if (!ordered.length) return { sample: null, extraQuestions: [], superseded };
-  const [, takes] = ordered[0];
-  const sample = takes.reduce((best, r) => (r.take > best.take ? r : best));
-  return { sample, extraQuestions: ordered.slice(1).map(([id]) => id), superseded };
+  const firstSeen = (id: string) => Math.min(questions.get(id)?.at ?? Number.POSITIVE_INFINITY, ...mine.filter((r) => r.questionId === id).map((r) => r.finalAt));
+  const ordered = [...ids].sort((a, b) => firstSeen(a) - firstSeen(b));
+  if (!ordered.length) return { questionId: null, sample: null, pending: null, extraQuestions: [], superseded };
+  const [chosen, ...extra] = ordered;
+  const sample = currentRecord(chosen, rows, questions.get(chosen));
+  return {
+    questionId: chosen,
+    sample,
+    pending: sample ? null : { questionId: chosen, take: currentTake(chosen, rows, questions.get(chosen)) },
+    extraQuestions: extra,
+    superseded,
+  };
 }
 
-/** Every detected question has a finished (non-superseded) record: no
- *  answer of this block is still in flight, so the next fixture's timing
- *  cannot be slowed or taken over by an earlier one. */
+/** Questions whose current take has not finished. When there are none, no
+ *  answer of this block is in flight, so the next fixture's timing cannot be
+ *  slowed or taken over by an earlier one. */
 export function unsettled(rows: Row[], questions: Map<string, DetectedQuestion>): string[] {
-  const finished = new Set(rows.filter((r) => r.outcome && r.outcome !== 'superseded').map((r) => r.questionId));
-  return [...questions.keys()].filter((id) => !finished.has(id));
+  return [...questions.values()].filter((q) => !currentRecord(q.id, rows, q)).map((q) => q.id);
 }
 
 export interface CollectDeps {
@@ -139,28 +178,23 @@ export interface CollectDeps {
   sleep(ms: number): Promise<void>;
 }
 
-export interface Collected {
-  sample: Row | null;
+export interface Collected extends SamplePick {
   attribution: Attribution | null;
-  extraQuestions: string[];
-  superseded: number;
   timedOut: boolean;
 }
 
-/** Wait for THIS fixture's record: attributed to it, finished. Records for
- *  any other fixture are ignored here (they are kept in the raw file and
- *  written to attribution.jsonl at the end of the block). */
+/** Wait for THIS fixture's sample: its first question's current take,
+ *  finished. Records for any other fixture are ignored here. The block's
+ *  lines are finalized from all the raw evidence at its end (driver
+ *  `reconcileBlock`), so a take that finishes later is still the one saved. */
 export async function collectAnswer(deps: CollectDeps, fixture: FixtureText, fixtures: FixtureText[], windows: FixtureWindow[], timeoutMs: number, pollMs = 250): Promise<Collected> {
   const deadline = deps.now() + timeoutMs;
   for (;;) {
     const rows = deps.readRows();
     const questions = await deps.readQuestions();
     const attributions = attributeAll(rows, questions, fixtures, windows);
-    const pick = pickSample(rows, attributions, fixture.id);
-    if (pick.sample) {
-      const i = rows.indexOf(pick.sample);
-      return { ...pick, attribution: attributions[i], timedOut: false };
-    }
+    const pick = pickSample(rows, attributions, fixture.id, questions, fixtures, windows);
+    if (pick.sample) return { ...pick, attribution: attributions[rows.indexOf(pick.sample)], timedOut: false };
     if (deps.now() >= deadline) return { ...pick, attribution: null, timedOut: true };
     await deps.sleep(pollMs);
   }

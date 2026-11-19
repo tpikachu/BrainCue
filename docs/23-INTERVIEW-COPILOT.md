@@ -723,6 +723,18 @@ fixtures and the live plan are synthetic and shared:
     fixture by the question the app detected, or by its final's time window
     when it has no text. It is never matched by row order. The driver waits
     for earlier answers to finish before the next question.
+  - **Takes:** a question is finished only when its CURRENT take is (the
+    latest `latencyTake` the Cue Card was told). An earlier finished take
+    never stands in for a running correction. Each block's lines are
+    reconciled at its end from all the raw evidence, with the sampled
+    take's own grounding.
+  - **One run, one configuration** (`bench/perf01.driver.ts`): the manifest
+    binds the folder, and a reused folder is refused. The meter must have
+    installed the manifest's caps before anything is spent. The report
+    rejects totals over the caps, other installed caps, missing or extra
+    metered processes, and a ledger that disagrees with its log.
+  - **A failed block fails:** its evidence is saved and its session
+    stopped, then its test fails. No later block of the run starts.
   - **Budget** (`scripts/perf01/live-meter.cjs`, `bench/perf01.budget.ts`):
     a meter in main reserves every provider request's upper bound before it
     is sent, across all processes, and refuses past the caps. That includes

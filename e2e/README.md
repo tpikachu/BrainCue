@@ -110,7 +110,9 @@ Three tiers, kept apart:
     and runs each block on a copy (`userDataDir` / `seedUserData`). `PERF01_DRY=1` checks it
     offline, under the guard: the seed and its copy, the meter's ledger and window snapshot,
     the locally synthesized audio and the report gate. No session starts and no provider is
-    called.
+    called. The spec only registers tests and adapts the pages to the driver's `AppPort`; the
+    driver itself (`src/main/services/engine/bench/perf01.driver.ts`) is unit-tested against a
+    fake app. Every run needs a new `PERF01_OUT`.
   - `useful-paint.spec.ts` (M7.2b, PERF-01) — the Cue Card reports the first USEFUL paint
     only once the painted text holds a real word. A bare `**` or a bullet marker split
     across tokens is not reported; one report per card, and again after a regenerate.

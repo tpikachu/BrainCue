@@ -137,11 +137,32 @@ export interface MeterState {
   models: Record<string, number>;
   stt: { model: string | null; vad: string | null; prefixPaddingMs: number | null; silenceDurationMs: number | null } | null;
   capped: { reason: string; cls: string; at: number } | null;
-  processes: { pid: number; startedAt: number }[];
+  /** Every app process the meter was loaded in, with the caps it installed. */
+  processes: { pid: number; startedAt: number; caps?: { tokens: number; requests: number; sttSeconds: number } }[];
 }
+
+/** One line of the meter's request log (ledger/requests.jsonl). */
+export interface RequestLogEntry {
+  at: number;
+  pid: number;
+  via: string;
+  cls?: string;
+  model?: string | null;
+  reservedPromptTokens?: number;
+  reservedCompletionTokens?: number;
+  sent: boolean;
+  refused?: string;
+}
+
+/** The caps a run installs in the meter, and how many questions it may speak. */
+export const METER_CAP_KEYS = ['tokens', 'requests', 'sttSeconds'] as const;
+export const RUN_CAP_KEYS = [...METER_CAP_KEYS, 'questions'] as const;
 
 export interface Evidence {
   manifest: Manifest | null;
+  /** seed.json: the seeded ids, and the seed's app process. */
+  seed: { profileId: string; packId: string; pid: number | null } | null;
+  requests: RequestLogEntry[];
   lines: SampleLine[];
   blocks: BlockLog[];
   summaries: BlockSummaryFile[];
@@ -292,10 +313,44 @@ export function validateEvidence(e: Evidence): Validated {
   }
   add('decision-evidence-missing', noDecisions);
 
-  // The meter: present, never capped, only the reference models.
+  // The meter: present, never capped, only the reference models — and
+  // bound to THIS manifest: its caps installed in every process of the run,
+  // every total within them, and its ledger agreeing with its own log.
+  const caps = m.caps ?? {};
+  const missingCaps = RUN_CAP_KEYS.filter((k) => typeof caps[k] !== 'number');
+  add('caps-missing', missingCaps.map((k) => `manifest has no ${k} cap`));
   if (!e.meter) add('meter-missing', 'no ledger: the budget and the models sent were not observed');
   else {
     if (e.meter.capped) add('budget-capped', `${e.meter.capped.reason} (${e.meter.capped.cls}): the run stopped short`);
+    const over: string[] = [];
+    if (typeof caps.tokens === 'number' && e.meter.reservedTokens > caps.tokens) over.push(`tokens ${e.meter.reservedTokens} > ${caps.tokens}`);
+    if (typeof caps.requests === 'number' && e.meter.requests > caps.requests) over.push(`requests ${e.meter.requests} > ${caps.requests}`);
+    if (typeof caps.sttSeconds === 'number' && e.meter.sttSeconds > caps.sttSeconds) over.push(`speech-to-text ${Math.round(e.meter.sttSeconds)} s > ${caps.sttSeconds} s`);
+    const spoken = e.lines.filter((l) => l.runId === m.runId && l.outcome !== 'not-run').length;
+    if (typeof caps.questions === 'number' && spoken > caps.questions) over.push(`questions ${spoken} > ${caps.questions}`);
+    add('over-cap', over);
+    // Installed caps: every process the meter ran in, the manifest's caps.
+    add(
+      'caps-mismatch',
+      e.meter.processes
+        .filter((p) => !p.caps || METER_CAP_KEYS.some((k) => p.caps![k] !== caps[k]))
+        .map((p) => `pid ${p.pid} installed ${JSON.stringify(p.caps ?? null)}`),
+    );
+    // Coverage: the meter ran in exactly the seed's and the blocks' processes.
+    const expected = new Set<number>([...(e.seed?.pid != null ? [e.seed.pid] : []), ...[...lastLog.values()].map((l) => l.pid).filter((p): p is number => p != null)]);
+    if (!e.seed || e.seed.pid == null) add('seed-unmetered', 'seed.json names no metered process');
+    const metered = new Set(e.meter.processes.map((p) => p.pid));
+    add('meter-not-loaded', [...expected].filter((p) => !metered.has(p)).map((p) => `pid ${p}`));
+    add('process-unexpected', [...metered].filter((p) => !expected.has(p)).map((p) => `pid ${p}`));
+    // The ledger agrees with its own request log.
+    const http = e.requests.filter((r) => r.sent && (r.via === 'http' || r.via === 'https' || r.via === 'fetch'));
+    const logged = http.reduce((n, r) => n + (r.reservedPromptTokens ?? 0) + (r.reservedCompletionTokens ?? 0), 0);
+    if (http.length !== e.meter.requests || logged !== e.meter.reservedTokens)
+      add('ledger-inconsistent', `ledger ${e.meter.requests} requests / ${e.meter.reservedTokens} tokens, log ${http.length} / ${logged}`);
+    // Anything refused: a cap, capture, or a host other than the provider.
+    const refused = new Map<string, number>();
+    for (const r of e.requests.filter((x) => !x.sent)) refused.set(r.refused ?? 'unknown', (refused.get(r.refused ?? 'unknown') ?? 0) + 1);
+    add('requests-refused', [...refused.entries()].map(([why, n]) => `${why} ×${n}`));
     const allowed = new Set<string>([ref.answerModel, ref.classifyModel, ref.parsingModel, ref.embeddingModel]);
     add('model-unexpected', Object.keys(e.meter.models).filter((x) => !allowed.has(x)));
     if (e.meter.stt?.model !== ref.sttModel) add('stt-model', `speech-to-text ran ${e.meter.stt?.model ?? 'unobserved'}, reference ${ref.sttModel}`);
@@ -319,6 +374,8 @@ const readLines = <T>(file: string): T[] =>
 export function readEvidence(dir: string): Evidence {
   return {
     manifest: readJson<Manifest>(path.join(dir, 'manifest.json')),
+    seed: readJson<Evidence['seed'] & object>(path.join(dir, 'seed.json')),
+    requests: readLines<RequestLogEntry>(path.join(dir, 'ledger', 'requests.jsonl')),
     lines: readLines<SampleLine>(path.join(dir, 'rows.jsonl')),
     blocks: readLines<BlockLog>(path.join(dir, 'blocks.jsonl')),
     summaries: readdirSync(dir)

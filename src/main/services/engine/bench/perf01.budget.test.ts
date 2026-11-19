@@ -59,7 +59,7 @@ function fakeApp(ledger: { state: MeterState; caps: RunCaps; asked: number }, op
         ...(refused ? { reason: 'network' } : { firstUsefulAt: opts.paints === false ? undefined : t + 1_000 }),
         ...(opts.usage === false || refused ? {} : { promptTokens: 1_700, completionTokens: 200 }),
       };
-      return { sample, attribution: null, extraQuestions: [], superseded: 0, timedOut: false };
+      return { questionId: sample.questionId, sample, pending: null, attribution: null, extraQuestions: [], superseded: 0, timedOut: false };
     },
     record: (q, c, _at, notRun) => void lines.push({ id: q.id, outcome: notRun ? 'not-run' : (c?.sample?.outcome ?? 'no-record'), ...(notRun ? { notRun } : {}) }),
     audioSeconds: () => 4,

@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { liveReport, planRun, REFERENCE, validateEvidence, type BlockLog, type BlockSummaryFile, type Evidence, type MeterState, type PlannedBlock, type SampleLine } from './perf01.evidence';
+import { DEFAULT_CAPS } from './perf01.budget';
+import { liveReport, planRun, REFERENCE, validateEvidence, type BlockLog, type BlockSummaryFile, type Evidence, type MeterState, type PlannedBlock, type RequestLogEntry, type SampleLine } from './perf01.evidence';
 
-/** A complete, valid live run: every planned block, every fixture once. */
+/** The caps a real run installs (the driver's defaults), within which the control stays. */
+const CAPS = { ...DEFAULT_CAPS, questionTimeoutMs: 30_000, settleMs: 30_000, gapMs: 15_000 };
+const METER_CAPS = { tokens: CAPS.tokens, requests: CAPS.requests, sttSeconds: CAPS.sttSeconds };
+
+/** A complete, valid live run: every planned block, every fixture once, the
+ *  meter loaded in the seed's and every block's process with the manifest's
+ *  caps, its totals within them, and its ledger matching its request log. */
 function completeRun(): Evidence {
-  const manifest = planRun({ runId: 'run-1', commit: 'abc1234', dirty: 0, caps: { tokens: 1 }, dry: false, now: new Date(0) });
+  const manifest = planRun({ runId: 'run-1', commit: 'abc1234', dirty: 0, caps: { ...CAPS }, dry: false, now: new Date(0) });
   const blocks: BlockLog[] = [];
   const lines: SampleLine[] = [];
   const summaries: BlockSummaryFile[] = [];
@@ -37,6 +44,9 @@ function completeRun(): Evidence {
     for (const id of b.fixtures) lines.push(line(b, id, p, b.kind === 'cold'));
     if (b.kind === 'warm') summaries.push({ runId: 'run-1', block: b.block, pid: p, summary: { decisions: { n: 40, p50: 300, p95: 900 } } });
   }
+  // 400 sent requests of 750 reserved tokens each: 300,000, within 673,000.
+  const requests: RequestLogEntry[] = Array.from({ length: 400 }, (_, i) => ({ at: i, pid: 1000, via: 'https', cls: i % 2 ? 'embedding' : 'responses', reservedPromptTokens: 600, reservedCompletionTokens: 150, sent: true }));
+  const pids = [1000, ...blocks.filter((b) => b.status === 'complete').map((b) => b.pid!)];
   const meter: MeterState = {
     reservedTokens: 300_000,
     requests: 400,
@@ -47,9 +57,9 @@ function completeRun(): Evidence {
     models: { 'gpt-6-luna': 200, 'text-embedding-3-small': 190 },
     stt: { model: 'gpt-4o-transcribe', vad: 'server_vad', prefixPaddingMs: 300, silenceDurationMs: 600 },
     capped: null,
-    processes: [],
+    processes: pids.map((pid, i) => ({ pid, startedAt: i, caps: { ...METER_CAPS } })),
   };
-  return { manifest, lines, blocks, summaries, meter };
+  return { manifest, seed: { profileId: 'p', packId: 'k', pid: 1000 }, requests, lines, blocks, summaries, meter };
 }
 
 const codes = (e: Evidence) => validateEvidence(e).issues.map((i) => i.code);
@@ -94,7 +104,7 @@ describe('PERF-01 live evidence check', () => {
   });
 
   it('a live report with no evidence check at all is invalid', () => {
-    const { report } = liveReport({ manifest: null, lines: completeRun().lines, blocks: [], summaries: [], meter: null });
+    const { report } = liveReport({ manifest: null, seed: null, requests: [], lines: completeRun().lines, blocks: [], summaries: [], meter: null });
     expect(report.verdicts.general.usefulP50).not.toBe('met');
     expect(report.evidence?.issues[0].code).toBe('manifest-missing');
   });
@@ -125,6 +135,19 @@ describe('PERF-01 live evidence check', () => {
     ['no meter ledger', (e) => (e.meter = null), 'meter-missing'],
     ['a weak-text attribution', (e) => (e.lines.find((l) => l.fixtureId === 'G11')!.attribution!.how = 'window-weak-text'), 'attribution-weak'],
     ['a dry-run manifest', (e) => (e.manifest!.dry = true), 'dry-run'],
+    // The meter bound to the manifest (review of 492a6cc, finding 3).
+    ['reserved tokens over the manifest cap', (e) => (e.meter!.reservedTokens = CAPS.tokens + 1), 'over-cap'],
+    ['requests over the manifest cap', (e) => (e.meter!.requests = CAPS.requests + 1), 'over-cap'],
+    ['speech-to-text over the manifest cap', (e) => (e.meter!.sttSeconds = CAPS.sttSeconds + 1), 'over-cap'],
+    ['more questions spoken than the cap', (e) => (e.manifest!.caps.questions = 71), 'over-cap'],
+    ['a process that installed other caps', (e) => (e.meter!.processes[3].caps = { ...METER_CAPS, tokens: 10_000_000 }), 'caps-mismatch'],
+    ['a process with no installed caps recorded', (e) => delete e.meter!.processes[2].caps, 'caps-mismatch'],
+    ['a block process the meter never ran in', (e) => (e.meter!.processes = e.meter!.processes.filter((p) => p.pid !== e.blocks.find((b) => b.block === 'cold-4')!.pid)), 'meter-not-loaded'],
+    ['a metered process that is no block of this run (a reused folder)', (e) => e.meter!.processes.push({ pid: 4242, startedAt: 9, caps: { ...METER_CAPS } }), 'process-unexpected'],
+    ['a seed with no metered process', (e) => (e.seed!.pid = null), 'seed-unmetered'],
+    ['a ledger that disagrees with its request log', (e) => e.requests.pop(), 'ledger-inconsistent'],
+    ['a request refused (any reason)', (e) => e.requests.push({ at: 1, pid: 1000, via: 'socket', sent: false, refused: 'host-not-allowed' }), 'requests-refused'],
+    ['a manifest with no caps', (e) => (e.manifest!.caps = {}), 'caps-missing'],
   ];
   it.each(cases)('invalid: %s', (_name, mutate, code) => {
     const e = completeRun();
@@ -132,6 +155,17 @@ describe('PERF-01 live evidence check', () => {
     expect(codes(e)).toContain(code);
     const { report } = liveReport(e);
     expect(report.verdicts.general.usefulP50 === 'met' || report.verdicts.technical.usefulP50 === 'met').toBe(false);
+  });
+
+  it('the review case: a manifest capped at 1 token with a 300,000-token ledger is invalid, never "met"', () => {
+    const e = completeRun();
+    e.manifest!.caps = { ...e.manifest!.caps, tokens: 1 };
+    const v = validateEvidence(e);
+    expect(v.issues.map((i) => i.code)).toEqual(['over-cap', 'caps-mismatch']);
+    expect(v.issues[0].detail).toBe('tokens 300000 > 1');
+    const { report } = liveReport(e);
+    expect(report.verdicts.general.usefulP50).toBe('invalid evidence');
+    expect(report.decision).toBe('invalid evidence');
   });
 
   it('a no-record or not-run line is unanswered in the denominator (and not-run is flagged)', () => {

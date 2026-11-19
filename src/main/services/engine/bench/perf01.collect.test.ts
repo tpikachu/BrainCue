@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Row } from '../metrics/report';
 import { attribute, attributeAll, collectAnswer, pickSample, settle, type CollectDeps, type DetectedQuestion, type FixtureText, type FixtureWindow } from './perf01.collect';
 import { GENERAL, TECHNICAL } from './perf01.fixtures';
+import { LatencyRecorder } from '../metrics/latency';
 
 /**
  * The live driver's record attribution, OFFLINE. These run the same
@@ -175,5 +176,92 @@ describe('PERF-01 record attribution', () => {
     expect(await settle(run.deps, 10_000)).toEqual({ settled: true, open: [] }); // at 6 s
     run.setNow(7_000);
     expect(await settle(run.deps, 2_000)).toEqual({ settled: false, open: ['qb'] });
+  });
+
+  describe('takes: an old finished take never stands in for the running replacement (review of 492a6cc)', () => {
+    /** The REAL recorder, its sink feeding the file the collector reads. Timers
+     *  are immediate, so a finished answered take is written when it paints. */
+    function recorded() {
+      const rows: Row[] = [];
+      let t = 0;
+      const rec = new LatencyRecorder(500, (r) => rows.push({ ...r } as Row), { set: (fn) => (fn(), 0), clear: () => {} });
+      const questions = new Map<string, DetectedQuestion>([['qa', { id: 'qa', text: A.text, at: 1_000 }]]);
+      const take1 = rec.begin({ questionId: 'qa', sessionId: 's', finalAt: 1_000 });
+      questions.get('qa')!.take = take1;
+      rec.mark('qa', { firstTokenAt: 1_900 }, take1);
+      rec.mark('qa', { firstUsefulAt: 2_000 }, take1);
+      rec.finish('qa', 'answered', { completedAt: 2_500 }, take1);
+      const deps: CollectDeps = {
+        readRows: () => [...rows],
+        readQuestions: async () => new Map(questions),
+        now: () => t,
+        sleep: async (ms) => {
+          t += ms;
+          for (const e of pending.splice(0).filter((x) => (x.at <= t ? (x.run(), false) : true))) pending.push(e);
+        },
+      };
+      const pending: { at: number; run: () => void }[] = [];
+      /** A correction: take 2 starts now (announced to the Cue Card), finishes at `doneAt` (or never). */
+      const correct = (doneAt: number | null) => {
+        const take2 = rec.begin({ questionId: 'qa', sessionId: 's', finalAt: 3_000 });
+        questions.get('qa')!.take = take2;
+        if (doneAt !== null)
+          pending.push({
+            at: doneAt,
+            run: () => {
+              rec.mark('qa', { firstTokenAt: doneAt - 100 }, take2);
+              rec.mark('qa', { firstUsefulAt: doneAt }, take2);
+              rec.finish('qa', 'answered', { completedAt: doneAt + 200 }, take2);
+            },
+          });
+        return take2;
+      };
+      return { rows, deps, correct, setNow: (v: number) => (t = v) };
+    }
+    const win = [{ id: 'G01', audioStartAt: 0 }];
+
+    it('take 1 answered, take 2 running: collection waits for take 2 and returns it', async () => {
+      const r = recorded();
+      r.setNow(3_000);
+      const take2 = r.correct(4_000);
+      expect(r.rows.map((x) => [x.take, x.outcome])).toEqual([[1, 'answered']]); // take 1 is all the file holds
+      const got = await collectAnswer(r.deps, A, FIX, win, 30_000);
+      expect(got.sample).toMatchObject({ take: take2, outcome: 'answered', firstUsefulAt: 4_000 });
+    });
+
+    it('take 2 running: settle does not return until it finishes', async () => {
+      const r = recorded();
+      r.setNow(3_000);
+      r.correct(5_000);
+      const s = await settle(r.deps, 30_000);
+      expect(s.settled).toBe(true);
+      expect(r.deps.now()).toBeGreaterThanOrEqual(5_000); // not at 0 ms: it waited for the replacement
+    });
+
+    it('take 2 never finishes: collection times out with it pending (take 1 is not the sample), settle reports it open', async () => {
+      const r = recorded();
+      r.setNow(3_000);
+      const take2 = r.correct(null);
+      const got = await collectAnswer(r.deps, A, FIX, win, 5_000);
+      expect(got).toMatchObject({ timedOut: true, sample: null, pending: { questionId: 'qa', take: take2 } });
+      expect(await settle(r.deps, 2_000)).toEqual({ settled: false, open: ['qa'] });
+    });
+
+    it('control: with only take 1, it is the sample at once', async () => {
+      const r = recorded();
+      const got = await collectAnswer(r.deps, A, FIX, win, 30_000);
+      expect(got).toMatchObject({ timedOut: false, sample: { take: 1, firstUsefulAt: 2_000 } });
+      expect(await settle(r.deps, 1)).toEqual({ settled: true, open: [] });
+    });
+
+    it('a detected question with no record yet is the fixture’s question: a later split-off part does not jump ahead', async () => {
+      const questions = new Map<string, DetectedQuestion>([
+        ['first', { id: 'first', text: A.text, at: 1_000, take: 1 }],
+        ['second', { id: 'second', text: A.text, at: 2_000, take: 2 }],
+      ]);
+      const rows = [rec({ questionId: 'second', take: 2, finalAt: 2_000 })];
+      const pick = pickSample(rows, attributeAll(rows, questions, FIX, win), 'G01', questions, FIX, win);
+      expect(pick).toMatchObject({ questionId: 'first', sample: null, pending: { questionId: 'first', take: 1 }, extraQuestions: ['second'] });
+    });
   });
 });

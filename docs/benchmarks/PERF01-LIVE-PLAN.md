@@ -183,7 +183,11 @@ Remove-Item Env:PERF01_LIVE, Env:PERF01_OUT
 $env:PERF01_RESULTS = "bench-results\perf01\live-$stamp"; npm run perf01:report; Remove-Item Env:PERF01_RESULTS
 ```
 
-Do not use `npm run test:e2e:live` for this: it also runs the other live specs. The targeted command above runs only this driver. The blocks run in series. If one fails, the rest are skipped, and the report shows the run as incomplete.
+Do not use `npm run test:e2e:live` for this: it also runs the other live specs. The targeted command above runs only this driver.
+
+**One folder, one run.** The manifest binds `PERF01_OUT` to the caps and reference it was written with. A folder that already holds a manifest is refused before anything launches, so a run is never resumed or mixed with another. Use a new stamp for every run, dry or live.
+
+**Stopping.** The tests run in series, so a failed test skips every later one. The driver also enforces this itself: any unsuccessful block (preflight failed, a cap, in-flight work, a driver error) saves its evidence, stops its session and then **fails its test**. No later block of the run starts once one has stopped. The report then shows the run as incomplete.
 
 ## 7. Evidence, and the check before any verdict
 
@@ -192,9 +196,11 @@ Evidence goes to `bench-results/perf01/live-<stamp>/`. That folder is gitignored
 | File | Content |
 | --- | --- |
 | `manifest.json` | the plan: run id, fixture version, commit and uncommitted-file count, caps, reference route and effort, and every block with its category, warm-up and fixture ids |
-| `seed.json`, `seed-userData/` | the seeded profile and Space; the user data each block copies |
+| `seed.json`, `seed-userData/` | the seeded profile and Space, and the seed's app process; the user data each block copies |
 | `blocks.jsonl` | per block: start and end, the app process id, the status (`complete`, `stopped`, `preflight-failed`) and its reason, and the preflight's findings |
-| `rows.jsonl` | one line per fixture asked. It holds the app's record and the fixture id, plus: how it was attributed (detected text, or the final's time window); whether its context held the expected fact; whether usage was reported; and split-final and superseded counts. A fixture with nothing attributed is `no-record`; one the block never reached is `not-run`. |
+| `rows.jsonl` | one line per planned fixture, written once at the end of its block and **reconciled from all the block's evidence**. It holds the sample record (its question's current take), the fixture id, how it was attributed (detected text, or the final's time window), whether **that take's** context held the expected fact, whether usage was reported, and split-final and superseded counts. A fixture whose current take never finished, or with nothing attributed, is `no-record`. One the block never reached is `not-run`. |
+| `<block>-progress.jsonl` | what the loop saw at each question (provisional: the question and take collected then) |
+| `<block>-watched.json` | the watched Cue Card state at the end: each question's latest wording, detection time and latest take, and the context each take was sent with |
 | `<block>-summary.json` | `api.metrics.latency()` at the end of the block: every evaluated turn's decision time, plus hardware |
 | `<block>-latency.jsonl` | the app's raw records, unlabelled, all of them |
 | `<block>-attribution.jsonl` | every raw record with the fixture it was attributed to, and how |
@@ -204,7 +210,13 @@ Evidence goes to `bench-results/perf01/live-<stamp>/`. That folder is gitignored
 | `audio/` | the synthesized questions |
 | `report.md`, `report.json` | the acceptance view from `npm run perf01:report` |
 
-**Attribution.** A record is never matched by row order. It goes to a fixture by the question the app detected, which is the card title, matched against every fixture of the block. A record with no text, missed before its card opened, goes by the time window its final fell in. So a late record for one question can't become the next question's sample. Before each question, the driver waits until every detected question has a finished record. If something is still in flight after 30 s, the block stops.
+**Attribution.** A record is never matched by row order. It goes to a fixture by the question the app detected, which is the card title, matched against every fixture of the block. A record with no text, missed before its card opened, goes by the time window its final fell in. So a late record for one question can't become the next question's sample.
+
+**Takes.** A record is written only when a take finishes. A corrected question starts a new take on the same card, and the earlier take's finished record stays in the file. The driver watches each card's latest announced take in the Cue Card page (`latencyTake`). A question counts as finished only when its **current** take is.
+
+- **Collection** waits for the current take; an earlier take is never the sample.
+- **Settling** before each question waits for every question's current take. If something is still in flight after 30 s, the block stops.
+- **The saved line** is reconciled at the end of the block from every raw record, so a replacement that started after collection is the one saved. A replacement still running at the end leaves the fixture unanswered and the block stopped.
 
 **The evidence check** (`bench/perf01.evidence.ts`). The report gives verdicts only if the folder matches its manifest. All of these must hold:
 
@@ -214,7 +226,14 @@ Evidence goes to `bench-results/perf01/live-<stamp>/`. That folder is gitignored
 - **Answers:** every answer used `openai/gpt-6-luna` at effort `none`, and its context held its fact.
 - **Attribution:** every attribution was clear.
 - **Decision evidence:** every warm block has its all-turn decision summary.
-- **Budget:** the meter covered the run, never capped it, and saw only the reference models and speech-to-text model.
+- **Budget**, bound to the manifest:
+  - Every process of the run (the seed and each block) loaded the meter with exactly the manifest's caps, and no other process did.
+  - Reserved tokens, requests, speech-to-text seconds and questions spoken are all within the manifest's caps.
+  - The ledger's totals agree with its own request log.
+  - Nothing was refused (a cap, capture or another host), and the meter never capped.
+  - Only the reference models and speech-to-text model were on the wire.
+
+  The driver checks the installed caps before it spends anything: before the seed, and in every block's preflight.
 
 Any issue makes every verdict "invalid evidence". The latencies stay in the report as diagnostics. The report command fails on invalid evidence. Missing fixtures stay in the denominator as unanswered.
 
@@ -234,11 +253,13 @@ The handoff carries `report.md`, the commit, and `run-notes.md` (network, prices
   - split finals;
   - several takes;
   - a record with no text;
-  - settling.
+  - settling;
+  - with the real `LatencyRecorder`: an answered take 1 and a running take 2 (collection and settling wait for take 2; it is never take 1), a take 2 that never finishes, and a split question detected before its first record.
 - **The evidence check** (`perf01.evidence.test.ts`):
   - It passes a complete valid run as the control.
   - It rejects the review case: 30 × G01, 30 × T01, 70 grounding misses and no decision summaries.
-  - It rejects each kind of invalid evidence on its own.
+  - It rejects each kind of invalid evidence on its own, including the meter bound to the manifest: totals over a cap, a process with other or no installed caps, a block process without the meter, an extra metered process, a seed without one, a ledger that disagrees with its log, any refused request, and a manifest without caps.
+  - It rejects the second review case: a manifest capped at 1 token with a 300,000-token ledger.
 - **The meter** (`perf01.meter.test.ts`) runs real child processes on the OpenAI SDK and `ws`, against a fake loopback provider. It shows:
   - a refused request never reaches the provider;
   - the one-token cap case;
@@ -258,11 +279,22 @@ The handoff carries `report.md`, the commit, and `run-notes.md` (network, prices
   - no meter, nothing asked;
   - in-flight work stops the block;
   - a warm-up that never paints stops the block.
+- **The driver** (`perf01.driver.test.ts`): the real `runBlock`, `seedRun` and `bindRun`, with real files and a fake app on a virtual clock. It shows:
+  - a failed preflight saves its evidence, stops the session once, sends no speech and **fails**, and the next block refuses to start;
+  - caps installed differently from the manifest fail the block before any audio, and stop the seed before any setup;
+  - a passing control, with its sample saved with its take's grounding;
+  - a correction's take 2 saved with its own timing and grounding;
+  - a replacement during the gap reconciled to take 2;
+  - a replacement still running at the end leaves the fixture unanswered and the block stopped;
+  - the next fixture is not sent while a replacement is running;
+  - a folder that already holds a manifest is refused.
+- **Playwright's serial mode**, checked on a throwaway spec with this suite's layout: after a failed block, every later test did not run.
 - **The dry run passes**, under the offline guard:
   - the seed in one process;
   - a fresh process on its copy, which sees the profile and has an empty latency file;
-  - the meter loaded once in main and sending nothing;
+  - the meter loaded once in main, with the manifest's caps, and sending nothing;
   - its window snapshot from that process, with every window on the secondary display;
   - 61 audio files, 1–10 s each;
-  - the report gate rejecting the unrun folder.
+  - the report gate rejecting the unrun folder;
+  - a second run on the same folder refused before anything launches.
 - **Not yet exercised:** the live session start, real STT, the paint reports in a visible Cue Card, and real provider traffic through the meter. The first live block's preflight and stop conditions cover them.
