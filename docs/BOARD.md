@@ -23,6 +23,14 @@ regression tests gives **12 failures and 2 passing controls**; the same
 selection gives **14 passes** on the candidate. The isolated checkout was
 removed; logs remain gitignored under `bench-results/stable23-*`.
 
+Implemented/pushed at **`44ad736`**, in draft
+[PR #76](https://github.com/tpikachu/BrainCue/pull/76). GitHub CI passes on
+that commit (run `44616615171`). The opt-in driver's **offline dry run passes
+2/2** with the guard active, two metered processes and no provider requests;
+output: `bench-results/perf01/dry-stable23-44ad736-20261119-151340/`.
+The benchmark key is available (presence checked only, value not printed).
+Paid-run approval is pending in the user prompt; no live run has begun.
+
 The next required step is the explicit opt-in measured run in
 `docs/benchmarks/PERF01-LIVE-PLAN.md`: synthetic data, pinned OpenAI route,
 72 questions, at most 673,000 reserved tokens / 678 requests / 900 seconds
