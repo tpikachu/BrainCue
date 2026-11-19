@@ -1,5 +1,6 @@
 import { test as base, expect, type Page } from '@playwright/test';
 import { launchHarness, type Harness } from './harness/harness';
+import { LatencyRecorder } from '../src/main/services/engine/metrics/latency';
 
 /**
  * M7.2b / PERF-01 — the latency record's acceptance measure is the first
@@ -87,4 +88,94 @@ test('a bullet marker split across tokens waits for its word; a regenerated card
   expect(await reports(page)).toHaveLength(1);
   await emit(page, 'onContributionDelta', { contributionId: 'q2', token: 'A deadlock' });
   await expect.poll(() => reports(page)).toHaveLength(2);
+});
+
+/** Hand the page's animation frames to the test: `advance()` runs every
+ *  frame callback queued so far, once. */
+async function holdFrames(page: Page) {
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__frames = new Map();
+    w.__frameId = 100000;
+    window.requestAnimationFrame = (fn) => {
+      const id = ++w.__frameId;
+      w.__frames.set(id, fn);
+      return id;
+    };
+    window.cancelAnimationFrame = (id) => w.__frames.delete(id);
+    w.__advance = () => {
+      const callbacks = [...w.__frames.values()];
+      w.__frames.clear();
+      callbacks.forEach((fn: FrameRequestCallback) => fn(performance.now()));
+    };
+  });
+}
+/** Deliver the page's paint reports to a REAL recorder, as metrics.ipc does. */
+async function deliver(page: Page, recorder: LatencyRecorder) {
+  const paints = await page.evaluate(() => (window as any).__fake.args.filter((a: any) => a.path === 'metrics.firstUseful').map((a: any) => a.args));
+  for (const [id, at, take] of paints) recorder.mark(id, { firstUsefulAt: at }, take);
+  return paints as [string, number, number | undefined][];
+}
+
+// M7.2b review, finding 3 (Codex's reproduction): the old card's two-frame
+// acknowledgement is still pending when the card is reset and its
+// replacement starts with only "**"; the old frames run after the new
+// take's first token. The replacement must stay unpainted.
+test('a pending paint report from before a reset never satisfies the replacement take', async ({ cue: page }) => {
+  const recorder = new LatencyRecorder();
+  const old = recorder.begin({ questionId: 'race', sessionId: 's', finalAt: Date.now() });
+  recorder.mark('race', { firstTokenAt: Date.now() }, old);
+  await holdFrames(page);
+  await page.evaluate((take) => {
+    const w = window as any;
+    w.__fake.emit('onContributionOpen', { contributionId: 'race', kind: 'answer', title: 'Old question' });
+    w.__fake.emit('onContributionPatch', { contributionId: 'race', latencyTake: take });
+    w.__fake.emit('onContributionDelta', { contributionId: 'race', token: 'Old answer' });
+    w.__advance(); // flush the old words; their acknowledgement is pending
+  }, old);
+  await expect(page.locator('.cue-current')).toContainText('Old answer');
+
+  const next = recorder.begin({ questionId: 'race', sessionId: 's', finalAt: Date.now() });
+  recorder.mark('race', { firstTokenAt: Date.now() }, next);
+  await page.evaluate((take) => {
+    const w = window as any;
+    w.__fake.emit('onContributionReset', { contributionId: 'race' });
+    w.__fake.emit('onContributionPatch', { contributionId: 'race', latencyTake: take });
+    w.__fake.emit('onContributionDelta', { contributionId: 'race', token: '**' });
+    w.__fake.emit('onContributionDone', { contributionId: 'race' }); // flush syntax only
+    w.__advance();
+    w.__advance(); // the OLD callback's frames run now, after the new first token
+  }, next);
+  await expect(page.locator('.cue-current')).not.toContainText('Old answer');
+  expect(await deliver(page, recorder)).toEqual([]); // the old callback reported nothing
+  expect(recorder.get('race')?.firstUsefulAt).toBeUndefined();
+});
+
+test("control: the replacement take's own words are reported with its take and accepted", async ({ cue: page }) => {
+  const recorder = new LatencyRecorder();
+  const old = recorder.begin({ questionId: 'again', sessionId: 's', finalAt: Date.now() });
+  recorder.mark('again', { firstTokenAt: Date.now() }, old);
+  await holdFrames(page);
+  await page.evaluate((take) => {
+    const w = window as any;
+    w.__fake.emit('onContributionOpen', { contributionId: 'again', kind: 'answer', title: 'Old question' });
+    w.__fake.emit('onContributionPatch', { contributionId: 'again', latencyTake: take });
+    w.__fake.emit('onContributionDelta', { contributionId: 'again', token: 'Old answer' });
+    w.__advance();
+  }, old);
+  const next = recorder.begin({ questionId: 'again', sessionId: 's', finalAt: Date.now() });
+  recorder.mark('again', { firstTokenAt: Date.now() }, next);
+  await page.evaluate((take) => {
+    const w = window as any;
+    w.__fake.emit('onContributionReset', { contributionId: 'again' });
+    w.__fake.emit('onContributionPatch', { contributionId: 'again', latencyTake: take });
+    w.__fake.emit('onContributionDelta', { contributionId: 'again', token: '**New' });
+    w.__advance(); // flush the new words
+    w.__advance(); // first frame (and the void old one)
+    w.__advance(); // second frame: after paint
+  }, next);
+  await expect(page.locator('.cue-current')).toContainText('New');
+  const paints = await deliver(page, recorder);
+  expect(paints.map(([id, , take]) => [id, take])).toEqual([['again', next]]);
+  expect(recorder.get('again')?.firstUsefulAt).toBe(paints[0][1]);
 });

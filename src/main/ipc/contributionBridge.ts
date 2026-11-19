@@ -78,6 +78,13 @@ export function emitContributionMeta(
   broadcast(EVENTS.contributionPatch, { contributionId, meta }, targets);
 }
 
+/** The latency take now streaming on this card (metrics/latency.ts). Only
+ *  the Cue Card reports paint, so only it is told; its paint report carries
+ *  the take back, and a report for an older take is rejected. */
+export function emitContributionTake(contributionId: string, take: number): void {
+  broadcast(EVENTS.contributionPatch, { contributionId, latencyTake: take }, ['overlay']);
+}
+
 export function emitContributionContext(
   contributionId: string,
   context: ContextSentEvent,

@@ -163,6 +163,13 @@ export default function Overlay() {
   const reportedVisible = useRef(new Set<string>());
   // Text streamed so far for cards not yet reported (usually a few chars).
   const unreported = useRef(new Map<string, string>());
+  // Who owns a pending report. Each reset/regenerate starts a new render
+  // generation of the card, and a two-frame callback scheduled for an older
+  // one does nothing when it fires — its words are gone. The report also
+  // carries main's latency take for the card (its take patch), so main can
+  // reject one for any other take whatever its timestamp (M7.2b review).
+  const renderGen = useRef(new Map<string, number>());
+  const takeOf = useRef(new Map<string, number>());
   // rAF-coalesced token buffer, one lane per contribution id (see lib/streamBuffer).
   const buffer = useRef(
     createStreamBuffer((chunks) => {
@@ -176,11 +183,18 @@ export default function Overlay() {
         }
         unreported.current.delete(id);
         reportedVisible.current.add(id);
+        const gen = renderGen.current.get(id) ?? 0;
+        const take = takeOf.current.get(id);
+        const current = () => (renderGen.current.get(id) ?? 0) === gen;
         // Two frames: the first runs before React commits this append, the
         // second after the browser has painted it.
-        requestAnimationFrame(() =>
-          requestAnimationFrame(() => void api.metrics.firstUseful(id, Date.now()).catch(() => {})),
-        );
+        requestAnimationFrame(() => {
+          if (!current()) return;
+          requestAnimationFrame(() => {
+            if (!current()) return;
+            void api.metrics.firstUseful(id, Date.now(), take).catch(() => {});
+          });
+        });
       }
     }),
   );
@@ -202,7 +216,10 @@ export default function Overlay() {
       api.events.onContributionDelta((p: ContributionDeltaEvent) =>
         buf.push(p.contributionId, p.token),
       ),
-      api.events.onContributionPatch((p: ContributionPatchEvent) => feed().patch(p)),
+      api.events.onContributionPatch((p: ContributionPatchEvent) => {
+        if (p.latencyTake !== undefined) takeOf.current.set(p.contributionId, p.latencyTake);
+        feed().patch(p);
+      }),
       api.events.onContributionDone((p: ContributionDoneEvent) => {
         buf.flush();
         feed().done(p.contributionId);
@@ -213,6 +230,10 @@ export default function Overlay() {
       api.events.onContributionReset((p: ContributionResetEvent) => {
         reportedVisible.current.delete(p.contributionId);
         unreported.current.delete(p.contributionId);
+        // A new render generation: any report still pending for the old
+        // words is void, and the old take no longer applies.
+        renderGen.current.set(p.contributionId, (renderGen.current.get(p.contributionId) ?? 0) + 1);
+        takeOf.current.delete(p.contributionId);
         buf.drop(p.contributionId);
         feed().reset(p.contributionId);
       }),

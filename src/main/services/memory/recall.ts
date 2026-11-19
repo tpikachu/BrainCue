@@ -55,11 +55,7 @@ export async function recallMemories(
   } = {},
 ): Promise<RetrievedMemory[]> {
   try {
-    if (settingsRepo.get(SETTINGS_KEYS.memoryEnabled) !== '1') return []; // consent off
-    if (packId) {
-      const pack = contextPacksRepo.get(packId);
-      if (pack && !pack.memoryEnabled) return []; // Space opted out
-    }
+    if (!memoryAllowed(packId)) return []; // consent off, or the Space opted out
     const rows = memoriesRepo.recallRows(profileId, packId, now);
     if (rows.length === 0) return [];
 
@@ -120,14 +116,51 @@ export async function recallMemories(
     return scored.map((s) => ({
       id: s.row.id,
       category: s.row.category as MemoryCategory,
-      content:
-        s.row.content.length > MEMORY_MAX_CHARS
-          ? `${s.row.content.slice(0, MEMORY_MAX_CHARS - 1)}…`
-          : s.row.content,
+      content: clip(s.row.content),
       score: s.semantic,
     }));
   } catch {
     return []; // recall must never break an answer
+  }
+}
+
+const clip = (content: string) =>
+  content.length > MEMORY_MAX_CHARS ? `${content.slice(0, MEMORY_MAX_CHARS - 1)}…` : content;
+
+/** Is memory allowed for this profile/Space right now (global consent and
+ *  the Space's own switch)? */
+function memoryAllowed(packId: string | null): boolean {
+  if (settingsRepo.get(SETTINGS_KEYS.memoryEnabled) !== '1') return false;
+  if (packId) {
+    const pack = contextPacksRepo.get(packId);
+    if (pack && !pack.memoryEnabled) return false;
+  }
+  return true;
+}
+
+/**
+ * Memories recalled EARLIER (the live engine recalls while the question is
+ * still being spoken), checked again at the moment an answer is about to
+ * use them: memory must still be on — globally and for this Space — and each
+ * memory must still be eligible (approved, not superseded, deleted or
+ * expired). Ineligible ones are dropped; the rest carry their CURRENT text.
+ * Fails closed: on any error, no memory is sent. M7.2b review.
+ */
+export function revalidateRecalled(
+  profileId: string,
+  packId: string | null,
+  memories: RetrievedMemory[],
+  now = Date.now(),
+): RetrievedMemory[] {
+  if (memories.length === 0) return memories;
+  try {
+    if (!memoryAllowed(packId)) return [];
+    const current = new Map(memoriesRepo.recallRows(profileId, packId, now).map((r) => [r.id, r]));
+    return memories
+      .filter((m) => current.has(m.id))
+      .map((m) => ({ ...m, content: clip(current.get(m.id)!.content) }));
+  } catch {
+    return [];
   }
 }
 

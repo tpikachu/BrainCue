@@ -945,6 +945,9 @@ export interface ContributionPatchEvent {
   meta?: AnswerMetaEvent & Record<string, unknown>;
   context?: ContextSentEvent;
   followup?: string;
+  /** The latency take now streaming on this card — the Cue Card returns it
+   *  with its paint report (M7.2b). Not card content. */
+  latencyTake?: number;
 }
 /** The contribution's stream finished (completed OR aborted — mirrors answerDone). */
 export interface ContributionDoneEvent {

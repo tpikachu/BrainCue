@@ -591,6 +591,18 @@ automatically detected question, each stage on its own:
 - **Takes:** a revision starts a new take; a stale stream of the earlier
   take, finishing late, cannot write into it. Manual asks and regenerates
   are not timed.
+- **Paint belongs to a take** (M7.2b review). Main sends each card its take
+  (`latencyTake` on a Cue-Card-only patch), and the paint report carries it
+  back. A report for another take, or with none, is rejected whatever its
+  timestamp. In the Cue Card, each reset/regenerate starts a new render
+  generation, and a two-frame callback still pending for the old words does
+  nothing when it fires.
+- **The whole denominator** (M7.2b review). A question queued when Stop
+  comes is recorded `aborted` (`stopped-before-dispatch`). A missed card
+  still waiting for the answer slot is recorded `missed`. A question not yet
+  on a card is keyed by its job, and nothing is opened or started just to
+  record it. An answer stopped while its context was being gathered builds
+  no request.
 - **Content:** ids, timestamps, counts (chunks, memories, tokens), route
   names and outcome codes only — never transcript, answer text or a key.
   `api.metrics.latency()` returns the summary plus hardware.
@@ -604,6 +616,15 @@ automatically detected question, each stage on its own:
   Both now run in parallel, and both start on the interim transcript when it
   first reads as the question. Memories are marked used only when an answer
   uses them, so a discarded prefetch changes nothing.
+- **Consent at the moment of sending** (M7.2b review). Memory recalled on
+  the interim is checked again just before the answer is sent
+  (`revalidateRecalled`):
+  - memory must still be on, globally and for the Space;
+  - each memory must still be approved, current and unexpired.
+
+  Memories that are no longer eligible are dropped; the rest go with their
+  current text. On any error, no memory is sent. An opt-out after the
+  prefetch therefore holds, as it did when recall ran only after the final.
 - **One embedding per question.** Retrieval and recall share the request
   for the same text (a few entries, a few seconds, in memory only).
 - **A bounded embedding.** The live query embedding gives up after 2.5 s

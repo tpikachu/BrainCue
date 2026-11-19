@@ -52,6 +52,7 @@ vi.mock('../../ipc/contributionBridge', () => ({
   emitContributionMeta: vi.fn(),
   emitContributionOpen: vi.fn(),
   emitContributionReset: vi.fn(),
+  emitContributionTake: () => {},
   emitContributionTitle: vi.fn(),
 }));
 vi.mock('../../providers/normalizeError', () => ({ normalizeProviderError: (e: unknown) => String(e) }));

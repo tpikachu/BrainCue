@@ -30,12 +30,13 @@ vi.mock('../../ipc/contributionBridge', () => ({
   emitContributionMeta: vi.fn(),
   emitContributionOpen: vi.fn(),
   emitContributionReset: vi.fn(),
+  emitContributionTake: () => {},
   emitContributionTitle: vi.fn(),
 }));
 vi.mock('../../providers/normalizeError', () => ({ normalizeProviderError: (e: Error) => e.message }));
 vi.mock('../../db/repositories/profiles.repo', () => ({ profilesRepo: { get: () => ({ id: 'p1', name: 'T', language: 'en' }) } }));
 vi.mock('../security/logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
-vi.mock('../memory/recall', () => ({ recallMemories: async () => [], markRecalled: () => {} }));
+vi.mock('../memory/recall', () => ({ recallMemories: async () => [], markRecalled: () => {}, revalidateRecalled: (_p: string, _k: unknown, m: unknown) => m }));
 vi.mock('./grounding', () => ({ ground: async () => [] }));
 vi.mock('./persistence/enginePersistence', () => ({
   enginePersistence: {

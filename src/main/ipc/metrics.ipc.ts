@@ -11,9 +11,14 @@ import { latency } from '../services/engine/metrics/latencyStore';
 export function registerMetricsIpc(): void {
   handle(
     IPC.metrics.firstUseful,
-    z.object({ contributionId: z.string().min(1).max(100), at: z.number().int().positive() }),
-    ({ contributionId, at }) => {
-      latency.mark(contributionId, { firstUsefulAt: at });
+    z.object({
+      contributionId: z.string().min(1).max(100),
+      at: z.number().int().positive(),
+      /** The take the painted words belong to (the card's take patch). */
+      take: z.number().int().positive().optional(),
+    }),
+    ({ contributionId, at, take }) => {
+      latency.mark(contributionId, { firstUsefulAt: at }, take);
       return { ok: true as const };
     },
   );

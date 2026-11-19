@@ -40,6 +40,7 @@ vi.mock('../../ipc/contributionBridge', () => ({
   emitContributionMeta: (id: string, m: { riskWarning: string | null }) => h.metas.push({ id, riskWarning: m.riskWarning }),
   emitContributionOpen: (p: { contributionId: string }) => h.opened.push(p.contributionId),
   emitContributionReset: (id: string) => h.resets.push(id),
+  emitContributionTake: () => {},
   emitContributionTitle: (id: string, title: string) => h.titles.push({ id, title }),
 }));
 vi.mock('../../providers/normalizeError', () => ({ normalizeProviderError: (e: unknown) => String(e) }));
@@ -47,7 +48,7 @@ vi.mock('../../db/repositories/profiles.repo', () => ({
   profilesRepo: { get: () => ({ id: 'p1', name: 'Test User', language: 'en' }) },
 }));
 vi.mock('../security/logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
-vi.mock('../memory/recall', () => ({ recallMemories: async () => [], markRecalled: () => {} }));
+vi.mock('../memory/recall', () => ({ recallMemories: async () => [], markRecalled: () => {}, revalidateRecalled: (_p: string, _k: unknown, m: unknown) => m }));
 vi.mock('./grounding', () => ({ ground: async () => [] }));
 vi.mock('./persistence/enginePersistence', () => {
   let tc = 0;

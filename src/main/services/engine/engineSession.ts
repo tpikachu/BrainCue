@@ -9,6 +9,7 @@ import {
   emitContributionMeta,
   emitContributionOpen,
   emitContributionReset,
+  emitContributionTake,
   emitContributionTitle,
 } from '../../ipc/contributionBridge';
 import { retryRouteAfterModelError, taskRoute } from '../../providers/taskRoute';
@@ -22,7 +23,7 @@ import type { ClassifierTurn } from '../openai/questions';
 import { normalizeProviderError } from '../../providers/normalizeError';
 import { profilesRepo } from '../../db/repositories/profiles.repo';
 import { log } from '../security/logger';
-import { markRecalled, recallMemories } from '../memory/recall';
+import { markRecalled, recallMemories, revalidateRecalled } from '../memory/recall';
 import { ground } from './grounding';
 import { enginePersistence as persist } from './persistence/enginePersistence';
 import { EchoGuard, sameWords, turnWords } from './echoGuard';
@@ -184,6 +185,8 @@ export class EngineSession {
       abortActive: () => this.abortScheduled(),
       slotBusy: () => this.answering,
       missed: (job, why) => this.surfaceMissed(job, why),
+      // Queued when Stop came: in the sample as aborted before dispatch.
+      stopped: (job) => this.timeUnanswered(job, 'aborted', 'stopped-before-dispatch'),
       onDecision: (d) => {
         latency.decision(d.finalAt, d.decidedAt);
         // Outcome + timing only — never the words.
@@ -266,6 +269,9 @@ export class EngineSession {
   /** Abort in-flight work and release every transcriber. Idempotent. */
   teardown(): void {
     this.scheduler?.stop();
+    // Missed cards still waiting for the slot are never shown now — but they
+    // were detected questions, so they stay in the latency sample.
+    for (const m of this.pendingMissed.splice(0)) this.timeUnanswered(m.job, 'missed', m.why);
     this.answerAbort?.abort();
     this.prefetch = null;
     this.echo.flush(); // held own turns are the user's last words — keep them
@@ -393,6 +399,8 @@ export class EngineSession {
       provider: route?.provider,
       model: route?.model,
     });
+    // The Cue Card ties its paint report to this take (Overlay.tsx).
+    emitContributionTake(job.questionId, take);
     // generateContribution claims the slot synchronously, before its first
     // await — remember which stream is the scheduler's.
     const stream = this.generateContribution(job.questionId, job.text, job.type, { take });
@@ -449,8 +457,22 @@ export class EngineSession {
       job.questionId = questionId;
     }
     // In the latency sample as an unanswered question — never left out.
+    this.timeUnanswered(job, 'missed', why);
+    // `missed` lets the Cue Card keep this card (and its retry) visible
+    // as a missed question, apart from the answers.
+    emitContributionMeta(questionId, { questionId, riskWarning, missed: why });
+    emitContributionDone(questionId);
+  }
+
+  /** A detected question that ends without an answer stream of its own — a
+   *  missed card, or a queued job Stop dropped — as one finished take in the
+   *  latency sample. Before a card exists it is keyed by its job (no card or
+   *  answer is opened just to record it). */
+  private timeUnanswered(job: QuestionJob, outcome: 'missed' | 'aborted', reason: string): void {
+    const tcId = job.transcriptChunkIds[job.transcriptChunkIds.length - 1] ?? null;
     const speechEnd = tcId ? this.speechEnds.get(tcId) : undefined;
-    latency.missed({
+    const questionId = job.questionId ?? `job:${this.sessionId}:${job.seq}`;
+    latency.begin({
       questionId,
       sessionId: this.sessionId,
       ...this.latencyClass(job.type),
@@ -459,12 +481,8 @@ export class EngineSession {
       finalAt: job.finalAt,
       decidedAt: job.decidedAt,
       detection: `${job.detection.source}/${job.detection.reason}`,
-      reason: why,
     });
-    // `missed` lets the Cue Card keep this card (and its retry) visible
-    // as a missed question, apart from the answers.
-    emitContributionMeta(questionId, { questionId, riskWarning, missed: why });
-    emitContributionDone(questionId);
+    latency.finish(questionId, outcome, { reason });
   }
 
   /** Manual escape hatch (Cue Card "Answer that"): answer the interviewer's
@@ -707,8 +725,15 @@ export class EngineSession {
       const pending = this.takePrefetch(questionText);
       const early = pending ? await pending.catch(() => null) : null;
       const gathered = early ?? (await this.gather(profile.id, questionText, session.packId));
+      // Stopped, superseded or replaced while the context was gathered: no
+      // request is built or sent (the abort path below records it).
+      if (abort.signal.aborted) throw new Error('aborted before dispatch');
       context = gathered.chunks;
-      memories = gathered.memories;
+      // Memory may have been recalled seconds ago, on the interim: check
+      // consent and each memory's eligibility again NOW, before anything is
+      // sent or marked used (M7.2b review — an opt-out after the prefetch
+      // must hold).
+      memories = revalidateRecalled(profile.id, session.packId, gathered.memories);
       markRecalled(memories);
       const tReady = Date.now();
       if (gathered.lexical.length)

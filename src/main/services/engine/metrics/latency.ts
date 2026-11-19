@@ -240,11 +240,16 @@ export class LatencyRecorder {
   /** Patch the current take. Ignored once the take has an outcome — except
    *  the overlay's paint report, which may arrive just after completion —
    *  or when `take` names an older take. One-shot marks keep their first
-   *  value. A paint report that precedes this take's first token belongs to
-   *  an earlier take and is dropped. */
+   *  value. A paint report must NAME this take (the Cue Card learns it from
+   *  the take patch): one without a take, or for another take, is dropped
+   *  whatever its timestamp; so is one from before this take's first token. */
   mark(questionId: string, patch: Partial<QuestionTiming>, take?: number): void {
     const t = this.timings.get(questionId);
     if (!t || (take !== undefined && t.take !== take)) return;
+    if (patch.firstUsefulAt !== undefined && take === undefined) {
+      const { firstUsefulAt: _unowned, ...rest } = patch;
+      patch = rest;
+    }
     const paint = patch.firstUsefulAt;
     if (t.outcome) {
       if (paint === undefined || !this.pending.has(questionId)) return;

@@ -225,8 +225,8 @@ const api = {
   /** Live latency instrumentation — ids and timestamps only. */
   metrics: {
     /** The first painted text of a card that holds a real answer word. */
-    firstUseful: (contributionId: string, at: number) =>
-      invoke<{ ok: true }>(IPC.metrics.firstUseful, { contributionId, at }),
+    firstUseful: (contributionId: string, at: number, take?: number) =>
+      invoke<{ ok: true }>(IPC.metrics.firstUseful, { contributionId, at, ...(take !== undefined ? { take } : {}) }),
     latency: () =>
       invoke<{
         /** See main/services/engine/metrics/latency.ts (LatencySummary). */

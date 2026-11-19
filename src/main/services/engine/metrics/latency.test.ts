@@ -25,7 +25,7 @@ function manualTimers() {
 function answered(r: LatencyRecorder, id: string, at: number, ft: number, up: number, extra: Partial<QuestionTiming> = {}) {
   const take = r.begin({ questionId: id, sessionId: 's', finalAt: at, decidedAt: at + 10, ...extra });
   r.mark(id, { dispatchAt: at + 20, requestAt: at + 30, firstTokenAt: at + ft }, take);
-  r.mark(id, { firstUsefulAt: at + up });
+  r.mark(id, { firstUsefulAt: at + up }, take);
   r.finish(id, 'answered', { completedAt: at + up + 500 }, take);
   return take;
 }
@@ -100,8 +100,8 @@ describe('LatencyRecorder', () => {
     r.finish('a', 'answered', { completedAt: 900 }, take);
     expect(sunk).toEqual([]); // the overlay paints after the last token
     expect(r.summary().byCategory.all.all.samples).toBe(0); // not finished until written
-    r.mark('a', { firstUsefulAt: 950 });
-    r.mark('a', { firstUsefulAt: 2000 });
+    r.mark('a', { firstUsefulAt: 950 }, take);
+    r.mark('a', { firstUsefulAt: 2000 }, take);
     expect(sunk.map((x) => x.firstUsefulAt)).toEqual([950]);
     expect(t.pending()).toBe(0);
   });
@@ -135,7 +135,7 @@ describe('LatencyRecorder', () => {
     expect(r.get('q')?.outcome).toBeUndefined();
     expect(r.get('q')?.firstTokenAt).toBeUndefined();
     r.mark('q', { firstTokenAt: 3900 }, second);
-    r.mark('q', { firstUsefulAt: 4000 });
+    r.mark('q', { firstUsefulAt: 4000 }, second);
     r.finish('q', 'answered', { completedAt: 4500 }, second);
     expect(sunk.map((x) => [x.take, x.outcome])).toEqual([
       [first, 'superseded'],
@@ -148,12 +148,25 @@ describe('LatencyRecorder', () => {
   it('a paint report from before this take\'s first token belongs to an earlier take and is dropped', () => {
     const r = new LatencyRecorder(10, undefined, manualTimers().timers);
     const take = r.begin({ questionId: 'q', sessionId: 's', finalAt: 1000 });
-    r.mark('q', { firstUsefulAt: 1100 }); // no first token yet
+    r.mark('q', { firstUsefulAt: 1100 }, take); // no first token yet
     r.mark('q', { firstTokenAt: 1500 }, take);
-    r.mark('q', { firstUsefulAt: 1400 }); // earlier than the first token
+    r.mark('q', { firstUsefulAt: 1400 }, take); // earlier than the first token
     expect(r.get('q')?.firstUsefulAt).toBeUndefined();
-    r.mark('q', { firstUsefulAt: 1600 });
+    r.mark('q', { firstUsefulAt: 1600 }, take);
     expect(r.get('q')?.firstUsefulAt).toBe(1600);
+  });
+
+  it('a paint report must name the current take — an old take\'s or an unowned one is rejected even when it is later than the new first token (M7.2b review)', () => {
+    const r = new LatencyRecorder(10, undefined, manualTimers().timers);
+    const old = r.begin({ questionId: 'q', sessionId: 's', finalAt: 1000 });
+    r.mark('q', { firstTokenAt: 1200 }, old);
+    const next = r.begin({ questionId: 'q', sessionId: 's', finalAt: 5000 });
+    r.mark('q', { firstTokenAt: 5500 }, next);
+    r.mark('q', { firstUsefulAt: 6000 }, old); // the old card's late acknowledgement
+    r.mark('q', { firstUsefulAt: 6000 }); // no take at all
+    expect(r.get('q')?.firstUsefulAt).toBeUndefined();
+    r.mark('q', { firstUsefulAt: 6100 }, next); // the replacement's own words
+    expect(r.get('q')?.firstUsefulAt).toBe(6100);
   });
 
   it('counts detection latency for every evaluated turn, questions or not', () => {

@@ -106,6 +106,9 @@ Three tiers, kept apart:
   - `useful-paint.spec.ts` (M7.2b, PERF-01) — the Cue Card reports the first USEFUL paint
     only once the painted text holds a real word. A bare `**` or a bullet marker split
     across tokens is not reported; one report per card, and again after a regenerate.
+    With the page's animation frames held: a report still pending from before a reset never
+    satisfies the replacement take (a real recorder gets nothing), while the replacement's
+    own words are reported with its take and accepted.
   - `keyboard-drafts.spec.ts` — focus contained and restored, dropdown keys and ARIA state,
     Escape closes the inner control first, edited drafts and busy saves survive dismissal,
     readiness detail reachable by keyboard.

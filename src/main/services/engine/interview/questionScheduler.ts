@@ -138,6 +138,9 @@ export interface SchedulerDeps {
    *  `job.questionId` once it is on screen (may be deferred while a stream
    *  holds the slot — until then a revision may still change `job.text`). */
   missed(job: QuestionJob, why: MissReason): void;
+  /** Stop dropped this accepted job before it was answered (it was queued).
+   *  Observability only — nothing is opened or started for it. */
+  stopped?(job: QuestionJob): void;
   /** Observability: one record per evaluated final (no text). */
   onDecision?(d: {
     finalAt: number;
@@ -277,7 +280,14 @@ export class QuestionScheduler {
     this.stopped = true;
     this.epoch++;
     this.dropHeld();
-    for (const job of this.queue.splice(0)) this.finish(job, 'dropped');
+    for (const job of this.queue.splice(0)) {
+      try {
+        this.deps.stopped?.(job);
+      } catch {
+        /* observability must not break Stop */
+      }
+      this.finish(job, 'dropped');
+    }
   }
 
   /** The answer slot freed (a manual Ask / regenerate finished) — start the

@@ -69,6 +69,7 @@ vi.mock('../../ipc/contributionBridge', () => ({
   emitContributionMeta: (_id: string, m: Record<string, unknown>) => h.metas.push(m),
   emitContributionOpen: vi.fn(),
   emitContributionReset: vi.fn(),
+  emitContributionTake: () => {},
   emitContributionTitle: vi.fn(),
 }));
 vi.mock('../../providers/normalizeError', () => ({ normalizeProviderError: (e: Error) => e.message }));
@@ -82,7 +83,7 @@ vi.mock('../security/logger', () => ({
     error: vi.fn(),
   },
 }));
-vi.mock('../memory/recall', () => ({ recallMemories: async () => [], markRecalled: () => {} }));
+vi.mock('../memory/recall', () => ({ recallMemories: async () => [], markRecalled: () => {}, revalidateRecalled: (_p: string, _k: unknown, m: unknown) => m }));
 vi.mock('./grounding', () => ({ ground: async () => [] }));
 vi.mock('./persistence/enginePersistence', () => ({
   enginePersistence: {
