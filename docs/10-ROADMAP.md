@@ -10,8 +10,9 @@
 
 ## Where we are (2026-11-19 — v2.2.2 stable, v2.3.0-preview.1 Windows preview)
 
-The interview-first implementation is prepared as a limited Windows
-`2.3.0-preview.1` prerelease; the user has authorized publication. This does
+The interview-first implementation is published as a limited Windows
+[`2.3.0-preview.1` prerelease](https://github.com/tpikachu/BrainCue/releases/tag/v2.3.0-preview.1),
+as authorized by the user. This does
 not close the live acceptance gates or the current release train. Real
 interview speed remains unmeasured, the short user-run interview is pending,
 and PERF-01, formal M7.2c/M7.3, CTX-01 and the coding budget remain open.

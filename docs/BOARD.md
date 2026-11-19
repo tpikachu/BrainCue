@@ -1,13 +1,14 @@
 # The board
 
-**Current preview status (2026-11-19):** `2.3.0-preview.1` at `1c75cd1`
-is built and installed for the user's local Windows interview check. The
-registration correction `e721dc2` and committed UI-04 `43b0d46` are accepted.
-The release-note corrections and rebuilt installer are accepted at `1c75cd1`;
-the new size and SHA-256 are independently verified below. The user has now
-authorized publishing this limited Windows prerelease. Publication is in
-progress; the short user-run interview is still pending, not a claimed pass.
-Scope is frozen. Formal PERF-01 and the broader
+**Current preview status (2026-11-19):**
+[2.3.0-preview.1](https://github.com/tpikachu/BrainCue/releases/tag/v2.3.0-preview.1)
+is published as a **Windows prerelease**, authorized by the user. The tag
+points to `78f7530` (release documentation/workflow only beyond `1c75cd1`);
+the installer remains the reviewed `1c75cd1` build. Four assets are uploaded,
+with server-side SHA-256 digests matching the local files. v2.2.2 remains
+stable; no `latest.yml` or macOS/Linux preview asset was published. The short
+user-run interview is still pending, not a claimed pass. Scope is frozen.
+Formal PERF-01 and the broader
 M7.2c/M7.3 evidence remain open; the preview does not claim those gates met.
 
 The shared board for the release currently being built. The
@@ -94,8 +95,8 @@ the listed corrections; on acceptance, Codex should open the next planned
 checkpoint and send its concrete scope. Keep one checkpoint at a time and
 return implementation/test evidence for independent review before advancing.
 This does not change the existing live-capture, push, version or release
-constraints. Current assignment: **finish the limited Windows preview
-validation** at `1c75cd1`, with scope frozen. The last runner-registration
+constraints. Current assignment: **collect the user's interview feedback
+for the published Windows preview**, with scope frozen. The last runner-registration
 finding is resolved and accepted at `e721dc2`; the three previous findings
 remain resolved at `e7a268b`. No further benchmark redesign is assigned.
 The prior three code findings stay resolved at `286920f`; the additional
@@ -128,8 +129,8 @@ passes and the prefetch fix `c9d225b` is accepted. The evidence tooling's
 corrections are accepted through `e721dc2`. M7.2b itself
 remains open for trustworthy live performance evidence. Codex also
 implemented and verified the user's UI-04 toolbar request, now committed
-at `43b0d46`. A limited Windows preview at `1c75cd1` is prepared for the
-user-run interview check; formal integrated evidence (M7.2c) and stable
+at `43b0d46`. The limited Windows preview `v2.3.0-preview.1` is published;
+the user-run interview check is pending. Formal integrated evidence (M7.2c) and stable
 release review (M7.3) remain open. This
 sequence supersedes treating
 6.1–6.4 as one final acceptance batch; their rows above describe implementation
@@ -144,7 +145,7 @@ belongs to this sequence.
 | M4 | **Conversation context and trustworthy answers.** Preserve searchable full spoken turns; bound prompt output rather than irreversibly clipping the only retrieval source. Keep resume, JD, actual speech, and suggestions distinct, including in coaching. | Recall a fact beyond character 600 of an answer and after 30+ exchanges; restore it on resume. Follow-ups stay on the correct subject, topic switches work, and profile/Space/session isolation holds. Coaching assesses captured candidate speech and labels generated suggestions separately. | Accepted — `de24232` |
 | M5 | **A simple path into an interview.** Consolidate Home/navigation, interview creation, resume/JD entry, onboarding, and normal AI setup. | Home has one dominant Start interview action; other activities/tools are secondary. A returning configured user starts within two actions. New interviews use the correct kind and interview lists exclude other kinds. Setup shows resume, role/company, JD, audio, and AI readiness; optional research, tailoring, companion settings, and per-task models stay outside the default path. Replace jargon and repeated explanatory paragraphs with brief labels and actionable states; keep necessary consent/processing information accessible. | Accepted — `c7564ec` |
 | M6 | **A usable live view and dependable history.** Finish Cue Card simplification, transcript/session detail, save results, and shared keyboard/draft behavior. | Question and answer dominate the live view; transcript, sources, and extra controls expand on demand. History opens the saved transcript/questions without requiring report generation. Save distinguishes transcript retention, summary success, disabled processing, and failure; local-storage/cloud-processing copy is accurate. Modal focus stays contained, dropdowns support keyboard navigation, and accidental dismissal does not lose edited drafts. | Accepted — `8f86057` |
-| M7 | **Live acceptance and release readiness.** Validate the integrated journey after M1–M6 pass. | Typecheck/build and full unit suite pass; complete appropriate UI and privacy regression checks plus a real-audio interview covering start, questions, follow-ups, interruption, recovery, end, history, and resume. Report independent held-out detection precision >=95% and on-time recall >=90%; final-to-decision p95 <=1.5 s and final-to-first-visible p95 <=3 s on a named reference configuration. Include sample counts, cold/warm results, STT/provider/model, and full retrieval. Close AI-01 and PERF-01 below with actual-route evidence and separate general/simple-technical/coding measurements. Unmet or unmeasured targets remain open, with no completion claim. | M7.1/M7.2a accepted; M7.2b implementation and tooling corrections accepted through `e721dc2`; `1c75cd1` Windows preview built for local user validation, release-note corrections accepted. Live targets and formal M7.2c/M7.3 remain open. Nothing published. |
+| M7 | **Live acceptance and release readiness.** Validate the integrated journey after M1–M6 pass. | Typecheck/build and full unit suite pass; complete appropriate UI and privacy regression checks plus a real-audio interview covering start, questions, follow-ups, interruption, recovery, end, history, and resume. Report independent held-out detection precision >=95% and on-time recall >=90%; final-to-decision p95 <=1.5 s and final-to-first-visible p95 <=3 s on a named reference configuration. Include sample counts, cold/warm results, STT/provider/model, and full retrieval. Close AI-01 and PERF-01 below with actual-route evidence and separate general/simple-technical/coding measurements. Unmet or unmeasured targets remain open, with no completion claim. | M7.1/M7.2a accepted; M7.2b implementation and tooling corrections accepted through `e721dc2`. Windows `v2.3.0-preview.1` prerelease published at the user's request; installer built at `1c75cd1`, tag `78f7530`. Live targets and formal M7.2c/M7.3 remain open; v2.2.2 stays stable. |
 
 Every handoff contains the concrete behavior change, files/commit, relevant
 regression tests, manual verification where appropriate, and remaining
@@ -164,10 +165,10 @@ and two dry-run passes at the preview; full suites/install checks were not
 repeated by Codex. Installation, migration/upgrade, uninstall-retaining-data
 and fresh-start checks are accepted as submitted Windows preview evidence.
 The installer exists and is unsigned; its SHA-256 is recorded in the review.
-**Limited prerelease publication is now authorized by the user; stable
+**The user-authorized Windows prerelease is published; stable
 acceptance remains open.**
 The release-note wording corrections/rebuild are accepted at `1c75cd1`;
-the short user-run interview remains pending after the user's publication decision.
+the short user-run interview remains pending after publication.
 Formal PERF-01 remains unmeasured, and
 M7.2c/M7.3 stay open. AI-01/AI-02 and UI-01–UI-04 are resolved. This limited
 preview path does not waive or mark the formal milestones complete.
@@ -2147,6 +2148,22 @@ this is a preview within the current train, and M7.2b/PERF-01, M7.2c/M7.3,
 CTX-01 and the coding budget remain open. Keep review history and the feature
 branch; no merge into master is part of this preview publication.
 
+**Published:** 2026-11-19 20:17:16 UTC, GitHub release `451879154`,
+`prerelease: true`, `draft: false`, `make_latest: false`. Tag
+`v2.3.0-preview.1` resolves to `78f7530a20f0c824441cebf41c203529e960dd02`.
+The production build/typecheck passed before the release commit. All four
+uploaded asset sizes and GitHub SHA-256 digests match the prepared manifest.
+The release contains the Windows installer, matching blockmap, `preview.yml`
+and `SHA256SUMS.txt`. No app code changed after the accepted installer build.
+
+**Post-publication verification passed:** the public installer was downloaded
+without authentication and matches all 100,201,300 bytes and the recorded
+SHA-256. The GitHub latest-release endpoint still returns v2.2.2, with the
+same stable asset IDs, sizes and digests as before publication. The tag's
+Release workflow run `44606867768` completed as **skipped**; it built or
+published no additional platform artifacts. Local verification evidence is
+gitignored under `bench-results/release-2.3.0-preview.1/`.
+
 ### User follow-ups — model clarity, interview speed and Cue Card polish (2026-11-18)
 
 **Latest user steering:** the user is away for several hours and authorizes
@@ -2283,8 +2300,9 @@ gate. M7.1 correction review → M7.2a → M7.2b → M7.2c → M7.3 is the order
 Adding these reports does not authorize paid/live runs, push, version bump
 or release. M7.1 and M7.2a are accepted; the M7.2b code correction is accepted
 at `286920f`, and the prefetch fix at `c9d225b`; evidence-tooling corrections
-are accepted through `e721dc2`. `1c75cd1` is a prepared limited Windows
-preview awaiting user-run interview validation, not a completed M7 gate.
+are accepted through `e721dc2`. The limited Windows `v2.3.0-preview.1`
+prerelease is published, with user-run interview validation still pending;
+this is not a completed M7 gate.
 Controlled live
 performance/audio measurements remain M7.2b/c evidence and must use an
 explicitly authorized live setup; do not open the absent user's microphone
@@ -2294,6 +2312,7 @@ or call-audio capture to manufacture that evidence.
 
 | Date | Decision |
 | --- | --- |
+| 2026-11-19 | User authorized publication of Windows `2.3.0-preview.1` with unmeasured live speed disclosed. Published as a prerelease; v2.2.2 stays stable. Formal PERF-01 and M7.2c/M7.3 remain open; no board reset or milestone closure for this preview. |
 | 2026-10-07 | v2.2.2 is a patch train cut from user reports, not from the Roadmap; 5.2–5.5 stay unscheduled until the app has had real-world hours on 2.2. |
 | 2026-10-07 | Answer styles collapse to **General \| Technical**: the question type is something the classifier knows, not something a user should set mid-interview. Performance and a clean Cue Card over configurability. |
 | 2026-10-07 | Post-release work never continues on a merged release branch; every train starts its own branch from master. |
