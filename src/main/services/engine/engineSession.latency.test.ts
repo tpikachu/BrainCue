@@ -140,13 +140,13 @@ const mode: ModeDefinition = {
   },
 };
 
-const session = () =>
+const session = (answerFormat: 'general' | 'technical' = 'general') =>
   new EngineSession({
     sessionId: 's1',
     profileId: 'p1',
     packId: h.packId,
     mode,
-    settings: { interviewType: 'general', answerFormat: 'general', pronunciation: false, presence: 'balanced' },
+    settings: { interviewType: 'general', answerFormat, pronunciation: false, presence: 'balanced' },
     ephemeral: false,
   });
 
@@ -231,8 +231,8 @@ describe('the latency record of a detected question', () => {
     expect(h.markUsed).toEqual([['m1']]);
   });
 
-  it('a system-design question is Technical; a provider failure is written as failed with its kind — still in the sample', async () => {
-    const s = session();
+  it('in the Technical style a question is Technical; a provider failure is written as failed with its kind — still in the sample', async () => {
+    const s = session('technical');
     h.generate = 'auth-error';
     await settle(s.onTranscriptFinal('How would you design a rate limiter for our public API?'));
     const t = sunk.at(-1)!;

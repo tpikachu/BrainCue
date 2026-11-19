@@ -662,6 +662,52 @@ starts) still needs the authorized live run; the provider's own first-token
 time (1.9 s / 3.2 s p50 / p95 measured on 2026-11-17, below) is the larger
 share and is not changed here.
 
+**Interview prompts prefetch (M7.2b).** "Tell me about…" and "Walk me
+through…" — instructions rather than questions, with no "?" — never started
+the interim prefetch: it used the meeting rule, which reads them as
+ambiguous. In the fixtures that was every "Tell me about…" question, 8 of 30
+General ones, each paying one embedding round trip after the final. Q&A
+modes now also accept the interview rule's verdict; a fragment ("Walk me
+through the") still waits.
+
+**Measurement fixtures and the benchmark** (`engine/bench/`, M7.2b). The
+fixtures and the live plan are synthetic and shared:
+
+- **Fixtures** (`perf01.fixtures.ts`, `perf01-v1`): an invented candidate,
+  role and company. A 9.5 k-character résumé, the JD and company research,
+  two memories. 30 General (`G01`–`G30`) and 30 simple Technical
+  (`T01`–`T30`) questions, each with the fact and source its answer must be
+  grounded on.
+- **Scenarios:**
+  - a follow-up that keeps its subject, then a topic change;
+  - 32 exchanges, then Stop → Resume;
+  - the session archived, then recalled from a new session in the same
+    Space.
+- **The offline benchmark** (`perf01.bench.test.ts`, `npm run bench:perf01`)
+  runs them through the real engine, sql.js database and migrations,
+  indexing, vector store, retriever, recall, archive and answer prompt.
+  - Its embedder is a deterministic topic vector, so "the right chunk ranks
+    first" comes from the real ranking code. Vendors run on fake timers.
+  - The Cue Card's paint report is a stand-in using the real useful-text
+    rule and the take.
+  - Each question asserts its grounding and its stage timings: no wait
+    after a prefetch, one embedding without one, the cap after a stall.
+  - Variants: interim or none, and a stalled embedding.
+- **The export** goes to `bench-results/perf01/simulated-report.{md,json}`,
+  labelled SIMULATED. Its verdicts can never read "met".
+- **Reports** (`metrics/report.ts`): one report format for simulated and
+  live runs. It shows, per category and cold/warm:
+  - the censored p50/p95 and the target verdicts;
+  - stages, outcomes, routes **with effort**, and context sizes;
+  - every unanswered question by fixture id.
+
+  The record now carries the answering attempt's effort
+  (`liveTaskEffort`, pinned to `effortFor` for every catalog model).
+- **The live run** is prepared, not run: `docs/benchmarks/PERF01-LIVE-PLAN.md`,
+  driven by `e2e/live-perf01.spec.ts`. Locally synthesized speech is streamed
+  through the app's own audio IPC, with no microphone or capture. The plan
+  states caps, commands and evidence paths, and has an offline dry run.
+
 **Coding budget (proposed, not measured).** The coding solver (screen
 capture → solve, the `coding` task with deeper reasoning) is held to its own
 budget and never mixed into the interview numbers: first useful content

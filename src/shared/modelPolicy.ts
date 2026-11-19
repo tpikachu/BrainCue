@@ -37,6 +37,18 @@ export const POLICY_TASKS: PolicyTask[] = ['classify', 'answer', 'parsing', 'cod
  *  model accepts (none where it exists) — first-token latency is the product. */
 export const LIVE_TASKS: ReadonlySet<string> = new Set(['classify', 'answer', 'mock']);
 
+/** The reasoning effort a LIVE task sends on a model, for the latency record:
+ *  the catalog's lowest accepted effort on a reasoning model, `not-sent` on
+ *  one without the parameter, `not-in-catalog` when the catalog does not know
+ *  the model. Mirrors providers/effort.ts effortFor for live tasks (pinned by
+ *  providers/effort.liveRecord.test.ts). */
+export function liveTaskEffort(provider: CloudProviderId, modelId: string): string {
+  const opt = modelOption(provider, modelId);
+  if (!opt) return 'not-in-catalog';
+  if (opt.reasoning !== true) return 'not-sent';
+  return (opt.efforts ?? ['low'])[0];
+}
+
 type Plan = Record<PolicyTask, string[]>;
 
 const OPENAI: Record<ModelPreference, Plan> = {

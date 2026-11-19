@@ -19,6 +19,7 @@ import { assessUtterance } from './interview/questionHeuristics';
 import type { Detection } from './interview/detector';
 import { latency } from './metrics/latencyStore';
 import { latencyCategory, type Outcome, type QuestionTiming } from './metrics/latency';
+import { liveTaskEffort } from '@shared/modelPolicy';
 import type { ClassifierTurn } from '../openai/questions';
 import { normalizeProviderError } from '../../providers/normalizeError';
 import { profilesRepo } from '../../db/repositories/profiles.repo';
@@ -804,7 +805,14 @@ export class EngineSession {
             // The answering attempt's route, not the one seeded at dispatch.
             mark({
               firstTokenAt: firstToken,
-              ...(attemptRoute ? { provider: attemptRoute.provider, model: attemptRoute.model } : {}),
+              ...(attemptRoute
+                ? {
+                    provider: attemptRoute.provider,
+                    model: attemptRoute.model,
+                    // The reasoning effort that attempt sent (none on a model without the parameter).
+                    effort: liveTaskEffort(attemptRoute.provider, attemptRoute.model),
+                  }
+                : {}),
               ...(failedAttempts.length ? { failedAttempts: failedAttempts.length } : {}),
             });
             // Where the wait before the first token goes (no transcript text).

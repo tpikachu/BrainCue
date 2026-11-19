@@ -103,6 +103,10 @@ Three tiers, kept apart:
   - `cue-card.spec.ts` — the current question dominates; missed questions stay with why and
     a retry; earlier cards behind a toggle; sources name the provider; an unconfirmed Stop
     after a failed rollback is said in the Cue Card.
+  - `live-perf01.spec.ts` (live tier, M7.2b): the PERF-01 live benchmark driver. It is
+    prepared and not run, and needs `PERF01_LIVE=1`, a key and the approved plan
+    (docs/benchmarks/PERF01-LIVE-PLAN.md). `PERF01_DRY=1` checks it offline: the synthetic
+    data, the locally synthesized audio and the framing, with no session and no provider.
   - `useful-paint.spec.ts` (M7.2b, PERF-01) — the Cue Card reports the first USEFUL paint
     only once the painted text holds a real word. A bare `**` or a bullet marker split
     across tokens is not reported; one report per card, and again after a regenerate.

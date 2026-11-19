@@ -61,13 +61,14 @@ export const CATEGORIES: LatencyCategory[] = ['general', 'technical', 'coding'];
 export type Outcome = 'answered' | 'empty' | 'failed' | 'aborted' | 'superseded' | 'missed';
 export const OUTCOMES: Outcome[] = ['answered', 'empty', 'failed', 'aborted', 'superseded', 'missed'];
 
-/** Which bucket a question belongs to. Coding by the classifier's type;
- *  Technical by the answer style in use or a technical/system-design type. */
+/** Which bucket a question belongs to: coding by the classifier's type;
+ *  otherwise the answer STYLE in use (General / Technical) — the user's
+ *  choice for the interview, and what shapes the answer. The classifier's
+ *  type is recorded alongside (`questionType`), so a run can be re-bucketed;
+ *  the rules' type alone is too noisy to split the acceptance samples by. */
 export function latencyCategory(questionType: string | undefined, answerFormat: string | undefined): LatencyCategory {
   if (questionType === 'coding') return 'coding';
-  if (answerFormat === 'technical' || questionType === 'technical_concept' || questionType === 'system_design')
-    return 'technical';
-  return 'general';
+  return answerFormat === 'technical' ? 'technical' : 'general';
 }
 
 export interface QuestionTiming {
@@ -108,6 +109,9 @@ export interface QuestionTiming {
    *  seeded at dispatch, re-marked by the attempt that answers. */
   provider?: string;
   model?: string;
+  /** The reasoning effort the answering attempt sent ('not-sent' for a
+   *  model without the parameter) — providers/effort.ts. */
+  effort?: string;
   /** Attempts that failed before the answering one (same-provider failover). */
   failedAttempts?: number;
   /** Context sizes — counts, never content. */
@@ -316,29 +320,42 @@ export class LatencyRecorder {
   }
 
   summary(): LatencySummary {
-    const finished = this.all().filter((t) => t.outcome && !this.pending.has(t.questionId));
-    const bucket = (rows: QuestionTiming[]): Bucket => {
-      const outcomes = Object.fromEntries(OUTCOMES.map((o) => [o, 0])) as Record<Outcome, number>;
-      for (const r of rows) outcomes[r.outcome!]++;
-      const stages = {} as Record<Stage, StageSummary>;
-      for (const stage of STAGES) {
-        const vals = rows.map((r) => stageValue(r, stage)).filter((v): v is number => v !== null);
-        stages[stage] = { n: vals.length, p50: percentile(vals, 50), p95: percentile(vals, 95) };
-      }
-      return { samples: rows.length, outcomes, stages, endToEnd: endToEnd(rows) };
-    };
-    const split = (rows: QuestionTiming[]) => ({
-      cold: bucket(rows.filter((t) => t.cold)),
-      warm: bucket(rows.filter((t) => !t.cold)),
-      all: bucket(rows),
-    });
-    const byCategory = { all: split(finished) } as LatencySummary['byCategory'];
-    for (const c of CATEGORIES) byCategory[c] = split(finished.filter((t) => t.category === c));
-    return {
-      decisions: { n: this.decisions.length, p50: percentile(this.decisions, 50), p95: percentile(this.decisions, 95) },
-      byCategory,
-    };
+    return summarize(
+      this.all().filter((t) => t.outcome && !this.pending.has(t.questionId)),
+      this.decisions,
+    );
   }
+
+  /** Every evaluated turn's final → decision (ms), oldest first. */
+  decisionTimes(): number[] {
+    return [...this.decisions];
+  }
+}
+
+/** The summary of finished records — also used on a `latency.jsonl` file
+ *  (metrics/report.ts), so a live run and the in-app summary agree. */
+export function summarize(finished: QuestionTiming[], decisions: number[]): LatencySummary {
+  const bucket = (rows: QuestionTiming[]): Bucket => {
+    const outcomes = Object.fromEntries(OUTCOMES.map((o) => [o, 0])) as Record<Outcome, number>;
+    for (const r of rows) if (r.outcome) outcomes[r.outcome]++;
+    const stages = {} as Record<Stage, StageSummary>;
+    for (const stage of STAGES) {
+      const vals = rows.map((r) => stageValue(r, stage)).filter((v): v is number => v !== null);
+      stages[stage] = { n: vals.length, p50: percentile(vals, 50), p95: percentile(vals, 95) };
+    }
+    return { samples: rows.length, outcomes, stages, endToEnd: endToEnd(rows) };
+  };
+  const split = (rows: QuestionTiming[]) => ({
+    cold: bucket(rows.filter((t) => t.cold)),
+    warm: bucket(rows.filter((t) => !t.cold)),
+    all: bucket(rows),
+  });
+  const byCategory = { all: split(finished) } as LatencySummary['byCategory'];
+  for (const c of CATEGORIES) byCategory[c] = split(finished.filter((t) => t.category === c));
+  return {
+    decisions: { n: decisions.length, p50: percentile(decisions, 50), p95: percentile(decisions, 95) },
+    byCategory,
+  };
 }
 
 /** Censored end-to-end percentiles: an unanswered question is +∞. */

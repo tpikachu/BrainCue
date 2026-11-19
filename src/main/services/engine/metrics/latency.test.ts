@@ -41,12 +41,12 @@ describe('percentile', () => {
 });
 
 describe('latencyCategory — General, simple Technical and coding are measured apart', () => {
-  it('buckets by the classifier type and the answer style in use', () => {
+  it('buckets by the answer style in use; coding questions apart', () => {
     expect(latencyCategory('behavioral', 'general')).toBe('general');
     expect(latencyCategory('resume_project', 'general')).toBe('general');
     expect(latencyCategory('behavioral', 'technical')).toBe('technical');
-    expect(latencyCategory('technical_concept', 'general')).toBe('technical');
-    expect(latencyCategory('system_design', 'general')).toBe('technical');
+    expect(latencyCategory('technical_concept', 'general')).toBe('general'); // the style decides
+    expect(latencyCategory('system_design', 'technical')).toBe('technical');
     expect(latencyCategory('coding', 'technical')).toBe('coding');
     expect(latencyCategory('coding', 'general')).toBe('coding');
   });
