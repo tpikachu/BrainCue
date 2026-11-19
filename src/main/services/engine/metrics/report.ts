@@ -9,6 +9,11 @@ import { percentile, summarize, type LatencyCategory, type LatencySummary, type 
  *
  * A SIMULATED report says so in its first line and never says "met": only a
  * live run on the reference configuration can meet a target.
+ *
+ * A live report is judged only on VALIDATED evidence: the run checked
+ * against its manifest (bench/perf01.evidence.ts). Without that check, or
+ * with any issue found, every verdict is "invalid evidence". The latency
+ * values stay in the report as diagnostics, never as acceptance.
  */
 
 export const TARGETS = {
@@ -22,7 +27,13 @@ export const TARGETS = {
 /** A record plus the benchmark's own label for it (never in the app's file). */
 export type Row = QuestionTiming & { fixtureId?: string };
 
-export type Verdict = 'met' | 'not met' | 'insufficient samples' | 'simulated — not acceptance';
+export type Verdict = 'met' | 'not met' | 'insufficient samples' | 'simulated — not acceptance' | 'invalid evidence';
+
+/** The evidence check of a live run (bench/perf01.evidence.ts validateEvidence). */
+export interface EvidenceCheck {
+  valid: boolean;
+  issues: { code: string; detail: string }[];
+}
 
 export interface Perf01Report {
   title: string;
@@ -30,6 +41,8 @@ export interface Perf01Report {
   generatedAt: string;
   /** Anything the run wants on record: hardware, network/STT, config, KB size. */
   run: Record<string, unknown>;
+  /** Live runs: the evidence check the verdicts rest on (null when simulated). */
+  evidence: EvidenceCheck | null;
   /** One sample per question: its latest take. Earlier takes are counted here. */
   superseded: number;
   summary: LatencySummary;
@@ -65,25 +78,28 @@ function latestTakes(rows: Row[]): { latest: Row[]; superseded: number } {
 
 export function buildReport(
   rows: Row[],
-  opts: { simulated: boolean; title: string; run?: Record<string, unknown>; decisionsAllTurns?: StageSummary; now?: Date },
+  opts: { simulated: boolean; title: string; run?: Record<string, unknown>; decisionsAllTurns?: StageSummary; evidence?: EvidenceCheck; now?: Date },
 ): Perf01Report {
   const { latest, superseded } = latestTakes(rows);
   const summary = summarize(latest, []);
   const decisionsQuestions = stat(
     latest.filter((r) => r.decidedAt !== undefined && r.decidedAt >= r.finalAt).map((r) => r.decidedAt! - r.finalAt),
   );
-  const decisionBasis = opts.decisionsAllTurns ?? decisionsQuestions;
-  const judge = (ok: boolean | null): Verdict => (opts.simulated ? 'simulated — not acceptance' : ok === null ? 'not met' : ok ? 'met' : 'not met');
+  // A live verdict needs validated evidence: none, or any issue, and nothing is judged.
+  const invalid = !opts.simulated && !opts.evidence?.valid;
+  const judge = (ok: boolean | null): Verdict =>
+    opts.simulated ? 'simulated — not acceptance' : invalid ? 'invalid evidence' : ok === null ? 'not met' : ok ? 'met' : 'not met';
+  const counted = (): Verdict => (opts.simulated ? 'simulated — not acceptance' : invalid ? 'invalid evidence' : 'met');
   const verdicts = {} as Perf01Report['verdicts'];
   for (const c of ['general', 'technical'] as const) {
     const warm = summary.byCategory[c].warm;
     const cold = summary.byCategory[c].cold;
     const enough = warm.endToEnd.n >= TARGETS.minWarmSamples;
     verdicts[c] = {
-      samples: enough ? (opts.simulated ? 'simulated — not acceptance' : 'met') : 'insufficient samples',
+      samples: enough ? counted() : 'insufficient samples',
       usefulP50: enough ? judge(warm.endToEnd.p50 === null ? null : warm.endToEnd.p50 <= TARGETS.warmUsefulP50Ms) : 'insufficient samples',
       usefulP95: enough ? judge(warm.endToEnd.p95 === null ? null : warm.endToEnd.p95 <= TARGETS.warmUsefulP95Ms) : 'insufficient samples',
-      cold: cold.samples >= TARGETS.minColdSamples ? (opts.simulated ? 'simulated — not acceptance' : 'met') : 'insufficient samples',
+      cold: cold.samples >= TARGETS.minColdSamples ? counted() : 'insufficient samples',
     };
   }
   const routes: Record<string, number> = {};
@@ -97,13 +113,16 @@ export function buildReport(
     simulated: opts.simulated,
     generatedAt: (opts.now ?? new Date()).toISOString(),
     run: opts.run ?? {},
+    evidence: opts.simulated ? null : (opts.evidence ?? { valid: false, issues: [{ code: 'not-validated', detail: 'no evidence check was supplied' }] }),
     superseded,
     summary,
     decisionsQuestions,
     ...(opts.decisionsAllTurns ? { decisionsAllTurns: opts.decisionsAllTurns } : {}),
     verdicts,
-    decision:
-      decisionBasis.n === 0 ? 'insufficient samples' : judge(decisionBasis.p95 === null ? null : decisionBasis.p95 <= TARGETS.decisionP95Ms),
+    // Simulated runs may fall back to the question records' decision times.
+    // A live run never does: the target is over EVERY evaluated turn, so
+    // without that evidence there is no decision verdict.
+    decision: decisionVerdict(opts.simulated, invalid, opts.decisionsAllTurns, decisionsQuestions, judge),
     routes,
     context: {
       chunks: stat(nums((r) => r.chunks)),
@@ -121,6 +140,19 @@ export function buildReport(
         ...(r.reason ? { reason: r.reason } : {}),
       })),
   };
+}
+
+function decisionVerdict(
+  simulated: boolean,
+  invalid: boolean,
+  allTurns: StageSummary | undefined,
+  questions: StageSummary,
+  judge: (ok: boolean | null) => Verdict,
+): Verdict {
+  if (!simulated && (invalid || !allTurns)) return 'invalid evidence';
+  const basis = allTurns ?? questions;
+  if (basis.n === 0) return 'insufficient samples';
+  return judge(basis.p95 === null ? null : basis.p95 <= TARGETS.decisionP95Ms);
 }
 
 /** Parse a latency.jsonl file's text (blank lines and bad lines skipped and counted). */
@@ -148,13 +180,20 @@ const ms = (v: number | null) => (v === null ? '—' : `${Math.round(v).toLocale
 export function renderMarkdown(r: Perf01Report): string {
   const out: string[] = [];
   out.push(`# ${r.title}`, '');
+  const invalid = !r.simulated && !r.evidence?.valid;
   out.push(
     r.simulated
       ? '**SIMULATED — offline latency model, simulated providers. Not live-provider evidence; no target is met by this report.**'
-      : '**Live run.** Verdicts below are against the PERF-01 targets.',
+      : invalid
+        ? '**INVALID OR INCOMPLETE EVIDENCE — not acceptance.** The run does not match its manifest (see "Evidence check"). The latency values below are diagnostics only.'
+        : '**Live run, evidence validated.** Verdicts below are against the PERF-01 targets.',
     '',
   );
   out.push(`Generated ${r.generatedAt}.`, '');
+  if (r.evidence) {
+    out.push('## Evidence check', '');
+    out.push(...(r.evidence.issues.length ? r.evidence.issues.map((i) => `- **${i.code}**: ${i.detail}`) : ['- valid: every planned block and fixture, once, with its route, grounding and decision evidence']), '');
+  }
   if (Object.keys(r.run).length) {
     out.push('## Run', '', '```json', JSON.stringify(r.run, null, 2), '```', '');
   }

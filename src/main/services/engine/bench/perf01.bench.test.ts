@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -41,11 +42,15 @@ const MODEL = {
 const h = vi.hoisted(() => ({
   db: null as unknown as import('../../../test/dbHarness').TestDb,
   prompts: [] as string[],
+  /** Each answer request as the OpenAI adapter would send it (its size is
+   *  the live budget's measured basis: perf01.budget.ts). */
+  answerBodies: [] as { format: string; body: string }[],
   embedCalls: 0,
   embedDelay: 700,
   stt: null as null | { onDelta: (t: string) => void; onFinal: (t: string) => void; onSpeechStop?: () => void },
   onBroadcast: null as null | ((ch: string, p: Record<string, unknown>) => void),
   archiveSaid: '',
+  format: 'general',
 }));
 
 vi.mock('../../../db', async () => {
@@ -111,8 +116,13 @@ vi.mock('../../../providers/registry', async () => {
         };
       if (cap === 'chat')
         return {
-          async *stream(req: { user: string; signal?: AbortSignal }) {
+          async *stream(req: { system: string; user: string; maxOutputTokens?: number; signal?: AbortSignal }) {
             h.prompts.push(req.user);
+            // providers/openai stream body: model, effort none, ceiling, input, stream.
+            h.answerBodies.push({
+              format: h.format,
+              body: JSON.stringify({ model: 'gpt-6-luna', reasoning: { effort: 'none' }, max_output_tokens: req.maxOutputTokens, input: [{ role: 'system', content: req.system }, { role: 'user', content: req.user }], stream: true }),
+            });
             await sleep(1000, req.signal); // TTFT
             yield { type: 'delta', token: '**' };
             await sleep(40, req.signal); // TOKEN_GAP
@@ -151,6 +161,7 @@ import { clearLiveEmbedCache } from '../../rag/liveEmbed';
 import { engine } from '../engine';
 import { latency, setLatencySink } from '../metrics/latencyStore';
 import { buildReport, renderMarkdown, type Row } from '../metrics/report';
+import { ANSWER_RESERVE } from './perf01.budget';
 import { hasUsefulText } from '../../../../renderer/lib/usefulText';
 import {
   GENERAL,
@@ -340,6 +351,7 @@ afterAll(() => {
       reference: { answer: 'openai/gpt-6-luna (simulated)', embedding: 'deterministic topic vectors (simulated)' },
       host: { cpu: os.cpus()[0]?.model ?? 'unknown', cores: os.cpus().length, platform: `${os.platform()} ${os.release()}`, node: process.version },
       note: 'Cold starts are not modelled offline: every row after the first is warm.',
+      answerReservation: answerReservations(),
     },
     decisionsAllTurns: latency.summary().decisions,
   });
@@ -361,6 +373,27 @@ afterAll(() => {
   writeFileSync(path.join(dir, 'simulated-report.md'), renderMarkdown(report) + '\n' + scenarioTable);
 });
 
+/** What the live meter would reserve for each answer request the real
+ *  prompt builder produced here (scripts/perf01/meter-core.cjs): the
+ *  measured basis of the live budget (perf01.budget.ts). Per answer style:
+ *  the largest, and the p95. */
+function answerReservations(): Record<string, { n: number; max: number; p95: number }> {
+  const core = createRequire(import.meta.url)(path.join(process.cwd(), 'scripts', 'perf01', 'meter-core.cjs'));
+  const out: Record<string, { n: number; max: number; p95: number }> = {};
+  // 'scenario': the follow-up and long-session questions (32+ exchanges of context).
+  for (const format of ['general', 'technical', 'scenario']) {
+    const tokens = h.answerBodies
+      .filter((b) => b.format === format)
+      .map((b) => {
+        const r = core.reservationFor({ method: 'POST', path: '/v1/responses', body: b.body });
+        return r.promptTokens + r.completionTokens;
+      })
+      .sort((a: number, b: number) => a - b);
+    out[format] = { n: tokens.length, max: tokens.at(-1) ?? 0, p95: tokens[Math.max(0, Math.ceil(tokens.length * 0.95) - 1)] ?? 0 };
+  }
+  return out;
+}
+
 describe('PERF-01 offline benchmark — SIMULATED (perf01-v1 fixtures)', () => {
   it('indexes the full synthetic knowledge base', () => {
     const kb = knowledgeBaseSize();
@@ -377,6 +410,7 @@ describe('PERF-01 offline benchmark — SIMULATED (perf01-v1 fixtures)', () => {
     ['simple Technical', TECHNICAL, 'technical'],
   ] as const) {
     it(`${label}: 30 questions, each grounded on its fact and timed stage by stage`, async () => {
+      h.format = format;
       const sid = engine.start(profileId, 'general', packId, format).id;
       // One unmeasured warm-up, as the live plan does: the measured 30 are
       // all warm (the process's first answer is the cold one).
@@ -397,6 +431,7 @@ describe('PERF-01 offline benchmark — SIMULATED (perf01-v1 fixtures)', () => {
   }
 
   it('follow-up keeps its subject, a topic change drops it — with no interim and with a stalled embedding', async () => {
+    h.format = 'scenario';
     const sid = engine.start(profileId, 'general', packId, 'general').id;
     const [f1, f2, f3] = SCENARIOS.followup;
     const variants = [
@@ -461,5 +496,12 @@ describe('PERF-01 offline benchmark — SIMULATED (perf01-v1 fixtures)', () => {
     expect(report.context.chunks.p50).toBeGreaterThanOrEqual(5);
     expect(report.unanswered).toEqual([]);
     expect(renderMarkdown(report)).toMatch(/^# t\n\n\*\*SIMULATED/);
+  });
+
+  it('the live budget’s answer reserve covers every answer request the real prompt builder produced', () => {
+    for (const [format, m] of Object.entries(answerReservations())) {
+      expect(m.n, format).toBeGreaterThan(0);
+      expect(m.max, `${format}: largest answer reservation`).toBeLessThanOrEqual(ANSWER_RESERVE);
+    }
   });
 });

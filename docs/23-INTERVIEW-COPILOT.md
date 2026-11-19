@@ -703,10 +703,35 @@ fixtures and the live plan are synthetic and shared:
 
   The record now carries the answering attempt's effort
   (`liveTaskEffort`, pinned to `effortFor` for every catalog model).
+
+  A live report is judged only on **validated evidence**
+  (`bench/perf01.evidence.ts`). The results folder is checked against the
+  run's manifest:
+  - every planned block and fixture once, cold starts in fresh processes;
+  - the reference route and effort, and each answer's grounding;
+  - every warm block's all-turn decision summary;
+  - an uncapped budget.
+
+  Any issue makes every verdict "invalid evidence", and the latencies stay
+  only as diagnostics. A live run without all-turn decision evidence never
+  falls back to the question records' decision times.
 - **The live run** is prepared, not run: `docs/benchmarks/PERF01-LIVE-PLAN.md`,
   driven by `e2e/live-perf01.spec.ts`. Locally synthesized speech is streamed
   through the app's own audio IPC, with no microphone or capture. The plan
   states caps, commands and evidence paths, and has an offline dry run.
+  - **Attribution** (`bench/perf01.collect.ts`): a record goes to its
+    fixture by the question the app detected, or by its final's time window
+    when it has no text. It is never matched by row order. The driver waits
+    for earlier answers to finish before the next question.
+  - **Budget** (`scripts/perf01/live-meter.cjs`, `bench/perf01.budget.ts`):
+    a meter in main reserves every provider request's upper bound before it
+    is sent, across all processes, and refuses past the caps. That includes
+    setup, auxiliary calls and speech-to-text seconds. It also refuses
+    capture and any non-provider host.
+  - **Setup once:** the profile, Space and memories are seeded once. Each
+    block runs a fresh process on a copy.
+  - **Preflight:** each block checks the pinned route, speech-to-text model,
+    and both windows visible on the second monitor before any audio.
 
 **Coding budget (proposed, not measured).** The coding solver (screen
 capture → solve, the `coding` task with deeper reasoning) is held to its own

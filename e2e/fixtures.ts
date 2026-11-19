@@ -1,6 +1,6 @@
 import { test as base, expect, chromium, type Browser, type Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 // Playwright's _electron.launch() is broken on Electron 30+ (it passes
@@ -75,23 +75,48 @@ interface Fixtures {
   noApiKey: boolean;
   /** What the offline guard recorded in this test (empty in the live tier). */
   guardLog: () => GuardEntry[];
+  /** Launch option: extra scripts `--require`d into MAIN before any app
+   *  code, in either tier, and before the offline guard (the PERF-01 meter,
+   *  scripts/perf01/live-meter.cjs). */
+  mainPreloads: string[];
+  /** Launch option: extra environment for the app process. */
+  appEnv: Record<string, string>;
+  /** Launch option: run on this user-data folder instead of the test's own
+   *  (the PERF-01 seed, set up once and reused). */
+  userDataDir: string | null;
+  /** Launch option: start from a copy of this user-data folder, when it
+   *  exists. Its metrics are dropped, so the copy's latency file is new. */
+  seedUserData: string | null;
 }
 
 export const test = base.extend<Fixtures>({
   live: [false, { option: true }],
   noApiKey: [false, { option: true }],
+  mainPreloads: [[], { option: true }],
+  appEnv: [{}, { option: true }],
+  userDataDir: [null, { option: true }],
+  seedUserData: [null, { option: true }],
   guardLog: async ({}, use, testInfo) => {
     const file = resolve(testInfo.outputDir, 'offline-guard.jsonl');
     await use(() => readGuardLog(file));
   },
-  dashboard: async ({ live, noApiKey }, use, testInfo) => {
+  dashboard: async ({ live, noApiKey, mainPreloads, appEnv, userDataDir, seedUserData }, use, testInfo) => {
     const guardFile = resolve(testInfo.outputDir, 'offline-guard.jsonl');
+    const userData = userDataDir ?? resolve(testInfo.outputDir, 'userData'); // isolated DB per test
+    if (seedUserData && existsSync(seedUserData)) {
+      rmSync(userData, { recursive: true, force: true });
+      cpSync(seedUserData, userData, { recursive: true });
+      rmSync(resolve(userData, 'metrics'), { recursive: true, force: true });
+    }
     const env: NodeJS.ProcessEnv = {
       ...process.env,
+      ...appEnv,
       BRAINCUE_E2E: '1',
       E2E_CDP_PORT: String(CDP_PORT),
-      E2E_USER_DATA: resolve(testInfo.outputDir, 'userData'), // isolated DB per test
+      E2E_USER_DATA: userData,
     };
+    const preloads = mainPreloads.map((p) => `--require "${resolve(p).split('\\').join('/')}"`).join(' ');
+    if (preloads) env.NODE_OPTIONS = `${env.NODE_OPTIONS ? `${env.NODE_OPTIONS} ` : ''}${preloads}`;
     // The Playwright runner sets ELECTRON_RUN_AS_NODE, which would make our spawned
     // Electron run as plain Node (electron.app === undefined). Strip it so it boots
     // as a real Electron app.

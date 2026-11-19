@@ -22,7 +22,7 @@ The same run also reports:
 - the actual provider, model and effort;
 - context sizes and grounding misses.
 
-A target that isn't met, or doesn't have enough samples, stays **open**. Coding is not part of this run: its budget remains a proposal (docs/23-INTERVIEW-COPILOT.md §8).
+A target that isn't met, or doesn't have enough samples, stays **open**. A run whose evidence fails the check in §7 gives **no verdict at all**. Coding is not part of this run: its budget remains a proposal (docs/23-INTERVIEW-COPILOT.md §8).
 
 ## 2. Data
 
@@ -36,102 +36,233 @@ All data is synthetic and versioned: `src/main/services/engine/bench/perf01.fixt
   - `G01`–`G30`: General — behavioural, project, fit, salary and relocation.
   - `T01`–`T30`: short Technical explanations, not coding.
   - Each has the fact its answer must be grounded on.
+  - `W00` is the unmeasured warm-up of each warm block.
 
 No real person's data and no user transcript is used. The app runs on isolated E2E user data, so the user's own profiles and settings are untouched.
 
-**What is sent to OpenAI:**
+**Setup runs once.** The seed step creates the profile, Space and memories, and indexes them, in one app process. Every block then starts a **fresh app process on a copy** of that user data, with an empty latency file. Setup is not repeated twelve times.
 
-- the synthetic résumé, JD and company text, for embedding at setup;
-- each question's speech, to speech-to-text;
-- the question with its retrieved synthetic context, to the answer model;
-- classifier and follow-up calls on the question text.
+**What is sent to OpenAI, and nothing else:**
 
-Nothing else is sent.
+| When | What | Task and model |
+| --- | --- | --- |
+| Setup, once | the synthetic résumé, JD and company text | embeddings (`text-embedding-3-small`) |
+| Setup, once | the synthetic JD and company text, for structured JD parsing | parsing (`gpt-6-luna`) |
+| Setup, once | the 2 synthetic memories | embeddings |
+| Each process | a model warm-up (a `GET`, no tokens) | — |
+| Each question | its synthesized speech | speech-to-text (`gpt-4o-transcribe`) |
+| Each question | the question text, for retrieval | embeddings |
+| Ambiguous questions | the question text | classifier (`gpt-6-luna`) |
+| Each question | the question with its retrieved synthetic context | answer (`gpt-6-luna`) |
+| Each answer | the question and answer, for a follow-up prediction | classify task (`gpt-6-luna`) |
+
+The meter (§5) refuses any main-process connection to another host. The session is never kept, so no archive summary or memory suggestion is sent.
 
 ## 3. Reference configuration
 
 | Item | Value |
 | --- | --- |
-| Commit | recorded at run time (`git rev-parse HEAD`) |
+| Commit | recorded in `manifest.json` (`git rev-parse HEAD`, plus the count of uncommitted files) |
 | Build | production build (`npm run build`), launched by the live E2E tier with isolated user data |
-| Hardware | the development desktop: i9-10900K, 32 GB, Windows 11. The driver records the CPU, cores, memory and OS from `api.metrics.latency()` in each block summary. |
+| Hardware | the development desktop: i9-10900K, 32 GB, Windows 11, with a second monitor. The driver records the CPU, cores, memory and OS from `api.metrics.latency()` in each block summary. |
 | Network | the home broadband connection. Record the connection type and a speed-test result in `run-notes.md` before the run. |
 | Answer model | OpenAI `gpt-6-luna`, pinned by an override for the run. Reasoning effort `none` (the live task's lowest, recorded per answer). Output ceiling 360 tokens (General) / 600 (Technical). |
 | Classifier | OpenAI `gpt-6-luna` (pinned). Rules decide clear turns; the classifier is asked only on ambiguous ones, with a 1.2 s time limit. |
+| Parsing | OpenAI `gpt-6-luna` (pinned), setup only |
 | Embeddings | OpenAI `text-embedding-3-small` (2.5 s limit on the live path) |
 | Speech-to-text | OpenAI Realtime GA transcription, `gpt-4o-transcribe`, server VAD (300 ms prefix, 600 ms silence) |
 | Memory | on, globally and for the Space |
 | Answer style | General block: General. Technical block: Technical. |
 
+**Preflight, per block, before any audio.** A block whose preflight fails sends no speech. It is recorded as `preflight-failed`, with every fixture `not-run`. The preflight checks:
+
+- **Route:**
+  - The effective answer and classify models are `gpt-6-luna`, with no model notice and no effort override.
+  - Every route (answer, classify, parsing) is OpenAI.
+  - Chat is ready, retrieval uses embeddings, and memory is on.
+- **Speech-to-text:**
+  - Cloud transcription is ready.
+  - The model and VAD settings come from the session's own configuration message, seen by the meter in this process: `gpt-4o-transcribe`, server VAD, 300 / 600 ms.
+- **This process:**
+  - The meter is loaded and not capped.
+  - The latency file is empty.
+  - The seeded profile is present.
+- **Windows:**
+  - A secondary display exists.
+  - The dashboard and the Cue Card are visible, not minimized, and on the secondary display, according to the meter's window snapshot from this process.
+  - Chromium reports the Cue Card page as `visible`.
+
+The preflight's findings are written into `blocks.jsonl`.
+
 ## 4. Audio and capture
 
 - **Speech source:** each question is synthesized **locally** by Windows' built-in speech synthesizer to a 24 kHz PCM16 mono WAV (`scripts/perf01/make-audio.ps1`). This uses no network and opens no audio device.
 - **Delivery:** the driver streams each WAV into the session through the app's own audio IPC (`session.sendRealtimeAudio`), at real-time pace in 100 ms frames. That is followed by 1.5 s of silence so the VAD ends the turn.
-- **Nothing else is opened:** no microphone, call-audio capture or screen capture.
+- **Nothing else is opened.** The meter refuses microphone, call-audio and screen capture in main, as the offline guard does: permission requests, display media and `desktopCapturer`. Any attempt is logged in `ledger/requests.jsonl`.
 - **Optimistic speech:** synthetic speech is cleaner than a real interviewer's. Speech end → final may therefore be optimistic, and is reported as measured on synthetic speech.
-- **Screen requirement:** both app windows must be **visible on the second monitor** during the run: the dashboard, which streams the audio, and the Cue Card, which paints. A hidden or minimised Cue Card does not paint, so no useful-paint report arrives. The driver aborts a block if its warm-up never paints. Screen 1 stays the user's.
+- **Screen requirement:**
+  - Both app windows must be **visible on the second monitor** during the run: the dashboard, which streams the audio, and the Cue Card, which paints.
+  - The meter moves every window to a secondary display; the offline guard's placement is not active in the live tier.
+  - A hidden or minimised Cue Card does not paint. The preflight checks visibility, and a block whose warm-up never paints stops.
+  - Screen 1 stays the user's.
 
-## 5. Caps and stop conditions
+## 5. Budget, caps and stop conditions
+
+**The meter enforces the budget in main** (`scripts/perf01/live-meter.cjs`, loaded with `--require` into the app's main process only). For every provider request:
+
+1. The request is **held until its body is complete**. This covers `fetch` and `http`/`https`, which the OpenAI SDK and the realtime upgrade use.
+2. A **conservative upper bound is reserved**: the body's bytes / 3 as prompt tokens (English JSON is about 4 bytes per token), plus the body's own output ceiling. A request with no ceiling is charged 8,192.
+3. The request is **sent only if the run's caps still allow it**. Otherwise it is refused, as an offline machine's would be, and the ledger is marked **capped** for the rest of the run.
+
+Two more limits:
+
+- **Speech-to-text audio** is metered by the second as it is sent. Audio past the cap is not sent.
+- **One ledger serves the whole run** (`ledger/meter.json`). Setup, every block and every fresh process draw on the same budget. The ledger counts every request class (answer, classifier, prediction, embeddings, parsing, retries, warm-up), whether or not the provider reports usage.
+
+**The driver stops between questions** (`bench/perf01.budget.ts`). Before each question it checks that a whole question's worst case still fits the remaining budget. After each question, and again at the end of a block, it stops if the ledger is capped. A stopped block writes the fixtures it did not reach as `not-run`. The block is `stopped`, its evidence is saved, and the run is incomplete.
+
+**The worst case per question, from measured sizes.** The offline benchmark records what the meter would reserve for every answer request the real prompt builder produced: at most 4,365 (General), 4,653 (Technical) and 5,042 (in the 32-exchange session). The benchmark fails if any exceeds the 6,000 answer reserve.
+
+| Request | Reserve |
+| --- | --- |
+| Answer, one attempt | 6,000 |
+| Classifier, at most one | 1,000 |
+| Follow-up prediction | 1,000 |
+| Query embeddings, up to 3 | 1,000 |
+| **Per question** | **9,000 tokens, 9 requests** (6 plus 3 for retries) |
+| Setup, once: JD parsing (≈ 11 k with its 8,192 ceiling), indexing (≈ 6 k), memories, warm-ups | 25,000 tokens, 30 requests |
+
+**Caps** (environment variable, default):
 
 | Cap | Default | Variable |
 | --- | --- | --- |
-| Questions sent, whole run | 80 (2 × 31 warm + 10 cold, plus margin) | `PERF01_MAX_QUESTIONS` |
-| Tokens (prompt + completion), summed from the records | 400,000 | `PERF01_MAX_TOKENS` |
+| Questions spoken, whole run | 72 (2 × 31 warm + 10 cold, exactly the plan) | `PERF01_MAX_QUESTIONS` |
+| Reserved tokens, whole run | 673,000 (25 k setup + 72 × 9 k) | `PERF01_MAX_TOKENS` |
+| Provider requests, whole run | 678 (30 + 72 × 9) | `PERF01_MAX_REQUESTS` |
+| Speech-to-text audio, whole run | 900 s (72 × at most 11.5 s = 828 s) | `PERF01_MAX_STT_SECONDS` |
 | Failed or unpainted questions per block before it stops | 5 | `PERF01_MAX_FAILURES` |
 | Wait for a question's record | 30 s | `PERF01_QUESTION_TIMEOUT_MS` |
+| Wait for earlier answers to finish before the next question | 30 s, then the block stops | `PERF01_SETTLE_MS` |
 | Pause between questions | 15 s | `PERF01_GAP_MS` |
-| Wall clock | 45 min per warm block, 5 min per cold run (Playwright test timeouts) | — |
+| Wall clock | 45 min per warm block, 5 min per cold run, 5 min for the seed (Playwright test timeouts) | — |
 
-**Expected volume:**
+**Expected volume** (well under the caps):
 
 | Item | Count |
 | --- | --- |
-| Answers | about 72 |
-| Answer tokens, prompt | about 2.5 k each, about 180 k in total |
-| Answer tokens, completion | 43 k at most |
-| Follow-up predictions | up to 72 small calls |
-| Classifier calls | up to 72, on ambiguous turns only |
-| Query embeddings | up to about 150 |
-| Setup embeddings | about 40 chunks, in a few batched calls |
-| Speech-to-text | about 8 minutes of audio |
+| Answers | 72 |
+| Answer tokens, actual | about 3 k prompt (the measured requests are about 12 KB: system, context and question) + up to 0.6 k completion each, about 250 k in total |
+| Classifier and prediction calls | up to 144, small |
+| Query embeddings | up to about 216 |
+| Setup | 1 parse, a few embedding batches |
+| Speech-to-text | about 7 minutes of audio |
 
-**Expected time:** about 40 minutes in total.
+**Cost:**
 
-**Cost:** compute it from OpenAI's prices on the run date: tokens per model × price, plus transcription minutes × price. The app's own deliberately conservative estimate, which is not billing (`companion/costMeter.ts` rates), is under US $1 for this volume. If the cap is hit, the run stops and is reported as incomplete.
+- **Worst case,** bounded by the caps: 673,000 tokens × the higher of the per-token input and output prices of `gpt-6-luna` on the run date, plus 15 minutes of `gpt-4o-transcribe`. Compute it from OpenAI's price list on the run date, and record it in `run-notes.md` before the run.
+- **Expected:** a fraction of that, because the reservations overstate the real usage.
+- **App estimate:** the app's own estimate (`companion/costMeter.ts` rates) is about US $0.60 for the expected volume: answer, classifier and embedding floors plus about 300 k tokens. It is deliberately conservative, and it is not billing.
+
+**Expected time:** about 45 minutes in total.
 
 ## 6. Commands (PowerShell, from the repository root)
 
 ```powershell
-git rev-parse HEAD                                   # record in run-notes.md
+git rev-parse HEAD                                   # recorded in manifest.json too
 npm run build
-# 1. Dry run — offline: synthetic data, audio and framing; no session, no provider.
-$env:PERF01_DRY = '1'; npx playwright test -c playwright.live.config.ts e2e/live-perf01.spec.ts; Remove-Item Env:PERF01_DRY
-# 2. The live run — ONLY after approval. Needs OPENAI_API_KEY in .env.
-$env:PERF01_LIVE = '1'; npx playwright test -c playwright.live.config.ts e2e/live-perf01.spec.ts; Remove-Item Env:PERF01_LIVE
-# 3. The report.
-$env:PERF01_RESULTS = 'bench-results\perf01\live-<stamp>'; npm run perf01:report; Remove-Item Env:PERF01_RESULTS
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+# 1. Dry run, offline: seed, seed copy, meter, window snapshot, audio, report gate. No session, no provider.
+$env:PERF01_DRY = '1'; $env:PERF01_OUT = "bench-results\perf01\dry-$stamp"
+npx playwright test -c playwright.live.config.ts e2e/live-perf01.spec.ts
+Remove-Item Env:PERF01_DRY, Env:PERF01_OUT
+# 2. The live run — ONLY after approval. Needs OPENAI_API_KEY in .env. Both windows go to the second monitor.
+$env:PERF01_LIVE = '1'; $env:PERF01_OUT = "bench-results\perf01\live-$stamp"
+npx playwright test -c playwright.live.config.ts e2e/live-perf01.spec.ts
+Remove-Item Env:PERF01_LIVE, Env:PERF01_OUT
+# 3. The report: validates the folder first, and FAILS unless the evidence is valid.
+$env:PERF01_RESULTS = "bench-results\perf01\live-$stamp"; npm run perf01:report; Remove-Item Env:PERF01_RESULTS
 ```
 
-Do not use `npm run test:e2e:live` for this: it also runs the other live specs. The targeted command above runs only this driver.
+Do not use `npm run test:e2e:live` for this: it also runs the other live specs. The targeted command above runs only this driver. The blocks run in series. If one fails, the rest are skipped, and the report shows the run as incomplete.
 
-## 7. Evidence
+## 7. Evidence, and the check before any verdict
 
 Evidence goes to `bench-results/perf01/live-<stamp>/`. That folder is gitignored and outside `test-results/`, which Playwright clears on every run.
 
 | File | Content |
 | --- | --- |
-| `run.json` | fixture version, caps, start time, platform |
-| `rows.jsonl` | one line per question: the app's record, plus its fixture id, block, the time it was asked, and whether its grounding held the expected fact. A question with no record has its own line. |
+| `manifest.json` | the plan: run id, fixture version, commit and uncommitted-file count, caps, reference route and effort, and every block with its category, warm-up and fixture ids |
+| `seed.json`, `seed-userData/` | the seeded profile and Space; the user data each block copies |
+| `blocks.jsonl` | per block: start and end, the app process id, the status (`complete`, `stopped`, `preflight-failed`) and its reason, and the preflight's findings |
+| `rows.jsonl` | one line per fixture asked. It holds the app's record and the fixture id, plus: how it was attributed (detected text, or the final's time window); whether its context held the expected fact; whether usage was reported; and split-final and superseded counts. A fixture with nothing attributed is `no-record`; one the block never reached is `not-run`. |
 | `<block>-summary.json` | `api.metrics.latency()` at the end of the block: every evaluated turn's decision time, plus hardware |
-| `<block>-latency.jsonl` | the app's raw records, unlabelled |
+| `<block>-latency.jsonl` | the app's raw records, unlabelled, all of them |
+| `<block>-attribution.jsonl` | every raw record with the fixture it was attributed to, and how |
+| `ledger/meter.json` | the budget: reserved tokens, requests, refusals, speech-to-text seconds, request classes, the models on the wire, the speech-to-text configuration, and the cap if one was hit |
+| `ledger/requests.jsonl` | one line per request: its class, model, size and reservation, and whether it was sent. It holds no content. |
+| `ledger/windows.json` | the latest displays and windows snapshot |
 | `audio/` | the synthesized questions |
-| `report.md`, `report.json` | the acceptance view from `npm run perf01:report`: per category and cold/warm, censored p50/p95, verdicts, stages, outcomes, routes and effort, context sizes, unanswered questions and grounding misses |
+| `report.md`, `report.json` | the acceptance view from `npm run perf01:report` |
 
-The handoff carries `report.md`, the commit, and `run-notes.md` (network and anything unusual).
+**Attribution.** A record is never matched by row order. It goes to a fixture by the question the app detected, which is the card title, matched against every fixture of the block. A record with no text, missed before its card opened, goes by the time window its final fell in. So a late record for one question can't become the next question's sample. Before each question, the driver waits until every detected question has a finished record. If something is still in flight after 30 s, the block stops.
+
+**The evidence check** (`bench/perf01.evidence.ts`). The report gives verdicts only if the folder matches its manifest. All of these must hold:
+
+- **Blocks:** every planned block completed, passed its preflight, and ran in its own process.
+- **Fixtures:** every planned fixture appears exactly once, in its block and category.
+- **Cold and warm:** cold samples are their process's first answer, and warm samples are not.
+- **Answers:** every answer used `openai/gpt-6-luna` at effort `none`, and its context held its fact.
+- **Attribution:** every attribution was clear.
+- **Decision evidence:** every warm block has its all-turn decision summary.
+- **Budget:** the meter covered the run, never capped it, and saw only the reference models and speech-to-text model.
+
+Any issue makes every verdict "invalid evidence". The latencies stay in the report as diagnostics. The report command fails on invalid evidence. Missing fixtures stay in the denominator as unanswered.
+
+The handoff carries `report.md`, the commit, and `run-notes.md` (network, prices on the day, and anything unusual).
 
 ## 8. Already checked offline
 
-- **The offline benchmark** (`npm run bench:perf01`) runs the same fixtures through the real engine, database, retrieval, recall, archive and answer prompt, with simulated vendors. It asserts each question's grounding and stage timings, and writes `bench-results/perf01/simulated-report.md`, labelled SIMULATED.
-- **The dry run passes:** 61 audio files are synthesized and checked (1–10 s of speech each), and the synthetic profile and Space are created through the app's IPC. Memories are skipped in the dry run because they need the embedding provider.
-- **The report runner** was checked on a mock results folder: a missing question is counted as unanswered, and the warm-up is not a sample.
-- **Not yet exercised:** the live session start, real STT, the paint reports in a visible Cue Card, and the token cap. The first live run exercises them, which is why its first block stops on the conditions above.
+- **The offline benchmark** (`npm run bench:perf01`):
+  - It runs the same fixtures through the real engine, database, retrieval, recall, archive and answer prompt, with simulated vendors.
+  - It asserts each question's grounding and stage timings.
+  - It measures the answer reservations the budget is based on.
+  - It writes `bench-results/perf01/simulated-report.md`, labelled SIMULATED.
+- **The attribution** (`perf01.collect.test.ts`) passes these cases, all on the code the driver collects with:
+  - a late record for A arriving while B is asked;
+  - out-of-order completions;
+  - a final landing in the next window;
+  - split finals;
+  - several takes;
+  - a record with no text;
+  - settling.
+- **The evidence check** (`perf01.evidence.test.ts`):
+  - It passes a complete valid run as the control.
+  - It rejects the review case: 30 × G01, 30 × T01, 70 grounding misses and no decision summaries.
+  - It rejects each kind of invalid evidence on its own.
+- **The meter** (`perf01.meter.test.ts`) runs real child processes on the OpenAI SDK and `ws`, against a fake loopback provider. It shows:
+  - a refused request never reaches the provider;
+  - the one-token cap case;
+  - the final request over the cap;
+  - accumulation across processes;
+  - unbounded requests and setup calls;
+  - the request cap, and that it fails closed;
+  - non-provider hosts refused;
+  - speech-to-text seconds metered and capped, with its model recorded.
+- **The block loop** (`perf01.budget.test.ts`) shows:
+  - the one-token cap stops before speaking;
+  - a final question over the cap stops the block;
+  - not-run lines;
+  - accumulation across blocks;
+  - that unreported usage changes nothing;
+  - setup spending is counted;
+  - no meter, nothing asked;
+  - in-flight work stops the block;
+  - a warm-up that never paints stops the block.
+- **The dry run passes**, under the offline guard:
+  - the seed in one process;
+  - a fresh process on its copy, which sees the profile and has an empty latency file;
+  - the meter loaded once in main and sending nothing;
+  - its window snapshot from that process, with every window on the secondary display;
+  - 61 audio files, 1–10 s each;
+  - the report gate rejecting the unrun folder.
+- **Not yet exercised:** the live session start, real STT, the paint reports in a visible Cue Card, and real provider traffic through the meter. The first live block's preflight and stop conditions cover them.

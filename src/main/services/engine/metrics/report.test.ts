@@ -27,6 +27,8 @@ const row = (over: Partial<Row> = {}): Row => {
   };
 };
 const many = (k: number, over: Partial<Row> = {}) => Array.from({ length: k }, () => row(over));
+/** A live run's evidence check that passed (bench/perf01.evidence.ts). */
+const OK = { evidence: { valid: true, issues: [] } };
 
 describe('PERF-01 report', () => {
   it('a simulated report never says "met", however fast', () => {
@@ -45,18 +47,18 @@ describe('PERF-01 report', () => {
     const slow = many(2, { category: 'technical', firstUsefulAt: 4000 });
     const r = buildReport(
       [...many(30), ...many(5, { cold: true }), ...many(28, { category: 'technical' }), ...slow],
-      { simulated: false, title: 'live' },
+      { simulated: false, title: 'live', ...OK },
     );
     expect(r.verdicts.general).toEqual({ samples: 'met', usefulP50: 'met', usefulP95: 'met', cold: 'met' });
     expect(r.verdicts.technical).toMatchObject({ samples: 'met', usefulP50: 'met', usefulP95: 'not met', cold: 'insufficient samples' });
-    const few = buildReport(many(10), { simulated: false, title: 'few' });
+    const few = buildReport(many(10), { simulated: false, title: 'few', ...OK });
     expect(few.verdicts.general.usefulP95).toBe('insufficient samples');
   });
 
   it('unanswered questions stay in the denominator and are listed by fixture id', () => {
     const r = buildReport(
       [...many(28), row({ fixtureId: 'G29', outcome: 'failed', reason: 'network', firstTokenAt: undefined, firstUsefulAt: undefined }), row({ fixtureId: 'G30', firstUsefulAt: undefined })],
-      { simulated: false, title: 'x' },
+      { simulated: false, title: 'x', ...OK },
     );
     expect(r.summary.byCategory.general.warm.endToEnd).toMatchObject({ n: 30, unanswered: 2 });
     expect(r.verdicts.general.usefulP95).toBe('not met'); // 2 of 30 unanswered → p95 is "not answered"
@@ -74,10 +76,27 @@ describe('PERF-01 report', () => {
     expect(r.summary.byCategory.general.warm.endToEnd).toMatchObject({ n: 1, p50: 600 });
   });
 
-  it('decision p95 uses every evaluated turn when the in-app summary supplies it', () => {
+  it('decision p95 uses every evaluated turn; a live run without that evidence gets no decision verdict', () => {
     const rows = many(30, { decidedAt: 100 });
-    expect(buildReport(rows, { simulated: false, title: 'x' }).decision).toBe('met');
-    expect(buildReport(rows, { simulated: false, title: 'x', decisionsAllTurns: { n: 200, p50: 0, p95: 1800 } }).decision).toBe('not met');
+    expect(buildReport(rows, { simulated: false, title: 'x', ...OK, decisionsAllTurns: { n: 200, p50: 0, p95: 900 } }).decision).toBe('met');
+    expect(buildReport(rows, { simulated: false, title: 'x', ...OK, decisionsAllTurns: { n: 200, p50: 0, p95: 1800 } }).decision).toBe('not met');
+    // Question-only timings are never promoted to the all-turn target in a live run.
+    expect(buildReport(rows, { simulated: false, title: 'x', ...OK }).decision).toBe('invalid evidence');
+    expect(buildReport(rows, { simulated: true, title: 'x' }).decision).toBe('simulated — not acceptance');
+  });
+
+  it('a live report without a passed evidence check is "invalid evidence" everywhere, its latencies kept as diagnostics', () => {
+    const rows = [...many(30), ...many(30, { category: 'technical' }), ...many(5, { cold: true }), ...many(5, { cold: true, category: 'technical' })];
+    for (const opts of [{}, { evidence: { valid: false, issues: [{ code: 'fixture-duplicate', detail: 'warm-general/G01 ×30' }] } }]) {
+      const r = buildReport(rows, { simulated: false, title: 'x', decisionsAllTurns: { n: 99, p50: 1, p95: 2 }, ...opts });
+      expect(r.verdicts.general).toEqual({ samples: 'invalid evidence', usefulP50: 'invalid evidence', usefulP95: 'invalid evidence', cold: 'invalid evidence' });
+      expect(r.decision).toBe('invalid evidence');
+      expect(r.summary.byCategory.general.warm.endToEnd.p50).toBe(1000);
+      const md = renderMarkdown(r);
+      expect(md.split('\n')[2]).toMatch(/^\*\*INVALID OR INCOMPLETE EVIDENCE/);
+      expect(md).toMatch(/## Evidence check/);
+      expect(md).not.toMatch(/\| met \|/);
+    }
   });
 
   it('routes and context sizes are reported', () => {

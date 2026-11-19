@@ -105,8 +105,12 @@ Three tiers, kept apart:
     after a failed rollback is said in the Cue Card.
   - `live-perf01.spec.ts` (live tier, M7.2b): the PERF-01 live benchmark driver. It is
     prepared and not run, and needs `PERF01_LIVE=1`, a key and the approved plan
-    (docs/benchmarks/PERF01-LIVE-PLAN.md). `PERF01_DRY=1` checks it offline: the synthetic
-    data, the locally synthesized audio and the framing, with no session and no provider.
+    (docs/benchmarks/PERF01-LIVE-PLAN.md). It loads the budget meter into main
+    (`scripts/perf01/live-meter.cjs`, through the `mainPreloads` option), seeds the data once
+    and runs each block on a copy (`userDataDir` / `seedUserData`). `PERF01_DRY=1` checks it
+    offline, under the guard: the seed and its copy, the meter's ledger and window snapshot,
+    the locally synthesized audio and the report gate. No session starts and no provider is
+    called.
   - `useful-paint.spec.ts` (M7.2b, PERF-01) — the Cue Card reports the first USEFUL paint
     only once the painted text holds a real word. A bare `**` or a bullet marker split
     across tokens is not reported; one report per card, and again after a regenerate.
