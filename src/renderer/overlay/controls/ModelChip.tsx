@@ -54,15 +54,16 @@ export function ModelChip({
     ? `${name}: the next ${task === 'coding' ? 'solve' : 'answer'} uses ${provider} · ${modelLabel(next)} (${value ? 'your choice' : 'automatic'}).${notice ? ` ${notice}` : ''}`
     : name;
   return (
-    <span className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-neutral-500" title={detail} data-model-task={task}>
-      {name}
+    <span className="flex w-full min-w-0 max-w-[18rem] flex-col gap-1 text-[10px] text-neutral-400" title={detail} data-model-task={task}>
+      <span>{name}</span>
       <Dropdown
         value={value}
         options={rows}
+        fixedList
         disabled={!settings}
         ariaLabel={`${name} model`}
         buttonLabel={next ? `${notice ? '⚠ ' : ''}${modelLabel(next)}` : '…'}
-        buttonClassName={`flex max-w-[11rem] items-center gap-1 ${ctrlSelect}`}
+        buttonClassName={`flex h-7 w-full items-center justify-between gap-2 ${ctrlSelect}`}
         onChange={(v) => {
           if (addKeyProvider(v)) {
             void api.window.openDashboard('/settings/models');

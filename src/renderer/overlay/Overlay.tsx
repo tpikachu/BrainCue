@@ -553,7 +553,7 @@ export default function Overlay() {
 
   return (
     <div
-      className="flex h-screen flex-col bg-neutral-900 p-2.5 text-neutral-100"
+      className="relative flex h-screen flex-col bg-neutral-900 p-2.5 text-neutral-100"
       style={{ fontSize: `${fontSize}px` }}
     >
       <HeaderBar
@@ -575,7 +575,11 @@ export default function Overlay() {
       />
 
       {moreOpen && (
-        <div ref={moreRef} id="cue-more-controls" className="shrink-0">
+        <div
+          ref={moreRef}
+          id="cue-more-controls"
+          className="absolute inset-x-2.5 top-[4.125rem] z-30 max-h-[calc(100vh-7.5rem)] overflow-y-auto overscroll-contain rounded-xl shadow-xl shadow-black/40"
+        >
           <MoreTray
             live={live}
             interviewType={interviewType}

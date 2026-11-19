@@ -369,6 +369,7 @@ export function Dropdown({
   disabled = false,
   buttonLabel,
   ariaLabel,
+  fixedList = false,
 }: {
   value: string;
   options: DropdownOption[];
@@ -380,12 +381,14 @@ export function Dropdown({
   buttonLabel?: string;
   /** Accessible name when no enclosing label gives one. */
   ariaLabel?: string;
+  /** Keep an in-window list outside a scrollable control panel's clipping. */
+  fixedList?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [openUp, setOpenUp] = useState(false);
-  /** Where the open list sits: `x` shifts it back inside the window, `maxH`
-   *  keeps it within the room on its side (px). */
-  const [place, setPlace] = useState({ x: 0, maxH: 256 });
+  /** Placement in the control, or viewport coordinates for a fixed list.
+   *  The list stays in this DOM/window to preserve capture protection. */
+  const [place, setPlace] = useState({ x: 0, y: 0, width: 0, maxH: 256 });
   const placeRef = useRef(place);
   placeRef.current = place;
   const listRef = useRef<HTMLUListElement>(null);
@@ -412,7 +415,7 @@ export function Dropdown({
       const room = 240;
       setOpenUp(r.bottom + room > window.innerHeight && r.top > window.innerHeight - r.bottom);
     }
-    setPlace({ x: 0, maxH: 256 }); // measured once the list is laid out (below)
+    setPlace({ x: 0, y: 0, width: 0, maxH: 256 }); // measured once the list is laid out (below)
     const start =
       at === 'last'
         ? enabled[enabled.length - 1]
@@ -516,14 +519,18 @@ export function Dropdown({
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     const r = el.getBoundingClientRect();
-    const left = r.left - placeRef.current.x; // where it sits unshifted
+    const b = root.getBoundingClientRect();
+    const left = fixedList ? b.left : r.left - placeRef.current.x;
     let x = Math.min(0, vw - margin - (left + r.width));
     if (left + x < margin) x = margin - left;
-    const b = root.getBoundingClientRect();
+    if (fixedList) x += left;
     const up = b.bottom + 240 > vh && b.top > vh - b.bottom;
-    const maxH = Math.round(Math.max(96, Math.min(256, (up ? b.top : vh - b.bottom) - margin - 4)));
+    const maxH = Math.round(Math.max(fixedList ? 48 : 96, Math.min(256, (up ? b.top : vh - b.bottom) - margin - 4)));
+    const h = Math.min(r.height, maxH);
+    const y = fixedList ? Math.max(margin, Math.min(up ? b.top - h - 4 : b.bottom + 4, vh - margin - h)) : 0;
+    const width = Math.min(b.width, vw - margin * 2);
     setOpenUp(up);
-    if (x !== placeRef.current.x || maxH !== placeRef.current.maxH) setPlace({ x, maxH });
+    if (x !== placeRef.current.x || y !== placeRef.current.y || width !== placeRef.current.width || maxH !== placeRef.current.maxH) setPlace({ x, y, width, maxH });
   };
   useLayoutEffect(() => {
     if (!open) return;
@@ -531,9 +538,11 @@ export function Dropdown({
     const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => placeList());
     if (listRef.current) ro?.observe(listRef.current);
     window.addEventListener('resize', placeList);
+    window.addEventListener('scroll', placeList, true);
     return () => {
       ro?.disconnect();
       window.removeEventListener('resize', placeList);
+      window.removeEventListener('scroll', placeList, true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -623,17 +632,19 @@ export function Dropdown({
           data-ct-popover
           role="listbox"
           style={{
+            position: fixedList ? 'fixed' : 'absolute',
             left: place.x,
+            ...(fixedList ? { top: place.y } : {}),
             // As wide as the longest row, at least the control's width, and
             // never wider than the window (min-width alone used to win over
             // the cap, so a full catalog ran 495 px wide in a 360 px window).
             width: 'max-content',
-            minWidth: 'min(100%, calc(100vw - 16px))',
+            minWidth: fixedList ? place.width : 'min(100%, calc(100vw - 16px))',
             maxWidth: 'min(22rem, calc(100vw - 16px))',
             maxHeight: place.maxH,
           }}
           className={`absolute left-0 z-[60] overflow-y-auto overflow-x-hidden rounded-lg border border-neutral-700 bg-neutral-900 py-1 shadow-xl shadow-black/50 ${
-            openUp ? 'bottom-full mb-1' : 'top-full mt-1'
+            fixedList ? '' : openUp ? 'bottom-full mb-1' : 'top-full mt-1'
           }`}
         >
           {options.map((o, i) => (

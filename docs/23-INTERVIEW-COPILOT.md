@@ -486,6 +486,17 @@ parsing task's provider, so the sample interview can start on any provider.
   The ⋯ tray closes on an outside press, Escape or window blur; its inner
   model list consumes Escape first. Settings replaces the tray. Open controls
   suspend click-through so their outside press reaches the Cue Card.
+  - **Toolbar polish (UI-04).** Session status and the role/company sit on
+    two lines beside consistent 28 px controls; Privacy and click-through
+    form one group, with visible Pause/Resume and Stop labels. The Ask row
+    is one surface anchored below the answer. Secondary controls open in a
+    bounded, scrollable panel instead of moving the answer and Ask row below
+    the window. Style and Interview answers share a row; tools and grounding
+    have their own groups, and optional session notes start collapsed.
+    The model list uses viewport positioning within the same DOM/window so
+    it escapes the panel's scroll clipping while keeping capture protection,
+    outside dismissal and keyboard navigation. Renderer checks cover 360
+    and 467 px widths and the 240 px minimum height, including coding.
 - **Readable history** (M6, `SessionsPage`, `SessionDetailModal`,
   `sessionTimeline.ts`). Sessions are paged on the server (`session:page`).
   Opening one reads the persisted session only (`session:get`) — no key, no

@@ -103,6 +103,12 @@ Three tiers, kept apart:
   - `cue-card.spec.ts` — the current question dominates; missed questions stay with why and
     a retry; earlier cards behind a toggle; sources name the provider; an unconfirmed Stop
     after a failed rollback is said in the Cue Card.
+  - `cue-toolbar.spec.ts` (UI-04) — toolbar and Ask controls fit 360 and 467 px
+    windows, including the 240 px minimum height. Pause, manual Ask, style and
+    solve actions still reach the bridge. The coding menu scrolls without
+    displacing Ask, and its model list fits the short viewport and accepts a
+    keyboard choice. Optional `UI_PREVIEW_DIR` with `HARNESS_CAPTURE_PORT`
+    saves fixture-window previews; no real session or desktop is captured.
   - `live-perf01.spec.ts` (live tier, M7.2b): the PERF-01 live benchmark driver. It is
     prepared and not run, and needs `PERF01_LIVE=1`, a key and the approved plan
     (docs/benchmarks/PERF01-LIVE-PLAN.md). It loads the budget meter into main
