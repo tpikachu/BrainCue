@@ -23,7 +23,7 @@ const h = vi.hoisted(() => ({
   packMemory: true,
   memoryRows: ['m1'],
   memoryText: 'Prefers to lead with the payments migration.',
-  inputs: [] as { memories?: { id: string; content: string }[] }[],
+  inputs: [] as { memories?: { id: string; content: string }[]; contextChunks?: { content: string }[] }[],
   opened: [] as string[],
 }));
 
@@ -131,7 +131,7 @@ const mode: ModeDefinition = {
   defaultPresence: 'balanced',
   reportStrategy: 'interview_coaching',
   async *generate(input) {
-    h.inputs.push({ memories: input.memories?.map((m) => ({ id: m.id, content: m.content })) });
+    h.inputs.push({ memories: input.memories?.map((m) => ({ id: m.id, content: m.content })), contextChunks: input.contextChunks });
     await new Promise((r) => setTimeout(r, TTFT));
     if (input.signal?.aborted) throw new Error('aborted');
     if (h.generate === 'auth-error') throw Object.assign(new Error('bad key'), { status: 401 });
@@ -181,6 +181,46 @@ const settle = async (p: Promise<unknown>) => {
 };
 
 describe('the latency record of a detected question', () => {
+  it.each(['general', 'technical'] as const)('a %s interview starts after 350 ms even when the semantic lookup is unfinished, keeping its document facts', async (format) => {
+    const s = session(format);
+    const p = s.onTranscriptFinal('How did you scale the payments service at your last company?');
+    await vi.advanceTimersByTimeAsync(349);
+    expect(h.inputs).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.inputs).toHaveLength(1);
+    expect(h.inputs[0].contextChunks?.map((c) => c.content)).toContain('Scaled the payments service to 40k rps.');
+    await settle(p);
+    const t = latency.all().at(-1)!;
+    expect(t.requestAt! - t.dispatchAt!).toBe(350);
+    expect(t.groundingDeadlineHit).toBe(true);
+    expect(t.lexical).toContain('documents');
+    s.teardown();
+  });
+
+  it('a still-running prefetch has the same short wait; its late result cannot replay the answer', async () => {
+    const s = session();
+    const q = 'How did you scale the payments service at your last company?';
+    s.prefetchGrounding(q);
+    await vi.advanceTimersByTimeAsync(100);
+    const p = s.onTranscriptFinal(q);
+    await vi.advanceTimersByTimeAsync(350);
+    expect(h.inputs).toHaveLength(1);
+    await settle(p);
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(h.inputs).toHaveLength(1);
+    s.teardown();
+  });
+
+  it('coding retains its longer context budget rather than falling back at 350 ms', async () => {
+    const s = session('technical');
+    const p = s.generateContribution('coding-card', 'Write a function for the payments service.', 'coding');
+    await vi.advanceTimersByTimeAsync(350);
+    expect(h.inputs).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(EMBED - 350);
+    expect(h.inputs).toHaveLength(1);
+    await settle(p);
+    s.teardown();
+  });
   it('times each stage on its own; memory is recalled with the documents on the interim; the record carries no text', async () => {
     const s = session();
     const Q = 'How did you scale the payments service at your last company?';
@@ -227,8 +267,9 @@ describe('the latency record of a detected question', () => {
     s.prefetchGrounding('What is our budget for the third quarter campaign');
     await vi.advanceTimersByTimeAsync(1200);
     await settle(s.onTranscriptFinal('Why did you leave your last role?'));
-    // Only the answered question's recall marked m1 — once.
-    expect(h.markUsed).toEqual([['m1']]);
+    // The discarded semantic result is never used. The answered question
+    // exhausted its wait budget and has no lexical match for that memory.
+    expect(h.markUsed).toEqual([[]]);
   });
 
   it('in the Technical style a question is Technical; a provider failure is written as failed with its kind — still in the sample', async () => {

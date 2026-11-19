@@ -237,7 +237,7 @@ const NO_CONTEXT_LINE: Record<AnswerFraming, string> = {
  *  labelled so in the prompt, where it matters. */
 const SOURCE_LABEL: Partial<Record<string, string>> = {
   resume: 'resume — the candidate\'s own background',
-  tailored: 'resume, tailored for this role — the candidate\'s own background',
+  tailored: 'resume selected for this role — the candidate\'s own background',
   profile: 'profile — what the candidate says about themselves',
   story: 'story — the candidate\'s own example',
   note: 'note — the candidate\'s own note',

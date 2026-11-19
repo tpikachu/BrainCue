@@ -19,7 +19,18 @@ describe('resolveChatTask — provider-aware defaults', () => {
       model: 'gpt-6-luna',
       source: 'policy',
     });
-    expect(resolveChatTask('answer', { provider: 'openai', preference: 'quality', keys: openaiOnly }).model).toBe('gpt-6.1-terra');
+    expect(resolveChatTask('answer', { provider: 'openai', preference: 'quality', keys: openaiOnly }).model).toBe('gpt-6-luna');
+  });
+
+  it('normal interview answers keep the fast model on every provider; deeper preferences still apply to coding', () => {
+    for (const provider of Object.keys(PROVIDER_PLANS) as (keyof typeof PROVIDER_PLANS)[]) {
+      const keys = { [provider]: true };
+      const fast = resolveChatTask('answer', { provider, preference: 'fast', keys });
+      for (const preference of ['balanced', 'quality'] as const) {
+        expect(resolveChatTask('answer', { provider, preference, keys }).model).toBe(fast.model);
+      }
+    }
+    expect(resolveChatTask('coding', { provider: 'openai', preference: 'quality', keys: openaiOnly }).model).toBe('gpt-6.2-astra');
   });
 
   it('defaults to a provider that HAS a key — an Anthropic-only user gets Claude, not an OpenAI error', () => {
@@ -178,6 +189,6 @@ describe('helpers', () => {
 
   it('explains the answer model in one line', () => {
     const r = resolveChatTask('answer', { provider: 'anthropic', preference: 'fast', keys: { anthropic: true } });
-    expect(explainAnswerModel(r, 'fast')).toBe('Anthropic · Claude Haiku 5.5 — Fast picks the lowest first-token latency.');
+    expect(explainAnswerModel(r, 'fast')).toBe('Anthropic · Claude Haiku 5.5 — prioritizes fast interview cues; coding can use deeper models.');
   });
 });

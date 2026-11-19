@@ -76,6 +76,9 @@ export const contextPacks = sqliteTable(
     companyUrl: text('company_url'), // optional company website to research
     companyResearch: text('company_research'), // raw text scraped from the site
     parsedCompany: text('parsed_company'), // json — structured interview-relevant research
+    // The résumé supplied for this role. Null inherits the profile default;
+    // it never changes the résumé of the profile or another Space.
+    resumeText: text('resume_text'),
     // The profile's résumé rewritten against THIS Space's job description.
     // A Space-level document like the JD beside it: it belongs to the role you
     // are interviewing for, is indexed pack-scoped, and substitutes for the

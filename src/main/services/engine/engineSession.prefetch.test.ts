@@ -30,7 +30,8 @@ vi.mock('../../db/repositories/profiles.repo', () => ({
 vi.mock('../security/logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock('../memory/recall', () => ({ recallMemories: async () => [], markRecalled: () => {}, revalidateRecalled: (_p: string, _k: unknown, m: unknown) => m }));
 vi.mock('./grounding', () => ({
-  ground: async (_profileId: string, query: string) => {
+  ground: async (_profileId: string, query: string, _pack: unknown, _mode: unknown, opts?: { cached?: unknown[] }) => {
+    if (opts?.cached) return opts.cached; // local corpus check, not a second query embedding
     h.groundCalls.push(query);
     return [{ id: `chunk-for:${query}`, content: query, sourceType: 'notes', score: 1 }];
   },

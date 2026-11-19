@@ -91,6 +91,9 @@ export interface QuestionTiming {
   retrievalMs?: number;
   /** Memory recall's own run time (likewise). */
   recallMs?: number;
+  /** Wait allowance and whether the answer used immediate lexical fallback. */
+  groundingBudgetMs?: number;
+  groundingDeadlineHit?: boolean;
   /** The first attempt was sent to the provider. */
   requestAt?: number;
   firstTokenAt?: number;

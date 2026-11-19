@@ -221,7 +221,10 @@ consent-gated).
 
 ## 5. Model selection (`shared/modelPolicy.ts`, `openai/models.ts`)
 
-The user picks a **provider** and **Fast / Balanced / Quality**. Each chat task
+The user picks a **provider** and **Fast / Balanced / Quality**. Normal live
+answers prioritize the fast candidate at every preference; deeper preferences
+still apply to coding and preparation. An explicit answer override is honored.
+Each chat task
 resolves to an ordered candidate list for that provider and preference; the
 first one the account can use wins. "Can use" = the provider has a key, the
 account's own model list (discovery — `GET /models`, cached, refreshed at
@@ -229,15 +232,15 @@ startup and on key change, never on the answer path; a list older than 7 days
 stops filtering) includes it, and it has not failed as unavailable this
 process.
 
-Defaults (first candidates), verified 2026-11-17 — OpenAI against an account's
+Catalog provenance (2026-11-17) — OpenAI against an account's
 live `/v1/models`, the others against vendor docs only:
 
 | Provider | Fast answer | Balanced answer | Quality answer | Classify | Coding (Balanced) |
 | --- | --- | --- | --- | --- | --- |
-| OpenAI | gpt-6-luna | gpt-6-luna | gpt-6.1-terra | gpt-6-luna | gpt-6.2-astra |
-| Anthropic | claude-haiku-5-5 | claude-sonnet-5-5 | claude-opus-5-5 | claude-haiku-5-5 | claude-opus-5-5 |
-| Google | gemini-3.5-flash-lite | gemini-3.8-flash | gemini-4-argon | gemini-3.5-flash-lite | gemini-4-carbon |
-| Groq | openai/gpt-oss-20b | openai/gpt-oss-120b | openai/gpt-oss-120b | openai/gpt-oss-20b | openai/gpt-oss-120b |
+| OpenAI | gpt-6-luna | gpt-6-luna | gpt-6-luna | gpt-6-luna | gpt-6.2-astra |
+| Anthropic | claude-haiku-5-5 | claude-haiku-5-5 | claude-haiku-5-5 | claude-haiku-5-5 | claude-opus-5-5 |
+| Google | gemini-3.5-flash-lite | gemini-3.5-flash-lite | gemini-3.5-flash-lite | gemini-3.5-flash-lite | gemini-4-carbon |
+| Groq | openai/gpt-oss-20b | openai/gpt-oss-20b | openai/gpt-oss-20b | openai/gpt-oss-20b | openai/gpt-oss-120b |
 
 Sources: developers.openai.com/api/docs/models (+ /deprecations),
 platform.claude.com/docs/en/about-claude/models/overview (+ /effort),
@@ -800,3 +803,49 @@ real audio: run the manual script in the handoff, then read `latency.jsonl`.
 The held-out set is small and hand-written; it is a regression signal, not a
 benchmark. Grow it from real misses (never from a user's transcripts without
 their say-so), and keep tuning and measuring on different sets.
+
+## 10. Stable 2.3.0 follow-up: role résumés and a short live context budget
+
+Requested 2026-11-19 after the Windows preview was published. The stable
+release is conditional on these changes and measured live acceptance.
+
+**Role résumé.** New/edit role offers Default résumé or Different résumé.
+The latter accepts a file through the existing extractor or pasted text.
+`jobs.resume_text` (migration 0018) is nullable: null inherits the profile;
+non-null is the submitted résumé for this role. The profile and other roles
+are unchanged. Existing AI-tailored versions remain supported: the derived
+`tailoredResume` takes precedence, and changing the submitted résumé clears
+the old derived version. Prep briefs and tailoring use this role's input.
+Setup and the Cue Card recognize a role résumé even without a parsed default.
+
+Saving a résumé invalidates its old scoped chunks synchronously. Reindexing
+writes the new text before embedding. A JD parsing or embedding failure
+reports the partial result and retains the saved text for local matching;
+database failures are not described as successful indexing. Scoped résumé
+selection is independent of embedding compatibility, so an unembedded custom
+résumé never silently reintroduces the embedded profile default.
+
+**Context freshness.** Before an early result is sent, its chunk IDs/content
+are checked against the current scope. A changed, removed or replaced
+document causes local re-ranking of the current scope. A query embedding
+that finishes after a corpus change also uses the current scope. This closes
+the pending CTX-01 early-document issue for the candidate; the published
+preview still has its documented limitation. Already-sent input cannot be
+withdrawn.
+
+**Normal interview wait.** Interview/practice/assist cues wait at most
+350 ms for their combined document/memory lookup after taking the answer
+slot. This includes an unfinished prefetch. Ready prefetch results add no
+wait. At the deadline, the current documents and consented memories are
+ranked locally; the bounded background lookup cannot replay the answer.
+This trades semantic ranking for bounded latency on that answer, so quality
+and grounding must be checked alongside speed. Coding retains a 2.5 s
+context allowance; its solver model and effort stay separately configurable.
+Other modes retain their existing wait behavior.
+
+Timing records include `groundingBudgetMs` and `groundingDeadlineHit` in
+addition to dispatch/request/first-word stages. All provider policy defaults
+favor the fast answer candidate; availability fallbacks, explicit overrides
+and same-provider retries remain intact. No first-word target is claimed
+from the simulated benchmark. General and short Technical require separate
+live p50/p95 results before stable promotion.

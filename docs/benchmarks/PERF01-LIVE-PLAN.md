@@ -69,7 +69,7 @@ The meter (§5) refuses any main-process connection to another host. The session
 | Answer model | OpenAI `gpt-6-luna`, pinned by an override for the run. Reasoning effort `none` (the live task's lowest, recorded per answer). Output ceiling 360 tokens (General) / 600 (Technical). |
 | Classifier | OpenAI `gpt-6-luna` (pinned). Rules decide clear turns; the classifier is asked only on ambiguous ones, with a 1.2 s time limit. |
 | Parsing | OpenAI `gpt-6-luna` (pinned), setup only |
-| Embeddings | OpenAI `text-embedding-3-small` (2.5 s limit on the live path) |
+| Embeddings | OpenAI `text-embedding-3-small`; request bounded at 2.5 s. Normal interview answers wait at most 350 ms for unfinished grounding, then rank the current local documents/memories lexically. Ready interim results are reused. Coding retains a longer allowance. |
 | Speech-to-text | OpenAI Realtime GA transcription, `gpt-4o-transcribe`, server VAD (300 ms prefix, 600 ms silence) |
 | Memory | on, globally and for the Space |
 | Answer style | General block: General. Technical block: Technical. |

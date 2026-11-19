@@ -19,6 +19,7 @@ import { assessUtterance } from './interview/questionHeuristics';
 import type { Detection } from './interview/detector';
 import { latency } from './metrics/latencyStore';
 import { latencyCategory, type Outcome, type QuestionTiming } from './metrics/latency';
+import { CODING_CONTEXT_WAIT_MS, INTERVIEW_CONTEXT_WAIT_MS, withinContextBudget } from './contextDeadline';
 import { liveTaskEffort } from '@shared/modelPolicy';
 import type { ClassifierTurn } from '../openai/questions';
 import { normalizeProviderError } from '../../providers/normalizeError';
@@ -539,7 +540,7 @@ export class EngineSession {
   /** Documents and memory for a question, in PARALLEL — they used to run one
    *  after the other. Memories are not marked used here (a prefetch may be
    *  discarded); generateContribution marks the ones an answer uses. */
-  private gather(profileId: string, questionText: string, packId: string | null): Promise<Gathered> {
+  private gather(profileId: string, questionText: string, packId: string | null, lexicalOnly = false): Promise<Gathered> {
     const lexical: Gathered['lexical'] = [];
     const timed = async <T>(work: () => Promise<T>) => {
       const start = Date.now();
@@ -547,10 +548,10 @@ export class EngineSession {
       return { value, ms: Date.now() - start };
     };
     const docs = timed(() =>
-      ground(profileId, this.retrievalQuery(questionText), packId, this.mode.id, { onLexical: () => lexical.push('documents') }),
+      ground(profileId, this.retrievalQuery(questionText), packId, this.mode.id, { ...(lexicalOnly ? { lexicalOnly: true } : {}), onLexical: () => lexical.push('documents') }),
     );
     const memory = timed(() =>
-      recallMemories(profileId, questionText, packId, Date.now(), { markUsed: false, onLexical: () => lexical.push('memory') }),
+      recallMemories(profileId, questionText, packId, Date.now(), { markUsed: false, lexicalOnly, onLexical: () => lexical.push('memory') }),
     );
     return Promise.all([docs, memory]).then(([d, m]) => ({
       chunks: d.value,
@@ -733,12 +734,25 @@ export class EngineSession {
       // never throws; cited separately as [M1]…), gathered in parallel —
       // usually already on the interim. A failed prefetch gathers afresh.
       const pending = this.takePrefetch(questionText);
-      const early = pending ? await pending.catch(() => null) : null;
-      const gathered = early ?? (await this.gather(profile.id, questionText, session.packId));
+      const work = pending
+        ? pending.then((gathered) => ({ gathered, early: true })).catch(async () => ({ gathered: await this.gather(profile.id, questionText, session.packId), early: false }))
+        : this.gather(profile.id, questionText, session.packId).then((gathered) => ({ gathered, early: false }));
+      const interview = ['interview', 'practice', 'interviewer_assist'].includes(this.mode.id);
+      const budget = questionType === 'coding' ? CODING_CONTEXT_WAIT_MS : INTERVIEW_CONTEXT_WAIT_MS;
+      const ready = interview ? await withinContextBudget(work, budget, abort.signal) : await work;
+      if (abort.signal.aborted) throw new Error('aborted before dispatch');
+      // The SAME current documents and approved memories remain available;
+      // a slow semantic lookup changes ranking, never drops the knowledge.
+      const gathered = ready?.gathered ?? await this.gather(profile.id, questionText, session.packId, true);
+      const early = ready?.early ?? false;
+      if (interview) mark({ groundingBudgetMs: budget, groundingDeadlineHit: !ready });
       // Stopped, superseded or replaced while the context was gathered: no
       // request is built or sent (the abort path below records it).
       if (abort.signal.aborted) throw new Error('aborted before dispatch');
-      context = gathered.chunks;
+      context = early
+        ? await ground(profile.id, this.retrievalQuery(questionText), session.packId, this.mode.id, { cached: gathered.chunks })
+        : gathered.chunks;
+      if (abort.signal.aborted) throw new Error('aborted before dispatch');
       // Memory may have been recalled seconds ago, on the interim: check
       // consent and each memory's eligibility again NOW, before anything is
       // sent or marked used (M7.2b review — an opt-out after the prefetch
@@ -749,7 +763,7 @@ export class EngineSession {
       if (gathered.lexical.length)
         log.warn(`answer grounding ranked lexically (${gathered.lexical.join(', ')}): the query embedding was late or failed`);
       mark({
-        prefetched: !!early,
+        prefetched: early,
         retrievalMs: gathered.retrievalMs,
         recallMs: gathered.recallMs,
         chunks: context.length,

@@ -32,7 +32,7 @@ export async function ground(
   query: string,
   packId: string | null,
   mode: SessionMode,
-  opts: { onLexical?: () => void } = {},
+  opts: { onLexical?: () => void; lexicalOnly?: boolean; cached?: RetrievedChunk[] } = {},
 ): Promise<RetrievedChunk[]> {
   // Both are interview-family devices, and both are wrong outside it. A STAR
   // story answers "tell me about a time you…"; a TAILORED résumé is the user's
@@ -42,6 +42,6 @@ export async function ground(
   return retrieve(profileId, query, GROUNDING_TOP_K, packId, {
     storyCue: interviewFamily,
     tailoredResume: interviewFamily,
-    ...(opts.onLexical ? { onLexical: opts.onLexical } : {}),
+    ...opts,
   });
 }

@@ -244,7 +244,7 @@ class Engine {
         title: pack?.title ?? (opts.activity ? activityConfig(opts.activity).label : 'Interview'),
         notes: pack?.notes ?? null,
         profileName: profile?.name ?? null,
-        hasResume: !!profile?.parsedResume,
+        hasResume: !!(pack?.tailoredResume?.trim() || pack?.resumeText?.trim() || profile?.parsedResume),
         hasJd: !!pack?.parsedJd,
         hasCompany: !!pack?.parsedCompany,
       },

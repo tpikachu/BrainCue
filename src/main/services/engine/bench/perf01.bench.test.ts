@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { INTERVIEW_CONTEXT_WAIT_MS } from '../contextDeadline';
 
 /**
  * PERF-01 OFFLINE BENCHMARK (M7.2b) — SIMULATED, never acceptance.
@@ -301,14 +302,15 @@ function expectTiming(r: Row, v: { interim: boolean; stall: boolean }, id: strin
   expect(r.firstTokenAt! - r.requestAt!, `${id} provider`).toBe(MODEL.TTFT);
   const contextWait = r.requestAt! - r.dispatchAt!;
   if (v.stall) {
-    expect(contextWait, `${id} stalled embedding capped`).toBeLessThanOrEqual(2500);
+    expect(contextWait, `${id} stalled embedding capped`).toBeLessThanOrEqual(INTERVIEW_CONTEXT_WAIT_MS);
     expect(r.lexical?.length, `${id} ranked lexically`).toBeGreaterThan(0);
   } else if (v.interim) {
     expect(r.prefetched, `${id} prefetched on the interim`).toBe(true);
     expect(contextWait, `${id} no wait for context`).toBe(0);
   } else {
     expect(r.prefetched, id).toBe(false);
-    expect(contextWait, `${id} one embedding round trip`).toBe(MODEL.EMBED);
+    expect(contextWait, `${id} bounded context wait`).toBe(Math.min(MODEL.EMBED, INTERVIEW_CONTEXT_WAIT_MS));
+    expect(r.groundingDeadlineHit, `${id} local ranking used after deadline`).toBe(true);
   }
   expect(r.speechEndSource, id).toBe('vad');
   expect(r.finalAt - r.speechEndAt!, id).toBe(MODEL.VAD_TO_FINAL);
@@ -395,6 +397,27 @@ function answerReservations(): Record<string, { n: number; max: number; p95: num
 }
 
 describe('PERF-01 offline benchmark — SIMULATED (perf01-v1 fixtures)', () => {
+  it('a role résumé reaches the real answer prompt and remains selected after Stop → Resume', async () => {
+    const role = 'perf01-custom-resume';
+    const fact = 'At Solaris I led the payments migration serving 42k requests per second.';
+    h.db.insert(schema.contextPacks).values({ id: role, profileId, kind: 'job', title: 'Solaris engineer', resumeText: fact, jdText: 'Own the payments platform.' }).run();
+    await indexJob(role);
+    h.format = 'scenario';
+    const sid = engine.start(profileId, 'general', role, 'general').id;
+    const text = 'Can you tell me about the payments migration at Solaris?';
+    await ask({ id: 'R01', text }, { interim: false, stall: false });
+    expect(section(promptFor(text), 'resume')).toContain(fact);
+    engine.stop(sid);
+    engine.resume(sid);
+    await ask({ id: 'R02', text }, { interim: false, stall: false });
+    expect(section(promptFor(text), 'resume')).toContain(fact);
+    engine.stop(sid);
+    const other = engine.start(profileId, 'general', packId, 'general').id;
+    await ask({ id: 'R03', text }, { interim: false, stall: false });
+    expect(section(promptFor(text), 'resume')).not.toContain(fact);
+    engine.stop(other);
+  });
+
   it('indexes the full synthetic knowledge base', () => {
     const kb = knowledgeBaseSize();
     expect(kb.resumeChars).toBeGreaterThan(6000);

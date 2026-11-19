@@ -100,6 +100,8 @@ export function checklistRows(
       label: 'Résumé',
       state: !profile
         ? { tone: 'block', text: 'no profile selected' }
+        : space?.tailoredResume?.trim() || space?.resumeText?.trim()
+          ? { tone: 'ok', text: space.tailoredResume?.trim() ? 'Tailored for this role' : 'Résumé for this role', action: { label: 'Edit', to: EDIT_ROLE } }
         : profile.parsedResume
           ? { tone: 'ok', text: profile.name }
           : profile.resumeText?.trim()

@@ -52,6 +52,8 @@ export async function recallMemories(
     /** The query could not be embedded in time (or at all): memories were
      *  matched lexically only — by what the question names. */
     onLexical?: () => void;
+    /** A live answer exhausted its semantic-lookup wait budget. */
+    lexicalOnly?: boolean;
   } = {},
 ): Promise<RetrievedMemory[]> {
   try {
@@ -61,13 +63,13 @@ export async function recallMemories(
 
     // Only vectors from the CURRENT embedding space are comparable; rows from
     // an older provider/model wait for a re-embed rather than mis-ranking.
-    const identity = providerFor('embedding').identity();
-    const usable = rows.filter(
+    const identity = opts.lexicalOnly ? null : providerFor('embedding').identity();
+    const usable = identity ? rows.filter(
       (r) =>
         r.embedProvider === identity.provider &&
         r.embedModel === identity.model &&
         r.embedDim === identity.dim,
-    );
+    ) : rows;
     if (usable.length === 0) return [];
 
     // Bounded and shared with document retrieval (rag/liveEmbed.ts). Past
@@ -76,7 +78,8 @@ export async function recallMemories(
     // all being dropped.
     let queryVector: Float32Array | null = null;
     try {
-      queryVector = await embedLiveQuery(query);
+      if (opts.lexicalOnly) opts.onLexical?.();
+      else queryVector = await embedLiveQuery(query);
     } catch {
       opts.onLexical?.();
     }

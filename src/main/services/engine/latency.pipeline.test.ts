@@ -237,10 +237,10 @@ describe('final → first token, offline latency model (30 General + 30 Technica
     for (const r of all.filter((r) => r.prefetch && !r.stall)) expect(r.ms).toBe(TTFT);
     // Recognised only at the final: ONE embedding round trip (documents and
     // memory share it, in parallel), then the provider.
-    for (const r of all.filter((r) => !r.prefetch && !r.stall)) expect(r.ms).toBe(EMBED + TTFT);
+    for (const r of all.filter((r) => !r.prefetch && !r.stall)) expect(r.ms).toBe(350 + TTFT);
     // A stalled embedding is cut at the deadline and ranked lexically — the
     // answer still comes, grounded on the same documents.
-    for (const r of all.filter((r) => r.stall)) expect(r.ms).toBeLessThanOrEqual(2500 + TTFT);
+    for (const r of all.filter((r) => r.stall)) expect(r.ms).toBeLessThanOrEqual(350 + TTFT);
     // One embedding per question: never a second, serial one for memory.
     expect((result.general as { embeddings: number }).embeddings).toBe(30);
     expect((result.technical as { embeddings: number }).embeddings).toBe(30);

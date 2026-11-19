@@ -478,6 +478,8 @@ export interface ContextPack {
   companyUrl: string | null;
   companyResearch: string | null;
   parsedCompany: ParsedCompany | null;
+  /** Uploaded/pasted résumé for this Space; null uses the profile default. */
+  resumeText: string | null;
   /** This profile's résumé rewritten against THIS Space's JD — a document of
    *  the Space, like the JD beside it. Indexed pack-scoped, and it stands in
    *  for the base résumé only while grounding this Space's interviews. */

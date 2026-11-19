@@ -70,7 +70,7 @@ const OPENAI: Record<ModelPreference, Plan> = {
   },
   quality: {
     classify: ['gpt-6-luna', 'gpt-5-nano', 'gpt-4.1-mini'],
-    answer: ['gpt-6.1-terra', 'gpt-6-luna', 'gpt-4.1'],
+    answer: ['gpt-6-luna', 'gpt-4.1-mini', 'gpt-6.1-terra', 'gpt-4.1'],
     parsing: ['gpt-6.1-terra', 'gpt-6-luna'],
     coding: ['gpt-6.2-astra', 'gpt-6.2-sol', 'gpt-5'],
     mock: ['gpt-6.1-terra', 'gpt-6-luna'],
@@ -89,7 +89,7 @@ const ANTHROPIC: Record<ModelPreference, Plan> = {
   },
   balanced: {
     classify: ['claude-haiku-5-5', 'claude-haiku-4-5'],
-    answer: ['claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-sonnet-5'],
+    answer: ['claude-haiku-5-5', 'claude-haiku-4-5', 'claude-sonnet-5-5', 'claude-sonnet-5'],
     parsing: ['claude-haiku-5-5'],
     coding: ['claude-opus-5-5', 'claude-sonnet-5-5'],
     mock: ['claude-haiku-5-5'],
@@ -97,7 +97,7 @@ const ANTHROPIC: Record<ModelPreference, Plan> = {
   },
   quality: {
     classify: ['claude-haiku-5-5', 'claude-haiku-4-5'],
-    answer: ['claude-opus-5-5', 'claude-sonnet-5-5'],
+    answer: ['claude-haiku-5-5', 'claude-haiku-4-5', 'claude-opus-5-5', 'claude-sonnet-5-5'],
     parsing: ['claude-sonnet-5-5'],
     coding: ['claude-fable-5-2', 'claude-opus-5-5'],
     mock: ['claude-sonnet-5-5'],
@@ -116,7 +116,7 @@ const GOOGLE: Record<ModelPreference, Plan> = {
   },
   balanced: {
     classify: ['gemini-3.5-flash-lite'],
-    answer: ['gemini-3.8-flash', 'gemini-3.5-flash-lite'],
+    answer: ['gemini-3.5-flash-lite', 'gemini-3.8-flash'],
     parsing: ['gemini-3.5-flash-lite'],
     coding: ['gemini-4-carbon', 'gemini-3.8-flash'],
     mock: ['gemini-3.8-flash'],
@@ -124,7 +124,7 @@ const GOOGLE: Record<ModelPreference, Plan> = {
   },
   quality: {
     classify: ['gemini-3.5-flash-lite'],
-    answer: ['gemini-4-argon', 'gemini-3.8-flash'],
+    answer: ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-4-argon'],
     parsing: ['gemini-3.8-flash'],
     coding: ['gemini-4-carbon', 'gemini-3.8-flash'],
     mock: ['gemini-3.8-flash'],
@@ -143,7 +143,7 @@ const GROQ: Record<ModelPreference, Plan> = {
   },
   balanced: {
     classify: ['openai/gpt-oss-20b'],
-    answer: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
+    answer: ['openai/gpt-oss-20b', 'openai/gpt-oss-120b'],
     parsing: ['openai/gpt-oss-20b'],
     coding: ['openai/gpt-oss-120b'],
     mock: ['openai/gpt-oss-120b'],
@@ -151,7 +151,7 @@ const GROQ: Record<ModelPreference, Plan> = {
   },
   quality: {
     classify: ['openai/gpt-oss-20b'],
-    answer: ['openai/gpt-oss-120b'],
+    answer: ['openai/gpt-oss-20b', 'openai/gpt-oss-120b'],
     parsing: ['openai/gpt-oss-120b'],
     coding: ['openai/gpt-oss-120b'],
     mock: ['openai/gpt-oss-120b'],
@@ -172,7 +172,7 @@ const OPENROUTER: Record<ModelPreference, Plan> = {
   },
   balanced: {
     classify: ['anthropic/claude-haiku-5-5', 'openai/gpt-6-luna'],
-    answer: ['anthropic/claude-sonnet-5-5', 'openai/gpt-6-luna'],
+    answer: ['anthropic/claude-haiku-5-5', 'openai/gpt-6-luna'],
     parsing: ['anthropic/claude-haiku-5-5', 'openai/gpt-6-luna'],
     coding: ['anthropic/claude-opus-5-5', 'openai/gpt-6.2-astra'],
     mock: ['anthropic/claude-haiku-5-5'],
@@ -180,7 +180,7 @@ const OPENROUTER: Record<ModelPreference, Plan> = {
   },
   quality: {
     classify: ['anthropic/claude-haiku-5-5', 'openai/gpt-6-luna'],
-    answer: ['anthropic/claude-opus-5-5', 'openai/gpt-6.1-terra'],
+    answer: ['anthropic/claude-haiku-5-5', 'openai/gpt-6-luna', 'anthropic/claude-opus-5-5', 'openai/gpt-6.1-terra'],
     parsing: ['anthropic/claude-sonnet-5-5'],
     coding: ['anthropic/claude-fable-5-2', 'openai/gpt-6.2-astra'],
     mock: ['anthropic/claude-sonnet-5-5'],
@@ -300,15 +300,9 @@ function modelLabel(provider: CloudProviderId, model: string): string {
   return modelOption(provider, model)?.name ?? model;
 }
 
-const WHY: Record<ModelPreference, string> = {
-  fast: 'the lowest first-token latency',
-  balanced: 'fast first token with stronger answers',
-  quality: 'the strongest answers that still stream live',
-};
-
 /** One line for the UI: which model answers, and why. */
-export function explainAnswerModel(r: TaskResolution, preference: ModelPreference): string {
+export function explainAnswerModel(r: TaskResolution, _preference: ModelPreference): string {
   const name = `${cloudProvider(r.provider)?.name ?? r.provider} · ${modelLabel(r.provider, r.model)}`;
   if (r.source === 'override') return `${name} — your choice in Advanced settings.`;
-  return `${name} — ${preference[0].toUpperCase()}${preference.slice(1)} picks ${WHY[preference]}.${r.notice ? ` ${r.notice}` : ''}`;
+  return `${name} — prioritizes fast interview cues; coding can use deeper models.${r.notice ? ` ${r.notice}` : ''}`;
 }

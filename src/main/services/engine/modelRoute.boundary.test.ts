@@ -178,30 +178,30 @@ describe('each task reaches the provider and model the policy chose', () => {
     await runCodingSolveFromImage('data:image/png;base64,AAAA');
 
     expect(streams()).toEqual([
-      'anthropic:chat:answer → anthropic/claude-sonnet-5-5', // Anthropic · Balanced pick
+      'anthropic:chat:answer → anthropic/claude-haiku-5-5', // Anthropic · Balanced pick
       'openai:chat:coding → openai/gpt-6.2-astra', // the coding override, on its own provider
       'openai:vision:coding → openai/gpt-6.2-astra', // the screenshot solver follows it
     ]);
     // What the UI is told agrees with what each adapter received…
-    expect(h.contexts[0]).toMatchObject({ sentTo: { provider: 'anthropic', model: 'claude-sonnet-5-5' } });
+    expect(h.contexts[0]).toMatchObject({ sentTo: { provider: 'anthropic', model: 'claude-haiku-5-5' } });
     const answeredBy = h.metas.map((m) => m.answeredBy);
     expect(answeredBy).toEqual([
-      { provider: 'anthropic', model: 'claude-sonnet-5-5' },
+      { provider: 'anthropic', model: 'claude-haiku-5-5' },
       { provider: 'openai', model: 'gpt-6.2-astra' },
       { provider: 'openai', model: 'gpt-6.2-astra' },
     ]);
     // …and the saved answer keeps its own route.
-    expect(h.saved[0].meta).toMatchObject({ answeredBy: { provider: 'anthropic', model: 'claude-sonnet-5-5' } });
+    expect(h.saved[0].meta).toMatchObject({ answeredBy: { provider: 'anthropic', model: 'claude-haiku-5-5' } });
     // The coding override does not touch the answer, and Automatic would name
     // the provider's own pick (what the Cue Card's "Automatic —" row shows).
-    expect(resolveTask('answer')).toMatchObject({ provider: 'anthropic', model: 'claude-sonnet-5-5', source: 'policy' });
+    expect(resolveTask('answer')).toMatchObject({ provider: 'anthropic', model: 'claude-haiku-5-5', source: 'policy' });
     expect(resolveTaskAuto('coding')).toMatchObject({ provider: 'anthropic', model: 'claude-opus-5-5' });
   });
 
   it('diagnostic logs name provider/model per attempt and never the question or a key', async () => {
     await session().generateContribution('q1', 'What is your SECRET-QUESTION-TEXT?');
     const routeLogs = h.logs.filter((l) => /answer (attempt|served)/.test(l));
-    expect(routeLogs).toEqual(['answer attempt 1 → anthropic/claude-sonnet-5-5', 'answer served by anthropic/claude-sonnet-5-5']);
+    expect(routeLogs).toEqual(['answer attempt 1 → anthropic/claude-haiku-5-5', 'answer served by anthropic/claude-haiku-5-5']);
     expect(h.logs.join('\n')).not.toMatch(/SECRET-QUESTION-TEXT|sk-/);
   });
 });
@@ -224,11 +224,11 @@ describe('an in-flight request stays pinned; a change applies to the next one', 
     setModels({ coding: 'gpt-6.2-astra', answer: 'gpt-6-luna' });
     release();
     await first;
-    expect(h.metas.at(-1)?.answeredBy).toEqual({ provider: 'anthropic', model: 'claude-sonnet-5-5' });
+    expect(h.metas.at(-1)?.answeredBy).toEqual({ provider: 'anthropic', model: 'claude-haiku-5-5' });
 
     await s.generateContribution('q2', 'And your weaknesses?');
     expect(streams()).toEqual([
-      'anthropic:chat:answer → anthropic/claude-sonnet-5-5',
+      'anthropic:chat:answer → anthropic/claude-haiku-5-5',
       'openai:chat:answer → openai/gpt-6-luna', // the NEXT question uses the new pick
     ]);
     expect(h.metas.at(-1)?.answeredBy).toEqual({ provider: 'openai', model: 'gpt-6-luna' });
@@ -246,30 +246,30 @@ describe('same-provider failover: every attempt, the answering route, and the re
       },
     ];
     // What answerScheduled seeds at dispatch, before any attempt.
-    const take = latency.begin({ questionId: 'qf', sessionId: 's1', finalAt: Date.now(), provider: 'anthropic', model: 'claude-sonnet-5-5' });
+    const take = latency.begin({ questionId: 'qf', sessionId: 's1', finalAt: Date.now(), provider: 'anthropic', model: 'claude-haiku-5-5' });
 
     await session().generateContribution('qf', 'Walk me through your last role.', undefined, { take });
     off();
 
     expect(streams()).toEqual([
-      'anthropic:chat:answer → anthropic/claude-sonnet-5-5',
-      'anthropic:chat:answer → anthropic/claude-haiku-5-5', // next candidate, SAME provider
+      'anthropic:chat:answer → anthropic/claude-haiku-5-5',
+      'anthropic:chat:answer → anthropic/claude-haiku-4-5', // next candidate, SAME provider
     ]);
     expect(h.metas.at(-1)?.answeredBy).toEqual({
       provider: 'anthropic',
-      model: 'claude-haiku-5-5',
-      failed: [{ provider: 'anthropic', model: 'claude-sonnet-5-5', reason: 'model' }],
+      model: 'claude-haiku-4-5',
+      failed: [{ provider: 'anthropic', model: 'claude-haiku-5-5', reason: 'model' }],
     });
-    expect(h.saved[0].meta).toMatchObject({ answeredBy: { model: 'claude-haiku-5-5' } });
+    expect(h.saved[0].meta).toMatchObject({ answeredBy: { model: 'claude-haiku-4-5' } });
     // The latency record names the attempt that answered, not the dispatch seed.
-    expect(latency.get('qf')).toMatchObject({ provider: 'anthropic', model: 'claude-haiku-5-5', failedAttempts: 1 });
+    expect(latency.get('qf')).toMatchObject({ provider: 'anthropic', model: 'claude-haiku-4-5', failedAttempts: 1 });
     // The next request's route moved — and every window is told.
     expect(routesChanged).toBe(1);
-    expect(resolveTask('answer')).toMatchObject({ provider: 'anthropic', model: 'claude-haiku-5-5' });
+    expect(resolveTask('answer')).toMatchObject({ provider: 'anthropic', model: 'claude-haiku-4-5' });
     expect(h.logs.filter((l) => /answer (attempt|served)/.test(l))).toEqual([
-      'answer attempt 1 → anthropic/claude-sonnet-5-5',
-      'answer attempt 2 → anthropic/claude-haiku-5-5',
-      'answer served by anthropic/claude-haiku-5-5 after 1 failed attempt(s)',
+      'answer attempt 1 → anthropic/claude-haiku-5-5',
+      'answer attempt 2 → anthropic/claude-haiku-4-5',
+      'answer served by anthropic/claude-haiku-4-5 after 1 failed attempt(s)',
     ]);
   });
 

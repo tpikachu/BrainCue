@@ -154,6 +154,8 @@ const api = {
       jdText: string | null;
       companyUrl: string | null;
       notes: string | null;
+      resumeText?: string | null;
+      tailoredResume?: null;
     }) =>
       invoke<{
         job: unknown;
@@ -161,6 +163,7 @@ const api = {
         embedded: number;
         companyResearched: boolean;
         companyError: string | null;
+        processingError: string | null;
       }>(IPC.jobs.save, input),
     setNotes: (id: string, notes: string | null) => invoke(IPC.jobs.setNotes, { id, notes }),
     setCompanionPrefs: (id: string, prefs: CompanionSpaceOverrides | null) =>

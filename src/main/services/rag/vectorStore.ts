@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import { db, schema } from '../../db';
 import { bufferToVector, cosineSimilarity, vectorToBuffer } from './vectorMath';
 import type { ChunkSource, RetrievedChunk } from '@shared/types';
@@ -50,6 +50,18 @@ export interface VectorStore {
 
 /** Bound on how many chunks one retrieval scope reads (lexical fallback). */
 const SCOPE_MAX = 5000;
+
+function hasScopedResume(profileId: string, jobId: string | null | undefined, allowed: boolean): boolean {
+  if (!allowed || !jobId) return false;
+  const pack = db().select({ resumeText: schema.contextPacks.resumeText, tailoredResume: schema.contextPacks.tailoredResume })
+    .from(schema.contextPacks).where(and(eq(schema.contextPacks.id, jobId), eq(schema.contextPacks.profileId, profileId))).get();
+  if (pack?.resumeText?.trim() || pack?.tailoredResume?.trim()) return true;
+  // Résumé selection does not depend on whether embedding that document
+  // succeeded, or on its embedding model matching the current one.
+  return !!db().select({ id: schema.chunks.id }).from(schema.chunks)
+    .where(and(eq(schema.chunks.profileId, profileId), eq(schema.chunks.packId, jobId), eq(schema.chunks.sourceType, 'tailored')))
+    .limit(1).get();
+}
 
 /** Is a stored vector comparable with a query from `identity`? A dimension
  *  mismatch is never comparable, whatever the labels say. */
@@ -106,10 +118,10 @@ export const sqliteVectorStore: VectorStore = {
       })
       .from(schema.chunks)
       .leftJoin(schema.embeddings, eq(schema.embeddings.chunkId, schema.chunks.id))
-      .where(eq(schema.chunks.profileId, profileId))
+      .where(and(eq(schema.chunks.profileId, profileId), or(isNull(schema.chunks.packId), jobId ? eq(schema.chunks.packId, jobId) : undefined)))
       .limit(SCOPE_MAX)
       .all();
-    const hasTailored = allowTailored && rows.some((r) => r.jobId === jobId && r.sourceType === 'tailored');
+    const hasTailored = hasScopedResume(profileId, jobId, allowTailored);
     return rows
       .filter(
         (r) =>
@@ -151,8 +163,7 @@ export const sqliteVectorStore: VectorStore = {
     // mode, so one leftover application could suppress the user's real résumé
     // in an unrelated meeting — the model was told their experience was the
     // version rewritten for a job they applied to once.
-    const hasTailored =
-      allowTailored && rows.some((r) => r.jobId === jobId && r.sourceType === 'tailored');
+    const hasTailored = hasScopedResume(profileId, jobId, allowTailored);
     const filtered = rows.filter(
       (r) =>
         // Base chunks (resume/notes/stories, jobId null) + the selected job's chunks…

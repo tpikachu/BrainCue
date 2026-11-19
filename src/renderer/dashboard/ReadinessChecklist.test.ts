@@ -23,6 +23,10 @@ const rows = (over: Partial<Parameters<typeof checklistRows>[0]> = {}) =>
   checklistRows({ profile, space, interview: true, listensTo: 'system', readiness: ready, hasMic: true, ...over });
 
 describe('the interview setup summary', () => {
+  it('a role résumé is ready even without a default résumé on the profile', () => {
+    const own = rows({ profile: { ...profile, parsedResume: null, resumeText: null }, space: { ...space, resumeText: 'Role-specific background.' } });
+    expect(own[0].state).toMatchObject({ tone: 'ok', text: 'Résumé for this role', action: { to: EDIT_ROLE } });
+  });
   it('is four short rows — résumé, role & JD, audio, AI — all ready for Anthropic + on-device', () => {
     const r = rows();
     expect(r.map((x) => x.label)).toEqual(['Résumé', 'Role & JD', 'Audio', 'AI']);

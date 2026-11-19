@@ -1,5 +1,35 @@
 # The board
 
+**Stable 2.3.0 follow-up (2026-11-19):** the user requested two changes before
+promoting 2.3.0 to latest: per-role résumé selection and fast normal interview
+responses, with a separate allowance for coding. This supersedes the preview
+scope freeze for these requirements. The existing preview stays published.
+
+| Checkpoint | Required behavior | State |
+| --- | --- | --- |
+| S1 — Role résumé | Create/edit offers Default résumé or upload/paste a different résumé. Only this role uses it; saving/replacing/removing it updates grounding, including cached lookups. Setup, prep and Resume use the selected role's context. Existing roles inherit their current behavior. | Implemented and verified offline: nullable Space field/migration, isolated indexing/cache validation, actual save/brief/tailor handlers including failures, real-engine prompt/Resume test, and four renderer cases. |
+| S2 — Interview speed | Normal General/short Technical cues use low-latency defaults and a short bounded context wait; coding keeps deeper models and a longer allowance. Preserve résumé/JD/session grounding, candidate speech, ordering, consent, explicit overrides and same-provider retry. | Implemented and verified offline: 350 ms context wait with local ranking fallback; 2.5 s coding allowance. Fast policy defaults, explicit overrides and same-provider retries tested. Live provider/paint latency remains unmeasured. |
+| S3 — Stable release | Independently review S1/S2, run full offline checks and measured live General/Technical acceptance. Publish 2.3.0 as latest only after the two changes are validated. | Pending. The user authorized this conditional stable release; no version/tag/latest change yet. Paid live benchmark and user audio are not started implicitly. |
+
+Current owner: Codex is implementing and verifying these changes locally.
+No other engineer checkpoint is assumed running from passive handoff files.
+Formal PERF-01/M7 acceptance and existing open issues remain recorded below;
+simulated timing is not live performance evidence.
+
+Candidate checks: **1,387 unit passes / 3 skips**, **115 offline E2E passes /
+13 intentional no-key registration skips**, production build/typecheck pass,
+`git diff --check` clean. A baseline checkout at `a058aec` with only the new
+regression tests gives **12 failures and 2 passing controls**; the same
+selection gives **14 passes** on the candidate. The isolated checkout was
+removed; logs remain gitignored under `bench-results/stable23-*`.
+
+The next required step is the explicit opt-in measured run in
+`docs/benchmarks/PERF01-LIVE-PLAN.md`: synthetic data, pinned OpenAI route,
+72 questions, at most 673,000 reserved tokens / 678 requests / 900 seconds
+synthetic STT. This has not been run or authorized; no user microphone or
+capture is implied by the stable-release request. Stable promotion remains
+conditional on measured results, not these offline timings.
+
 **Current preview status (2026-11-19):**
 [2.3.0-preview.1](https://github.com/tpikachu/BrainCue/releases/tag/v2.3.0-preview.1)
 is published as a **Windows prerelease**, authorized by the user. The tag

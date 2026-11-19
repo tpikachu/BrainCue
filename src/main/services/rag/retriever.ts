@@ -135,14 +135,27 @@ export async function retrieve(
     /** Called when the query could not be embedded in time (or at all) and
      *  the documents were ranked lexically instead. */
     onLexical?: () => void;
+    /** Re-rank locally immediately, without a query-embedding round trip. */
+    lexicalOnly?: boolean;
+    /** Validate an early result against the current corpus before dispatch. */
+    cached?: RetrievedChunk[];
   } = {},
 ): Promise<RetrievedChunk[]> {
   const allowTailored = opts.tailoredResume === true;
   // Everything in scope, with the embedding space each chunk was embedded in.
-  const scope = sqliteVectorStore.scope({ profileId, jobId, allowTailored });
+  let scope = sqliteVectorStore.scope({ profileId, jobId, allowTailored });
   // Nothing indexed for this profile → nothing to rank. Skipping the embedding
   // call here took 1.5 s off the first token for a Space without documents.
   if (scope.length === 0) return [];
+  if (opts.cached) {
+    const current = new Map(scope.map((c) => [c.id, c]));
+    if (opts.cached.length && opts.cached.every((c) => current.get(c.id)?.content === c.content)) return opts.cached;
+    return lexicalRetrieve(query, scope, k, opts.storyCue !== false);
+  }
+  if (opts.lexicalOnly) {
+    opts.onLexical?.();
+    return lexicalRetrieve(query, scope, k, opts.storyCue !== false);
+  }
 
   // Vector path: only when some chunk shares the current embedder's space.
   // No embedding provider (no OpenAI key), a failed embedding call, or an
@@ -167,6 +180,9 @@ export async function retrieve(
       opts.onLexical?.();
     }
   }
+  // The corpus can change while the query is being embedded. Both vector
+  // and lexical ranking must see the current résumé/documents when it ends.
+  scope = sqliteVectorStore.scope({ profileId, jobId, allowTailored });
   const lexicalPool = vector ? scope.filter((c) => !comparable(c)) : scope;
   if (!vector) return lexicalRetrieve(query, lexicalPool, k, opts.storyCue !== false);
   // Over-fetch so capping archives promotes real alternatives rather than
