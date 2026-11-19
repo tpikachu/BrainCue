@@ -14,21 +14,41 @@ export interface Release {
   body: string; // the file's markdown (already starts with an H1 heading)
 }
 
-/** "/changelog/0.2.0.md" -> "0.2.0"; non-version files (README) -> "". */
-function parseVersion(path: string): string {
-  const m = path.match(/\/(\d+\.\d+\.\d+)\.md$/);
+/** "/changelog/0.2.0.md" -> "0.2.0", "/changelog/2.3.0-preview.1.md" ->
+ *  "2.3.0-preview.1"; non-version files (README) -> "". */
+export function parseVersion(path: string): string {
+  const m = path.match(/\/(\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?)\.md$/);
   return m ? m[1] : '';
 }
 
-/** Descending semver compare (newest first). */
-function cmpDesc(a: string, b: string): number {
-  const pa = a.split('.').map(Number);
-  const pb = b.split('.').map(Number);
+/** Descending semver compare (newest first). A prerelease sorts below its
+ *  release (2.3.0-preview.1 < 2.3.0) and above everything before it; its
+ *  identifiers compare numerically when numeric (preview.2 < preview.10). */
+export function cmpDesc(a: string, b: string): number {
+  const [coreA, preA] = splitVersion(a);
+  const [coreB, preB] = splitVersion(b);
   for (let i = 0; i < 3; i++) {
-    const d = (pb[i] ?? 0) - (pa[i] ?? 0);
+    const d = (coreB[i] ?? 0) - (coreA[i] ?? 0);
+    if (d) return d;
+  }
+  if (!preA.length || !preB.length) return preA.length - preB.length; // the release first
+  for (let i = 0; i < Math.max(preA.length, preB.length); i++) {
+    const x = preA[i];
+    const y = preB[i];
+    if (x === undefined) return 1; // fewer identifiers: lower precedence
+    if (y === undefined) return -1;
+    const nx = /^\d+$/.test(x);
+    const ny = /^\d+$/.test(y);
+    const d = nx && ny ? Number(y) - Number(x) : nx ? 1 : ny ? -1 : y < x ? -1 : y > x ? 1 : 0;
     if (d) return d;
   }
   return 0;
+}
+
+function splitVersion(v: string): [number[], string[]] {
+  const [core, ...pre] = v.split('-');
+  const p = pre.join('-');
+  return [core.split('.').map(Number), p ? p.split('.') : []];
 }
 
 export const RELEASES: Release[] = Object.entries(files)
