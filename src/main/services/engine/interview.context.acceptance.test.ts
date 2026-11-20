@@ -23,6 +23,8 @@ const h = vi.hoisted(() => ({
   prompts: [] as { user: string; system: string }[],
   grounds: [] as { profileId: string; query: string; packId: string | null }[],
   json: [] as { system: string; user: string }[],
+  noSources: false,
+  reply: 'BrainCue cue text.',
 }));
 
 vi.mock('../../db', async () => {
@@ -60,6 +62,7 @@ vi.mock('../mock/sparringManager', () => ({ buildSparringReport: () => null }));
 vi.mock('./grounding', () => ({
   ground: async (profileId: string, query: string, packId: string | null) => {
     h.grounds.push({ profileId, query, packId });
+    if (h.noSources) return [];
     return [
       { id: `r-${profileId}`, sourceType: 'resume', content: `Résumé of ${profileId}: senior engineer.`, score: 0.8 },
       { id: `j-${packId}`, sourceType: 'jd', content: `JD of ${packId}: requires Kafka.`, score: 0.6 },
@@ -72,7 +75,7 @@ vi.mock('../../providers/registry', () => ({
       return {
         async *stream(req: { system: string; user: string }) {
           h.prompts.push({ user: req.user, system: req.system });
-          yield { type: 'delta', token: 'BrainCue cue text.' };
+          yield { type: 'delta', token: h.reply };
         },
         // The coaching report: one assessment per numbered exchange.
         json: async (req: { system: string; user: string }) => {
@@ -90,7 +93,7 @@ vi.mock('../../providers/registry', () => ({
 import * as schema from '../../db/schema';
 import { createTestDb } from '../../test/dbHarness';
 import { engine } from './engine';
-import { LIMITS } from './interview/conversationContext';
+import { ConversationContext, LIMITS } from './interview/conversationContext';
 import { generateReport, NO_ANSWER_CAPTURED, NOT_DETECTED_PREFIX } from '../session/report';
 
 // ~1,060 characters; the project name and the figure come LAST.
@@ -149,10 +152,97 @@ beforeEach(() => {
   h.prompts.length = 0;
   h.grounds.length = 0;
   h.json.length = 0;
+  h.noSources = false;
+  h.reply = 'BrainCue cue text.';
 });
 afterEach(() => {
   const cur = (engine as unknown as { current: { sessionId: string } | null }).current;
   if (cur) engine.stop(cur.sessionId);
+});
+
+const DRAFT_QUESTION = 'What is your experience building GraphQL APIs?';
+const DRAFT_TAIL = "For cache expiry, I'd use a 47-second TTL and fall back to the origin.";
+const PROPOSED_ANSWER = "**I'd start with a schema-first design and explain the trade-offs.**\n" +
+  'I would check the schema against client needs and keep the implementation easy to change. '.repeat(8) +
+  `\n${DRAFT_TAIL}`;
+
+describe('session draft continuity for flexible interview fallback', () => {
+  it('keeps the proposed details beyond the old lead for a live follow-up and after Resume, without inventing spoken evidence', async () => {
+    h.noSources = true;
+    const { profileId, packId } = seed();
+    const sid = engine.start(profileId, 'general', packId).id;
+    h.reply = PROPOSED_ANSWER;
+    await ask(sid, DRAFT_QUESTION);
+    h.reply = 'A follow-up cue.';
+    const follow = 'How would you handle the cache expiry?';
+    await ask(sid, follow);
+    const live = conversationOf(promptFor(follow));
+    expect(PROPOSED_ANSWER.indexOf(DRAFT_TAIL)).toBeGreaterThan(LIMITS.suggestionChars);
+    expect(live).toContain(DRAFT_TAIL);
+    expect(live).toContain('NOT evidence of what was said or done');
+    expect(live).not.toMatch(/You said:.*47-second/);
+    expect(h.prompts.at(-1)!.system).toContain('Keep it hypothetical until confirmed');
+    engine.stop(sid);
+    engine.resume(sid);
+    const recall = 'Which cache expiry strategy did you suggest for GraphQL?';
+    await ask(sid, recall);
+    expect(conversationOf(promptFor(recall))).toContain(DRAFT_TAIL);
+    expect(h.db.select().from(schema.memories).all()).toEqual([]);
+    expect(h.db.select().from(schema.profiles).all().find((p) => p.id === profileId)!.resumeText).toBeNull();
+  });
+
+  it('recalls an older draft after other topics, but never carries it into a fresh session', async () => {
+    h.noSources = true;
+    const { profileId, packId } = seed();
+    const sid = engine.start(profileId, 'general', packId).id;
+    h.reply = PROPOSED_ANSWER;
+    await ask(sid, DRAFT_QUESTION);
+    for (const topic of ['Hiring', 'Leadership', 'Mentoring', 'Feedback', 'Planning']) {
+      h.reply = `I'd explain ${topic.toLowerCase()} clearly.`;
+      const q = `What is your experience with ${topic}?`;
+      await engine.answerQuestion(sid, q); // separate cards; this case tests context, not fuzzy question deduplication
+      expect(conversationOf(promptFor(q))).not.toContain(DRAFT_TAIL);
+    }
+    const recall = 'Which cache expiry strategy did you suggest for GraphQL?';
+    await ask(sid, recall);
+    expect(conversationOf(promptFor(recall))).toContain(DRAFT_TAIL);
+    engine.stop(sid);
+    const fresh = engine.start(profileId, 'general', packId).id;
+    await ask(fresh, recall);
+    expect(promptFor(recall)).not.toContain(DRAFT_TAIL);
+  });
+
+  it('also continues a typed Ask with no spoken question or candidate transcript', async () => {
+    h.noSources = true;
+    const { profileId, packId } = seed();
+    const sid = engine.start(profileId, 'general', packId).id;
+    h.reply = PROPOSED_ANSWER;
+    await engine.answerQuestion(sid, DRAFT_QUESTION);
+    h.reply = 'A follow-up cue.';
+    await engine.answerQuestion(sid, 'Why that approach?');
+    const block = conversationOf(promptFor('Why that approach?'));
+    expect(block).toContain(DRAFT_TAIL);
+    expect(block).not.toContain('You said:');
+    expect(h.db.select().from(schema.transcriptChunks).all().filter((t) => t.sessionId === sid)).toEqual([]);
+  });
+
+  it('uses the existing prompt budget and respects replacing or clearing a draft', () => {
+    const c = new ConversationContext();
+    c.addSuggestion('draft', DRAFT_QUESTION, PROPOSED_ANSWER);
+    const q = 'How would you handle the cache expiry?';
+    const draft = c.snapshot(q, { drafts: true }).suggestions;
+    expect(draft).toHaveLength(1);
+    expect(draft[0].lead).toContain(DRAFT_TAIL);
+    expect(draft[0].lead.length).toBeLessThanOrEqual(LIMITS.suggestions * LIMITS.suggestionChars + 20);
+    expect(draft[0]).not.toHaveProperty('answer');
+    // Existing non-interview callers still get the original compact leads.
+    expect(c.snapshot(q).suggestions[0].lead.length).toBeLessThanOrEqual(LIMITS.suggestionChars);
+    c.addSuggestion('draft', DRAFT_QUESTION, '**I would use a per-request cache instead.**');
+    expect(c.snapshot(q, { drafts: true }).suggestions[0].lead).toContain('per-request');
+    expect(JSON.stringify(c.snapshot(q, { drafts: true }))).not.toContain('47-second');
+    c.addSuggestion('draft', DRAFT_QUESTION, '');
+    expect(c.snapshot(q, { drafts: true }).suggestions).toEqual([]);
+  });
 });
 
 describe('M4 — conversation context at the prompt boundary', () => {

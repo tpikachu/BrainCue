@@ -150,19 +150,26 @@ const CLOSING_RULE: Record<AnswerFraming, string> = {
     '  question genuinely asks about it. Say the useful thing and stop.',
 };
 
-/** What to do when the context cannot support the question. The interview
- *  text is v1, byte-for-byte. The conversation text exists because the
+/** What to do when the context cannot support the question. Interviews can
+ *  offer general knowledge and a proposed answer. The conversation text exists because the
  *  interview wording ("not in their background… transferable skills") never
  *  fired in a meeting: asked for a budget with no notes, the model produced a
  *  plausible dollar figure — the one thing a cue card must never do. */
 const FABRICATION_GUARD: Record<AnswerFraming, string> = {
   interview:
-    '- FABRICATION GUARD: if neither the context nor what they said ("You said") can support what\'s\n' +
-    '  asked, do NOT make it up. Begin\n' +
-    '  the answer with "⚠", state in one short clause that it\'s not in their background, then\n' +
-    '  pivot to a grounded, cited, transferable-skills framing — or, when only they can know it\n' +
-    '  (a number, a date, who did what), name the one detail they should fill in themselves\n' +
-    '  (this is the riskWarning case).',
+    '- FLEXIBLE ANSWER / FABRICATION GUARD: missing or unrelated sources are not a reason to stop.\n' +
+    '  For a conceptual or technical question, answer directly from general knowledge; no invented citation.\n' +
+    '  For an experience question with no matching personal example, give a useful, ready-to-say proposed\n' +
+    '  answer: bridge from confirmed transferable skills, then explain a concrete approach and trade-offs.\n' +
+    '  Use conditional wording ("I would…") for unverified experience; any illustrative scenario stays\n' +
+    '  hypothetical. Do not claim they have OR lack experience merely because a source is silent.\n' +
+    '  Never invent past employers, projects, years, outcomes or personal figures. If an exact personal\n' +
+    '  detail is indispensable, leave only that detail for them to supply and still give the useful answer.\n' +
+    '  Do not lead with a refusal, "not in your résumé", or a warning for an ordinary knowledge answer.\n' +
+    '- SESSION DRAFT CONTINUITY: use earlier "BrainCue suggested" text to continue the same proposed\n' +
+    '  scenario and design choices in follow-ups. Keep it hypothetical until confirmed by their own\n' +
+    '  material or "You said" turns; their corrections take precedence. Never turn a draft into personal\n' +
+    '  history or carry its scenario into an unrelated topic.',
   conversation:
     '- FABRICATION GUARD: if the context does not contain the specific thing asked for — a\n' +
     '  figure, a date, a decision, a name, a status — do NOT make it up, and NEVER produce a\n' +
@@ -172,9 +179,10 @@ const FABRICATION_GUARD: Record<AnswerFraming, string> = {
     '  back. A short honest answer beats a confident invented one every time.',
 };
 
-/** The card's risk line when nothing in the Space matched the question. */
-const NO_CONTEXT_WARNING: Record<AnswerFraming, string> = {
-  interview: 'No matching profile experience found.',
+/** Missing documents alone are normal in an interview. Meetings still flag
+ * unknown business facts rather than inventing a figure or decision. */
+const NO_CONTEXT_WARNING: Record<AnswerFraming, string | null> = {
+  interview: null, // missing documents do not make a useful general-knowledge answer an error
   conversation: 'Nothing in this Space covers this — the answer is not grounded.',
 };
 

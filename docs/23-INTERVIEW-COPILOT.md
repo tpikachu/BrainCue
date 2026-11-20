@@ -879,3 +879,21 @@ Standard is visible; missing data is not inferred. The benchmark can bind
 `PERF01_PROCESSING=fast` in its manifest and requires these tier records for
 answered samples. This option's real speed remains unmeasured. A second paid
 run requires new approval; stable promotion stays blocked.
+
+### Flexible answers and session-local proposed wording
+
+Requested 2026-11-20. An interview question need not have a ready-made answer
+in the sources. Conceptual/technical questions can use general knowledge;
+unsupported personal examples get useful conditional/proposed wording, not a
+refusal or invented past experience. Only real context can be cited. Missing
+documents alone no longer show an interview error note. The meeting guard
+for unknown figures, decisions and status is unchanged.
+
+Completed AI answers remain draft suggestions. For interview follow-ups the
+session cache keeps the body (bounded to 8,000 characters each, 200 answers)
+and selects one relevant passage within the existing 540-character suggestion
+budget, including a return to an older topic. It can also continue a typed
+Ask. Own speech/corrections and sourced facts outrank the proposal; it is
+never relabelled as what the candidate said or added to their resume/memory.
+Replacement/clear removes stale draft content, and Resume restores only
+that session's answer records. No extra AI call is needed.

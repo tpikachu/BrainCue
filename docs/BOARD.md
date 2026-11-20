@@ -10,6 +10,7 @@ scope freeze for these requirements. The existing preview stays published.
 | S1 — Role résumé | Create/edit offers Default résumé or upload/paste a different résumé. Only this role uses it; saving/replacing/removing it updates grounding, including cached lookups. Setup, prep and Resume use the selected role's context. Existing roles inherit their current behavior. | Implemented and verified offline: nullable Space field/migration, isolated indexing/cache validation, actual save/brief/tailor handlers including failures, real-engine prompt/Resume test, and four renderer cases. A stronger prompt check also found and fixed the stale default role/company heading; owned job Space metadata is now request-local, with cross-profile/non-job controls. |
 | S2 — Interview speed | Normal General/short Technical cues use low-latency defaults and a short bounded context wait; coding keeps deeper models and a longer allowance. Preserve résumé/JD/session grounding, candidate speech, ordering, consent, explicit overrides and same-provider retry. | First live run misses both latency targets and one memory. Recall/report fixes are verified offline (`09c8934`). At the user's explicit choice, normal supported OpenAI cues now default to Fast processing, with a higher-rate notice and opt-out; coding and other providers are unchanged. Actual tier/cache telemetry and the manifest-bound driver pass offline checks on `9b9a584`. A second paid live run remains unapproved; speed is not yet accepted. |
 | S3 — Stable release | Independently review S1/S2, run full offline checks and measured live General/Technical acceptance. Publish 2.3.0 as latest only after the two changes are validated. | Pending. The user authorized this conditional stable release; no version/tag/latest change yet. Paid live benchmark and user audio are not started implicitly. |
+| S4 — Flexible interview fallback | Give useful general-knowledge answers or an adaptable proposed experience answer when sources do not cover it. Keep the draft consistent within this session without promoting it to personal history. | Implemented; 10 focused checks and build/typecheck pass. Draft detail shares the existing prompt budget, supports follow-ups/older-topic recall/Resume, and stays isolated by session. No broad suite rerun, per the user's test scope. |
 
 Current owner: Codex is implementing and verifying these changes locally.
 No other engineer checkpoint is assumed running from passive handoff files.
@@ -51,8 +52,11 @@ with two isolated metered processes and zero provider requests, reserved
 tokens or STT seconds (`bench-results/perf01/dry-fast-9b9a584-20261119-181536/`).
 The final full offline browser rerun **passes 117 tests / 13 intentional
 no-key registration skips**, exit 0 (`bench-results/stable23-final-e2e.log`).
-No second paid run has started; choosing the Fast default did not authorize
-more test calls. Next is approval of the concrete follow-up in the live plan.
+The user subsequently approved **one** Fast follow-up with the same 72 /
+673,000 / 678 / 900 caps. The candidate now also includes S4 above; only its
+10 focused tests and build were rerun for that addition, per the user's scope.
+See `docs/sessions/2026-11-20.md`. The fixed benchmark fixtures are unchanged;
+no extra paid fallback questions are added to the approved run.
 
 **Current preview status (2026-11-19):**
 [2.3.0-preview.1](https://github.com/tpikachu/BrainCue/releases/tag/v2.3.0-preview.1)

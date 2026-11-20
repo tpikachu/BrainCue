@@ -241,13 +241,13 @@ describe('streamAnswer — streamed events', () => {
     expect(evs).toContainEqual({ type: 'usage', prompt: 12, completion: 7, requestedServiceTier: 'provider-default' });
   });
 
-  it('sets a riskWarning in meta only when context is empty', async () => {
+  it('the interview fallback does not flag missing documents alone as an answer error', async () => {
     const withCtx = (await collect(streamAnswer(baseInput()))).find((e) => e.type === 'meta');
     expect((withCtx as { riskWarning: string | null }).riskWarning).toBeNull();
     const noCtx = (await collect(streamAnswer(baseInput({ contextChunks: [] })))).find(
       (e) => e.type === 'meta',
     );
-    expect((noCtx as { riskWarning: string | null }).riskWarning).toBeTruthy();
+    expect((noCtx as { riskWarning: string | null }).riskWarning).toBeNull();
   });
 });
 
@@ -298,16 +298,11 @@ describe('answer framing', () => {
     expect(system()).toMatch(/never call it unverified/);
   });
 
-  it('the interview guard keeps the v1 rule plus the missing-detail option; the conversation guard forbids invented figures', async () => {
+  it('the interview fallback keeps useful drafts honest; the conversation guard forbids invented figures', async () => {
     await collect(streamAnswer(baseInput({ framing: 'interview' })));
-    expect(system()).toContain(
-      '- FABRICATION GUARD: if neither the context nor what they said ("You said") can support what\'s\n' +
-        '  asked, do NOT make it up. Begin\n' +
-        '  the answer with "⚠", state in one short clause that it\'s not in their background, then\n' +
-        '  pivot to a grounded, cited, transferable-skills framing — or, when only they can know it\n' +
-        '  (a number, a date, who did what), name the one detail they should fill in themselves\n' +
-        '  (this is the riskWarning case).',
-    );
+    expect(system()).toContain('missing or unrelated sources are not a reason to stop');
+    expect(system()).toContain('Use conditional wording');
+    expect(system()).toContain('Never invent past employers, projects, years, outcomes or personal figures');
     await collect(streamAnswer(baseInput({ framing: 'conversation' })));
     const sys = system();
     // Asked for a Q3 budget with no notes, the meeting answer used to state a
@@ -327,7 +322,7 @@ describe('answer framing', () => {
 
   it('the no-context risk line is framed for the room it is shown in', async () => {
     const interview = await collect(streamAnswer({ ...baseInput({ framing: 'interview' }), contextChunks: [] }));
-    expect(interview.at(-1)).toEqual({ type: 'meta', riskWarning: 'No matching profile experience found.' });
+    expect(interview.at(-1)).toEqual({ type: 'meta', riskWarning: null });
     const meeting = await collect(streamAnswer({ ...baseInput({ framing: 'conversation' }), contextChunks: [] }));
     expect(meeting.at(-1)).toEqual({
       type: 'meta',

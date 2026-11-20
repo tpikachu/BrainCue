@@ -444,6 +444,7 @@ export class EngineSession {
       // cleared, so the card and the saved session agree.
       questionId = job.questionId;
       persist.updateQuestionText(questionId, job.text, tcId);
+      this.context.addSuggestion(questionId, job.text, '');
       persist.replaceAnswer({ questionId, directAnswer: '', riskWarning, tokens: null });
       emitContributionReset(questionId);
       emitContributionTitle(questionId, job.text);
@@ -728,7 +729,7 @@ export class EngineSession {
       // surfaced + un-wedges the card too — not just generate failures.
       // Snapshot NOW, synchronously: turns that arrive while this answer
       // streams cannot change the context it is built on.
-      const conversation = this.context.snapshot(questionText);
+      const conversation = this.context.snapshot(questionText, { drafts: interview });
       const t0 = Date.now();
       mark({ dispatchAt: t0 });
       // Documents and approved memory (consent-gated; [] when off — recall

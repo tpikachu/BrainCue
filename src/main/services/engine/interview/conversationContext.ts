@@ -29,7 +29,8 @@ import { assessUtterance } from './questionHeuristics';
  *               question and what the candidate actually said, each tagged
  *               with its turn number so it is traceable to the transcript
  *   recalled    older turns retrieved (BM25) because THIS question needs them
- *   suggestions BrainCue's own earlier leads, labelled as NOT evidence
+ *   suggestions BrainCue's own earlier leads, or one relevant draft passage
+ *               for interview follow-ups, labelled as NOT evidence
  *   subject     for a referential follow-up: the exchange it continues
  *
  * No model call, no summarisation pass: deterministic and bounded, so it
@@ -52,7 +53,7 @@ export interface Turn {
 export interface Suggestion {
   questionId: string;
   question: string;
-  /** The first sentence/line of the suggested answer (the "lead"). */
+  /** Compact lead, or a bounded draft passage in an interview snapshot. */
   lead: string;
   at: number;
 }
@@ -96,6 +97,9 @@ export const LIMITS = {
   recalledChars: 500,
   suggestions: 3,
   suggestionChars: 180,
+  /** Local suggested-answer cache only; rendered drafts share the existing
+   * three-lead budget, so follow-up continuity cannot grow the prompt. */
+  suggestedAnswerChars: 8000,
   subjectSaidChars: 700,
   retrievalSaidChars: 400,
   classifierTurnChars: 600,
@@ -207,7 +211,7 @@ export class ConversationContext {
   /** `archive` loads this session's persisted turns, oldest first (by when
    *  spoken). Only consulted once turns have been evicted from memory. */
   constructor(private readonly archive?: () => { role: TurnRole; text: string; at: number }[]) {}
-  private readonly suggestions: Suggestion[] = [];
+  private readonly suggestions: (Suggestion & { answer: string })[] = [];
   private nextN = 1;
 
   /** Record one finalized turn, at the time it was SPOKEN. The candidate's
@@ -235,15 +239,21 @@ export class ConversationContext {
   /** Record (or, for a regenerate, replace) BrainCue's suggestion for a question. */
   addSuggestion(questionId: string, question: string, answer: string, at = Date.now()): void {
     const lead = clip(leadOf(answer), LIMITS.suggestionChars);
-    if (!lead) return;
+    if (!lead) {
+      const i = this.suggestions.findIndex((s) => s.questionId === questionId);
+      if (i >= 0) this.suggestions.splice(i, 1);
+      return;
+    }
+    const body = clip(answer.trim(), LIMITS.suggestedAnswerChars);
     const existing = this.suggestions.find((s) => s.questionId === questionId);
     if (existing) {
       existing.question = question;
       existing.lead = lead;
+      existing.answer = body;
       existing.at = at;
       return;
     }
-    this.suggestions.push({ questionId, question, lead, at });
+    this.suggestions.push({ questionId, question, lead, answer: body, at });
     if (this.suggestions.length > 200) this.suggestions.shift();
   }
 
@@ -328,7 +338,7 @@ export class ConversationContext {
    * start of generation and copied, so turns that arrive while the answer
    * streams can never change (or tear) the context it was built on.
    */
-  snapshot(question: string): ConversationSnapshot {
+  snapshot(question: string, opts: { drafts?: boolean } = {}): ConversationSnapshot {
     const q = question.trim();
     // Recent window, newest first until the budget runs out; the current
     // question's own turn(s) are the QUESTION, not context.
@@ -378,10 +388,26 @@ export class ConversationContext {
       .sort((a, b) => older.indexOf(a.item) - older.indexOf(b.item)) // transcript order, ties included
       .map((s) => ({ ...s.item, text: excerpt(s.item.text, LIMITS.recalledChars, recallQuery) }));
 
-    const suggestions = this.suggestions
+    const eligible = this.suggestions.filter((s) => s.question !== q);
+    let suggestions: Suggestion[] = this.suggestions
       .filter((s) => s.question !== q)
       .slice(-LIMITS.suggestions)
-      .map((s) => ({ ...s, question: clip(s.question, LIMITS.earlierQuestionChars) }));
+      .map((s) => ({ questionId: s.questionId, question: clip(s.question, LIMITS.earlierQuestionChars), lead: s.lead, at: s.at }));
+    if (opts.drafts) {
+      const latest = eligible[eligible.length - 1];
+      // Spoken follow-up first; typed Asks can have no transcript exchange.
+      const previous = subject && last
+        ? [...eligible].reverse().find((s) => s.question === last.question)
+        : latest && this.isReferential(q, { n: 0, at: latest.at, question: latest.question, said: '' }) ? latest : undefined;
+      // Shared interview wording alone must not attach a different topic's draft.
+      const generic = new Set(tokenize('experience approach question answer project work role example suggested proposed'));
+      const query = tokenize(q).filter((w) => !generic.has(w)).join(' ');
+      const match = previous ?? (query ? bm25(query, eligible, (s) => `${s.question} ${s.answer}`, 1)[0]?.item : undefined);
+      suggestions = match ? [{
+        questionId: match.questionId, question: clip(match.question, LIMITS.earlierQuestionChars), at: match.at,
+        lead: excerpt(match.answer, LIMITS.suggestions * LIMITS.suggestionChars, q),
+      }] : [];
+    }
 
     // Open questions: earlier interviewer questions with no reply captured,
     // outside the recent window (inside it, the model sees them verbatim).
