@@ -5,7 +5,7 @@ and completed. It did not satisfy the stable-release gate; see
 [the diagnostic result](PERF01-2026-11-19.md). That approval is consumed.
 Nothing in this repository starts a paid run automatically.
 
-The next proposed run, after approval, uses the same synthetic fixtures,
+The approved Fast follow-up uses the same synthetic fixtures,
 models, effort, samples and hard volume caps below, plus the corrected memory
 fallback and explicit OpenAI Fast processing for normal interview answers.
 The user chose Fast as the default for normal OpenAI interview answers on
@@ -13,14 +13,14 @@ The user chose Fast as the default for normal OpenAI interview answers on
 been changed; this is still a source candidate. That preference did not
 authorize another paid test.
 
-For this proposed run only, set `PERF01_PROCESSING=fast` for both the offline
+For this follow-up, set `PERF01_PROCESSING=fast` for both the offline
 dry run and the subsequent approved live run. The driver records this in the
 manifest, pins the setting on isolated test data and checks it before sending
 audio. Each answered sample must record requested and actual processing tiers;
 a downgrade remains visible and is measured at its actual speed. An unknown
 tier invalidates Fast-run evidence. Ordinary requests and coding are unaffected.
 
-OpenAI's published short-context Luna Fast rates on 2026-11-19 are
+OpenAI's published short-context Luna Fast rates, rechecked on 2026-11-20, are
 $0.20/M input and $1.00/M output (twice Standard); see
 [pricing](https://developers.openai.com/api/docs/pricing.md) and
 [Fast processing](https://developers.openai.com/api/docs/guides/fast-mode.md).
@@ -30,10 +30,14 @@ That is a conservative estimate, not a billing cap. Hard caps remain volume
 limits: **72 questions, 673,000 reserved tokens, 678 requests, 900 STT seconds**.
 No microphone or native capture is opened. Expected duration is 30–45 minutes.
 
-No second live run is authorized or started. Stable 2.3.0 remains blocked
-until corrected grounding and measured General/Technical speed meet the gate.
+On 2026-11-20 the user explicitly approved **one** follow-up under these caps.
+Application commit `4303964` also includes the requested flexible interview
+fallback and session draft continuity, verified by 10 focused checks and a
+production build. The fixed `perf01-v1` fixtures, model routes/effort, sample
+counts and volume caps are unchanged. No extra paid fallback questions are
+added outside the 72. Stable promotion still depends on the measured result.
 
-**Ready for that approval on application commit `9b9a584`:** build/typecheck,
+**Earlier preparation on application commit `9b9a584`:** build/typecheck,
 1,406 unit tests (3 skips), 117 offline browser tests (13 intentional no-key
 registration skips), and GitHub CI pass. The explicit Fast-mode offline dry
 run passes 2/2 in `dry-fast-9b9a584-20261119-181536`, with two isolated metered
