@@ -8,7 +8,7 @@ scope freeze for these requirements. The existing preview stays published.
 | Checkpoint | Required behavior | State |
 | --- | --- | --- |
 | S1 — Role résumé | Create/edit offers Default résumé or upload/paste a different résumé. Only this role uses it; saving/replacing/removing it updates grounding, including cached lookups. Setup, prep and Resume use the selected role's context. Existing roles inherit their current behavior. | Implemented and verified offline: nullable Space field/migration, isolated indexing/cache validation, actual save/brief/tailor handlers including failures, real-engine prompt/Resume test, and four renderer cases. A stronger prompt check also found and fixed the stale default role/company heading; owned job Space metadata is now request-local, with cross-profile/non-job controls. |
-| S2 — Interview speed | Normal General/short Technical cues use low-latency defaults and a short bounded context wait; coding keeps deeper models and a longer allowance. Preserve résumé/JD/session grounding, candidate speech, ordering, consent, explicit overrides and same-provider retry. | First live run misses both latency targets and one memory. Recall/report fixes are verified offline (`09c8934`). At the user's explicit choice, the next candidate defaults normal supported OpenAI cues to Fast processing, with a higher-rate notice and opt-out; coding and other providers are unchanged. Actual tier/cache telemetry and a manifest-bound Fast driver are in final offline validation. A second paid run is not yet authorized. |
+| S2 — Interview speed | Normal General/short Technical cues use low-latency defaults and a short bounded context wait; coding keeps deeper models and a longer allowance. Preserve résumé/JD/session grounding, candidate speech, ordering, consent, explicit overrides and same-provider retry. | First live run misses both latency targets and one memory. Recall/report fixes are verified offline (`09c8934`). At the user's explicit choice, normal supported OpenAI cues now default to Fast processing, with a higher-rate notice and opt-out; coding and other providers are unchanged. Actual tier/cache telemetry and the manifest-bound driver pass offline checks on `9b9a584`. A second paid live run remains unapproved; speed is not yet accepted. |
 | S3 — Stable release | Independently review S1/S2, run full offline checks and measured live General/Technical acceptance. Publish 2.3.0 as latest only after the two changes are validated. | Pending. The user authorized this conditional stable release; no version/tag/latest change yet. Paid live benchmark and user audio are not started implicitly. |
 
 Current owner: Codex is implementing and verifying these changes locally.
@@ -16,7 +16,7 @@ No other engineer checkpoint is assumed running from passive handoff files.
 Formal PERF-01/M7 acceptance and existing open issues remain recorded below;
 simulated timing is not live performance evidence.
 
-Candidate checks: **1,387 unit passes / 3 skips**, **115 offline E2E passes /
+Initial `44ad736` checks: **1,387 unit passes / 3 skips**, **115 offline E2E passes /
 13 intentional no-key registration skips**, production build/typecheck pass,
 `git diff --check` clean. A baseline checkout at `a058aec` with only the new
 regression tests gives **12 failures and 2 passing controls**; the same
@@ -40,6 +40,19 @@ without changing raw evidence. See [the measured result](benchmarks/PERF01-2026-
 The original 72-question approval is consumed. Any further paid run requires
 new approval after a concrete correction/plan is ready. Stable promotion stays
 blocked; the draft PR and published preview do not change.
+
+Latest application candidate: **`9b9a584`**. Full unit suite: **1,406 passed,
+3 skipped**; build/typecheck pass; four touched E2E files pass the ad-hoc
+typecheck. All **14 keyboard/popover checks pass** after reproducing and fixing
+focus-triggered scrolling hiding a readiness tooltip. GitHub
+[CI run 44644531266](https://github.com/tpikachu/BrainCue/actions/runs/44644531266)
+passes on that commit. The manifest-bound **Fast offline dry run passes 2/2**,
+with two isolated metered processes and zero provider requests, reserved
+tokens or STT seconds (`bench-results/perf01/dry-fast-9b9a584-20261119-181536/`).
+The final full offline browser rerun **passes 117 tests / 13 intentional
+no-key registration skips**, exit 0 (`bench-results/stable23-final-e2e.log`).
+No second paid run has started; choosing the Fast default did not authorize
+more test calls. Next is approval of the concrete follow-up in the live plan.
 
 **Current preview status (2026-11-19):**
 [2.3.0-preview.1](https://github.com/tpikachu/BrainCue/releases/tag/v2.3.0-preview.1)

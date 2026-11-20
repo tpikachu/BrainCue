@@ -33,6 +33,13 @@ No microphone or native capture is opened. Expected duration is 30–45 minutes.
 No second live run is authorized or started. Stable 2.3.0 remains blocked
 until corrected grounding and measured General/Technical speed meet the gate.
 
+**Ready for that approval on application commit `9b9a584`:** build/typecheck,
+1,406 unit tests (3 skips), 117 offline browser tests (13 intentional no-key
+registration skips), and GitHub CI pass. The explicit Fast-mode offline dry
+run passes 2/2 in `dry-fast-9b9a584-20261119-181536`, with two isolated metered
+processes and zero provider requests, reserved tokens or STT seconds. No live
+speed is inferred from that dry run.
+
 ## 1. What it measures and decides
 
 It measures the M7.2b / PERF-01 acceptance targets on one named reference configuration, with the full knowledge base and context path:
