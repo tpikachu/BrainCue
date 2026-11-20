@@ -94,6 +94,7 @@ import * as schema from '../../db/schema';
 import { createTestDb } from '../../test/dbHarness';
 import { engine } from './engine';
 import { ConversationContext, LIMITS } from './interview/conversationContext';
+import { assessUtterance } from './interview/questionHeuristics';
 import { generateReport, NO_ANSWER_CAPTURED, NOT_DETECTED_PREFIX } from '../session/report';
 
 // ~1,060 characters; the project name and the figure come LAST.
@@ -242,6 +243,62 @@ describe('session draft continuity for flexible interview fallback', () => {
     expect(JSON.stringify(c.snapshot(q, { drafts: true }))).not.toContain('47-second');
     c.addSuggestion('draft', DRAFT_QUESTION, '');
     expect(c.snapshot(q, { drafts: true }).suggestions).toEqual([]);
+  });
+
+  it('remembers a proposed answer when a new card asks the same question again', async () => {
+    h.noSources = true;
+    const { profileId, packId } = seed();
+    const sid = engine.start(profileId, 'general', packId).id;
+    h.reply = PROPOSED_ANSWER;
+    await engine.answerQuestion(sid, DRAFT_QUESTION);
+    h.reply = 'A consistent new cue.';
+    await engine.answerQuestion(sid, DRAFT_QUESTION);
+    expect(conversationOf(promptFor(DRAFT_QUESTION))).toContain(DRAFT_TAIL);
+    const cards = h.db.select().from(schema.detectedQuestions).all().filter((q) => q.sessionId === sid);
+    expect(cards).toHaveLength(2);
+  });
+
+  it('excludes only the active card draft, while legacy snapshots keep their old same-question exclusion', () => {
+    const c = new ConversationContext();
+    c.addSuggestion('first', DRAFT_QUESTION, PROPOSED_ANSWER);
+    expect(c.snapshot(DRAFT_QUESTION, { drafts: true, questionId: 'first' }).suggestions).toEqual([]);
+    expect(c.snapshot(DRAFT_QUESTION).suggestions).toEqual([]);
+    expect(c.snapshot(DRAFT_QUESTION, { drafts: true, questionId: 'new-card' }).suggestions[0]?.lead).toContain(DRAFT_TAIL);
+  });
+
+  it('does not reuse old citation numbers as current sources in a session draft', async () => {
+    h.noSources = true;
+    const { profileId, packId } = seed();
+    const sid = engine.start(profileId, 'general', packId).id;
+    h.reply = 'I would use a per-request GraphQL cache. [1]\nThe expiry would be 47 seconds. [M1]';
+    await engine.answerQuestion(sid, DRAFT_QUESTION);
+    h.reply = 'A follow-up cue.';
+    const follow = 'Why that cache expiry?';
+    await engine.answerQuestion(sid, follow);
+    const block = conversationOf(promptFor(follow));
+    expect(block).toContain('47 seconds');
+    expect(block).toContain('NOT evidence');
+    expect(block).not.toMatch(/\[(?:M)?1\]/);
+    // Rendering a draft never edits the answer saved for the original card.
+    expect(h.db.select().from(schema.aiAnswers).all().some((a) => a.directAnswer.includes('[M1]'))).toBe(true);
+  });
+
+  it('clears a draft without erasing its classifier-detected spoken question boundary', () => {
+    const c = new ConversationContext();
+    const detected = 'Your GraphQL caching experience.';
+    expect(assessUtterance(detected).verdict).not.toBe('question');
+    c.addTurn('interviewer', 'Tell me about your leadership.');
+    c.addTurn('candidate', 'I mentor the team.');
+    c.addTurn('interviewer', detected);
+    c.addSuggestion('classified', detected, 'I would use a per-request cache.');
+    c.addSuggestion('classified', detected, '');
+    c.addTurn('candidate', 'I have used a cache in one service.');
+    expect(c.exchanges().map((e) => [e.question, e.said])).toEqual([
+      ['Tell me about your leadership.', 'I mentor the team.'],
+      [detected, 'I have used a cache in one service.'],
+    ]);
+    expect(c.snapshot('Why that cache?', { drafts: true }).suggestions).toEqual([]);
+    expect(c.snapshot('Why that cache?').suggestions).toEqual([]);
   });
 });
 

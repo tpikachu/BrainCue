@@ -185,8 +185,11 @@ const ANAPHOR =
 export function leadOf(answer: string): string {
   const firstLine = (answer.trim().split(/\n+/)[0] ?? '').replace(/\*\*/g, '');
   const sentence = firstLine.split(/(?<=[.!?])\s/)[0] ?? firstLine;
-  return sentence.replace(/\s*(\[\d+\]|\[M\d+\])/g, '').trim();
+  return withoutSourceMarkers(sentence).trim();
 }
+
+/** Source numbers belong to the original request, never the next snapshot. */
+const withoutSourceMarkers = (text: string) => text.replace(/[ \t]*(\[\d+\]|\[M\d+\])/g, '');
 
 /** Capitalised words that are not sentence-initial — a rough named-entity
  *  probe for "did this follow-up name something new?". */
@@ -239,12 +242,9 @@ export class ConversationContext {
   /** Record (or, for a regenerate, replace) BrainCue's suggestion for a question. */
   addSuggestion(questionId: string, question: string, answer: string, at = Date.now()): void {
     const lead = clip(leadOf(answer), LIMITS.suggestionChars);
-    if (!lead) {
-      const i = this.suggestions.findIndex((s) => s.questionId === questionId);
-      if (i >= 0) this.suggestions.splice(i, 1);
-      return;
-    }
-    const body = clip(answer.trim(), LIMITS.suggestedAnswerChars);
+    // An empty answer clears its draft but keeps the detected-question marker
+    // used by exchanges(), including questions the rules alone cannot detect.
+    const body = clip(withoutSourceMarkers(answer.trim()), LIMITS.suggestedAnswerChars);
     const existing = this.suggestions.find((s) => s.questionId === questionId);
     if (existing) {
       existing.question = question;
@@ -329,7 +329,7 @@ export class ConversationContext {
     if (!last || !this.isReferential(question, last)) return question;
     const said = excerpt(last.said, LIMITS.retrievalSaidChars, question);
     if (said) return `${last.question} ${said} ${question}`;
-    const sug = [...this.suggestions].reverse().find((s) => s.question === last.question);
+    const sug = [...this.suggestions].reverse().find((s) => s.lead && s.question === last.question);
     return sug ? `${last.question} ${clip(sug.lead, 160)} ${question}` : `${last.question} ${question}`;
   }
 
@@ -338,7 +338,7 @@ export class ConversationContext {
    * start of generation and copied, so turns that arrive while the answer
    * streams can never change (or tear) the context it was built on.
    */
-  snapshot(question: string, opts: { drafts?: boolean } = {}): ConversationSnapshot {
+  snapshot(question: string, opts: { drafts?: boolean; questionId?: string } = {}): ConversationSnapshot {
     const q = question.trim();
     // Recent window, newest first until the budget runs out; the current
     // question's own turn(s) are the QUESTION, not context.
@@ -388,13 +388,16 @@ export class ConversationContext {
       .sort((a, b) => older.indexOf(a.item) - older.indexOf(b.item)) // transcript order, ties included
       .map((s) => ({ ...s.item, text: excerpt(s.item.text, LIMITS.recalledChars, recallQuery) }));
 
-    const eligible = this.suggestions.filter((s) => s.question !== q);
+    const eligible = this.suggestions.filter((s) => s.answer && (opts.questionId ? s.questionId !== opts.questionId : s.question !== q));
     let suggestions: Suggestion[] = this.suggestions
-      .filter((s) => s.question !== q)
+      .filter((s) => s.lead && s.question !== q)
       .slice(-LIMITS.suggestions)
       .map((s) => ({ questionId: s.questionId, question: clip(s.question, LIMITS.earlierQuestionChars), lead: s.lead, at: s.at }));
     if (opts.drafts) {
       const latest = eligible[eligible.length - 1];
+      // A new card can repeat an earlier question. Regenerating that same
+      // card excludes its own draft instead of treating it as fresh evidence.
+      const repeated = [...eligible].reverse().find((s) => s.question === q);
       // Spoken follow-up first; typed Asks can have no transcript exchange.
       const previous = subject && last
         ? [...eligible].reverse().find((s) => s.question === last.question)
@@ -402,7 +405,7 @@ export class ConversationContext {
       // Shared interview wording alone must not attach a different topic's draft.
       const generic = new Set(tokenize('experience approach question answer project work role example suggested proposed'));
       const query = tokenize(q).filter((w) => !generic.has(w)).join(' ');
-      const match = previous ?? (query ? bm25(query, eligible, (s) => `${s.question} ${s.answer}`, 1)[0]?.item : undefined);
+      const match = repeated ?? previous ?? (query ? bm25(query, eligible, (s) => `${s.question} ${s.answer}`, 1)[0]?.item : undefined);
       suggestions = match ? [{
         questionId: match.questionId, question: clip(match.question, LIMITS.earlierQuestionChars), at: match.at,
         lead: excerpt(match.answer, LIMITS.suggestions * LIMITS.suggestionChars, q),

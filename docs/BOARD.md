@@ -8,9 +8,9 @@ scope freeze for these requirements. The existing preview stays published.
 | Checkpoint | Required behavior | State |
 | --- | --- | --- |
 | S1 — Role résumé | Create/edit offers Default résumé or upload/paste a different résumé. Only this role uses it; saving/replacing/removing it updates grounding, including cached lookups. Setup, prep and Resume use the selected role's context. Existing roles inherit their current behavior. | Implemented and verified offline: nullable Space field/migration, isolated indexing/cache validation, actual save/brief/tailor handlers including failures, real-engine prompt/Resume test, and four renderer cases. A stronger prompt check also found and fixed the stale default role/company heading; owned job Space metadata is now request-local, with cross-profile/non-job controls. |
-| S2 — Interview speed | Normal General/short Technical cues use low-latency defaults and a short bounded context wait; coding keeps deeper models and a longer allowance. Preserve résumé/JD/session grounding, candidate speech, ordering, consent, explicit overrides and same-provider retry. | First live run misses both latency targets and one memory. Recall/report fixes are verified offline (`09c8934`). At the user's explicit choice, normal supported OpenAI cues now default to Fast processing, with a higher-rate notice and opt-out; coding and other providers are unchanged. Actual tier/cache telemetry and the manifest-bound driver pass offline checks. On 2026-11-20 the user approved one Fast follow-up, now being prepared on the candidate including S4. Speed is not yet accepted. |
+| S2 — Interview speed | Normal General/short Technical cues use low-latency defaults and a short bounded context wait; coding keeps deeper models and a longer allowance. Preserve résumé/JD/session grounding, candidate speech, ordering, consent, explicit overrides and same-provider retry. | Fast follow-up completed on `018b9ca`: valid evidence, all 70 measured prompt-grounding checks pass, all actual tiers Fast. Warm General p50/p95 2.389/2.952 s; short Technical 2.370/4.635 s. Both medians and Technical p95 miss 1.5/3 s targets. Provider first-token delay dominates; one on-wire answer request per sample. Approval consumed; speed not accepted. |
 | S3 — Stable release | Independently review S1/S2, run full offline checks and measured live General/Technical acceptance. Publish 2.3.0 as latest only after the two changes are validated. | Pending. The user authorized this conditional stable release; no version/tag/latest change yet. Paid live benchmark and user audio are not started implicitly. |
-| S4 — Flexible interview fallback | Give useful general-knowledge answers or an adaptable proposed experience answer when sources do not cover it. Keep the draft consistent within this session without promoting it to personal history. | Implemented; 10 focused checks and build/typecheck pass. Draft detail shares the existing prompt budget, supports follow-ups/older-topic recall/Resume, and stays isolated by session. No broad suite rerun, per the user's test scope. |
+| S4 — Flexible interview fallback | Give useful general-knowledge answers or an adaptable proposed experience answer when sources do not cover it. Keep the draft consistent within this session without promoting it to personal history. | Implemented; 14 focused checks and build/typecheck pass, including four post-run regressions. Draft detail shares the existing prompt budget, supports follow-ups/older-topic recall/Resume/repeated cards, and stays isolated by session. Cleared drafts keep spoken-question boundaries; old citation markers are not reused. No broad local suite rerun, per the user's test scope. |
 
 Current owner: Codex is implementing and verifying these changes locally.
 No other engineer checkpoint is assumed running from passive handoff files.
@@ -42,7 +42,7 @@ The original 72-question approval is consumed. Any further paid run requires
 new approval after a concrete correction/plan is ready. Stable promotion stays
 blocked; the draft PR and published preview do not change.
 
-Latest application candidate: **`9b9a584`**. Full unit suite: **1,406 passed,
+Earlier fully checked application candidate: **`9b9a584`**. Full unit suite: **1,406 passed,
 3 skipped**; build/typecheck pass; four touched E2E files pass the ad-hoc
 typecheck. All **14 keyboard/popover checks pass** after reproducing and fixing
 focus-triggered scrolling hiding a readiness tooltip. GitHub
@@ -57,6 +57,18 @@ The user subsequently approved **one** Fast follow-up with the same 72 /
 10 focused tests and build were rerun for that addition, per the user's scope.
 See `docs/sessions/2026-11-20.md`. The fixed benchmark fixtures are unchanged;
 no extra paid fallback questions are added to the approved run.
+
+**Fast follow-up result (2026-11-20):** completed on unchanged `018b9ca`
+(application `4303964`), with 13 runner passes and valid report evidence.
+All 70 measured questions answered/painted and had their expected prompt
+grounding; all used actual Fast. Used 373,176 reserved tokens, 433 requests
+and 384.229 STT seconds, zero refusals. Warm General p50/p95 is
+2.389/2.952 s; Technical 2.370/4.635 s. Stable remains blocked. See
+[the measured follow-up](benchmarks/PERF01-2026-11-20.md). The one approval
+is consumed; no further paid run is authorized. Four focused post-run draft
+regressions fail before their fix and pass now; the fallback selection is
+14 passes / 49 unselected, build/typecheck clean. They are not retroactively
+part of the measured source. No broad local suite was rerun for S4.
 
 **Current preview status (2026-11-19):**
 [2.3.0-preview.1](https://github.com/tpikachu/BrainCue/releases/tag/v2.3.0-preview.1)
@@ -2249,7 +2261,7 @@ results where applicable, reviewer decision and remaining limitations here.
 | UI-04 | P2 | User requests a cleaner Cue Card layout and toolbar: the current dense, uneven controls look poor. | Accepted — Codex implementation committed unchanged at `43b0d46`. Consistent toolbar geometry, grouped secondary controls in a scrollable popover, one Ask surface; earlier focused/full offline verification retained and engineer reports 111 E2E passes at preview HEAD. |
 | AI-01 | P1 | User sees `Default (gpt-6.2-astra)` in Cue Card settings and `GPT-4.1` in the General interview chip. The screenshot compares a **coding-solver setting** with the **live-answer selection**; it does not establish which model handled that answer. The distinction and actual route must be clear. | Resolved by `3557fa9` + `084cd07` with offline adapter-boundary, provenance, labels, stale-reply and field-level-write evidence. Real-provider performance remains separate. AI-02 tracks the outstanding dashboard draft gap. |
 | AI-02 | P2 | An unrelated settings push clears an unsaved dashboard per-task model choice; Save then submits `{ modelOverrides: {} }` and can report success. | Resolved — `8d0c24d`, M7.2a accepted. Four real-panel regressions assert preserved drafts, refreshed untouched tasks, a newer edit during Save and the actual Save payload. |
-| PERF-01 | P1 | User reports unacceptable response delays during general interviews and simple technical questions, while allowing more time for coding challenges. No duration can be inferred from the screenshots. | Open — implementation/tooling corrections accepted through `e721dc2`; `1c75cd1` limited Windows preview awaits the user's short interview. Formal live targets remain unmeasured; a short local-STT run does not satisfy the reference sample counts. |
+| PERF-01 | P1 | User reports unacceptable response delays during general interviews and simple technical questions, while allowing more time for coding challenges. No duration can be inferred from the screenshots. | Open — the approved Fast follow-up on `018b9ca` has valid evidence and all 70 expected prompt-grounding checks pass, but warm General p50/p95 is 2.389/2.952 s and Technical 2.370/4.635 s. Both medians and Technical p95 miss. Actual Fast confirmed; approval consumed. Stable 2.3.0 stays blocked. |
 | CTX-01 | P2 | Engineer reports that documents deleted after prefetch can still ground the next answer; document revalidation was outside the memory-consent correction. | Open — track in M7.2c's integrated grounding/lifecycle review. Establish the deletion contract and regression; this review does not claim it fixed. |
 
 **Baseline inspection before `3557fa9`, retained as the reason for M7.2a:**

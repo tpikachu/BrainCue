@@ -37,6 +37,14 @@ production build. The fixed `perf01-v1` fixtures, model routes/effort, sample
 counts and volume caps are unchanged. No extra paid fallback questions are
 added outside the 72. Stable promotion still depends on the measured result.
 
+**Completed:** the approved follow-up ran on `018b9ca` without changing its
+source or fixtures. Evidence is valid and all 70 measured grounding checks
+pass; all answers used actual Fast. Warm General p50/p95 is 2.389/2.952 s;
+Technical is 2.370/4.635 s. Both medians and Technical p95 miss the targets.
+The approval is consumed; stable remains blocked. See
+[the measured follow-up](PERF01-2026-11-20.md). Do not start another paid run
+from this completed plan without a new bounded proposal and approval.
+
 **Earlier preparation on application commit `9b9a584`:** build/typecheck,
 1,406 unit tests (3 skips), 117 offline browser tests (13 intentional no-key
 registration skips), and GitHub CI pass. The explicit Fast-mode offline dry

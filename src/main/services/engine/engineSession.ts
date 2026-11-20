@@ -729,7 +729,7 @@ export class EngineSession {
       // surfaced + un-wedges the card too — not just generate failures.
       // Snapshot NOW, synchronously: turns that arrive while this answer
       // streams cannot change the context it is built on.
-      const conversation = this.context.snapshot(questionText, { drafts: interview });
+      const conversation = this.context.snapshot(questionText, { drafts: interview, questionId });
       const t0 = Date.now();
       mark({ dispatchAt: t0 });
       // Documents and approved memory (consent-gated; [] when off — recall

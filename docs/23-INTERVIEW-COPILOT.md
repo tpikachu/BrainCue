@@ -877,8 +877,11 @@ Timing records separate `requestedServiceTier` from the provider's actual
 `serviceTier`, and retain `cachedPromptTokens` when reported. A downgrade to
 Standard is visible; missing data is not inferred. The benchmark can bind
 `PERF01_PROCESSING=fast` in its manifest and requires these tier records for
-answered samples. This option's real speed remains unmeasured. A second paid
-run requires new approval; stable promotion stays blocked.
+answered samples. The approved Fast follow-up records actual Fast on all
+70 measured answers, with valid grounding evidence, but misses both warm
+median targets and Technical p95. See
+[the measured result](benchmarks/PERF01-2026-11-20.md). Its approval is consumed;
+stable promotion stays blocked.
 
 ### Flexible answers and session-local proposed wording
 
@@ -897,3 +900,9 @@ Ask. Own speech/corrections and sourced facts outrank the proposal; it is
 never relabelled as what the candidate said or added to their resume/memory.
 Replacement/clear removes stale draft content, and Resume restores only
 that session's answer records. No extra AI call is needed.
+
+A new card repeating the same question can use the earlier proposal;
+regenerating a card excludes its own draft. Old source-number markers are
+removed from rendered draft context, since they belonged to another request.
+Clearing a draft keeps the detected spoken-question boundary so later
+candidate speech is not attributed to the preceding question.
