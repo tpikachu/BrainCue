@@ -11,15 +11,13 @@ import { useSettingsStore } from '../../store/useSettingsStore';
 import { useLiveSession } from '../../store/useLiveSession';
 import { StartSessionModal } from '../StartSessionModal';
 import { SetupChecklist } from '../SetupChecklist';
+import { lastOtherActivity } from '../startFlow';
 import { durationMs, fmtDur } from '../../lib/format';
 import {
   BoltIcon,
   ClipboardCheckIcon,
-  FrameIcon,
   GraduationCapIcon,
-  LibraryIcon,
   MicIcon,
-  MockIcon,
   SparklesIcon,
   UsersIcon,
 } from '../../components/icons';
@@ -30,12 +28,13 @@ type IconType = (p: React.SVGProps<SVGSVGElement>) => React.JSX.Element;
  *  single-word name is left exactly as it is. */
 const firstName = (name: string): string => name.trim().split(/\s+/)[0] || name;
 
-/** Home (docs/11-UX-NAVIGATION.md): one companion, not an interview app with
- *  disabled cards. Primary actions up top, an honest permission/status row,
- *  recent activity, and the activity cards as secondary presets — each opens
- *  the one start flow with that activity preselected (docs/18-ACTIVITIES.md).
- *  What is not built yet is flag-gated into a compact Labs strip — never
- *  dead-looking cards.
+/** Home (docs/23-INTERVIEW-COPILOT.md §7): ONE dominant action — Start
+ *  interview — then a few small secondary ones, recent sessions, and
+ *  everything else BrainCue does grouped under "More ways to use BrainCue".
+ *  It used to be five equal launch cards and a catalog of activities, so the
+ *  first screen asked "which of these?" before it asked anything useful.
+ *  Every start goes through the one start flow (docs/18-ACTIVITIES.md); what
+ *  is not built yet stays in a compact Labs strip — never dead-looking cards.
  *
  *  Everything here is scoped to the ACTIVE profile
  *  (docs/19-ACTIVE-PROFILE.md), greeting included. */
@@ -46,7 +45,8 @@ export default function HomePage() {
   const profile = useActiveProfile();
   const [startOpen, setStartOpen] = useState(false);
   const [startActivity, setStartActivity] = useState<ContextPackKind>(DEFAULT_ACTIVITY);
-  const [recent, setRecent] = useState<SessionListItem[]>([]);
+  const [sessions, setSessions] = useState<SessionListItem[]>([]);
+  const recent = sessions.slice(0, 4);
   const [micState, setMicState] = useState<'granted' | 'prompt' | 'denied' | 'unknown'>('unknown');
   const [activeSpace, setActiveSpace] = useState<string | null>(null);
 
@@ -56,13 +56,13 @@ export default function HomePage() {
   // underneath it.
   useEffect(() => {
     if (!profile) {
-      setRecent([]);
+      setSessions([]);
       return;
     }
     void api.session
       .list(profile.id)
-      .then((all) => setRecent((all as SessionListItem[]).slice(0, 4)))
-      .catch(() => setRecent([]));
+      .then((all) => setSessions(all as SessionListItem[]))
+      .catch(() => setSessions([]));
   }, [session, profile]);
 
   // Best-effort mic permission state (Chromium supports querying 'microphone').
@@ -106,8 +106,7 @@ export default function HomePage() {
   // which profile the whole page is scoped to.
   return (
     <Page
-      title={profile ? `Hi ${firstName(profile.name)} — how can I help right now?` : 'How can BrainCue help right now?'}
-      subtitle="It listens, grounds itself in your documents, and cues you in real time."
+      title={profile ? `Hi ${firstName(profile.name)}` : 'Welcome'}
       width="max-w-5xl"
     >
       {/* Live banner — mode-aware: interview/practice have a workspace to
@@ -147,75 +146,54 @@ export default function HomePage() {
           </Link>
         ))}
 
-      {/* What a live session still needs (transcription, the OpenAI key) —
-          the reminder behind every "Later" in first-run setup. Hidden once
-          both are ready. */}
+      {/* What an interview still needs (transcription, an AI provider) — from
+          main's readiness, so any keyed provider counts. Hidden once ready. */}
       <SetupChecklist />
 
-      {/* Primary actions. "Talk to BrainCue" joined when voice shipped
-          (FLAGS.voice) — a summon starts push-to-talk listening in the Cue
-          Card, with or without a session. */}
-      <div
-        className={`grid grid-cols-1 gap-3 ${FLAGS.voice ? 'sm:grid-cols-2 lg:grid-cols-4' : 'sm:grid-cols-3'}`}
+      {/* ONE dominant action: the interview. */}
+      <section
         data-tour="primary-actions"
+        className="rounded-2xl border border-indigo-400/20 bg-gradient-to-br from-indigo-500/15 via-neutral-900/80 to-neutral-900/80 p-6 shadow-lg shadow-black/20"
       >
-        <PrimaryAction
-          Icon={MicIcon}
-          title="Start listening"
-          desc="Live cues for the conversation you're in"
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-neutral-50">
+              <MicIcon className="h-5 w-5 text-indigo-300" />
+              Interview Copilot
+            </h2>
+            <p className="mt-1.5 max-w-md text-sm leading-relaxed text-neutral-300">
+              Hears the interviewer and shows answers from your résumé and the job description, in a Cue
+              Card only you can see.
+            </p>
+          </div>
+          <button
+            type="button"
+            data-tour="action-start"
+            onClick={() => {
+              setStartActivity(DEFAULT_ACTIVITY);
+              setStartOpen(true);
+            }}
+            className="shrink-0 rounded-xl bg-indigo-600 px-6 py-3 text-base font-semibold text-white shadow-md shadow-indigo-900/40 transition-all hover:bg-indigo-500 active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-300"
+          >
+            Start interview
+          </button>
+        </div>
+      </section>
+
+      {/* Secondary — deliberately small. */}
+      <div className="mt-3 flex flex-wrap items-center gap-x-1 gap-y-1 text-sm" aria-label="Other tools">
+        <SecondaryAction
           onClick={() => {
-            setStartActivity(DEFAULT_ACTIVITY);
+            // The last kind of other conversation this profile had, else a meeting.
+            setStartActivity(lastOtherActivity(sessions));
             setStartOpen(true);
           }}
-          tour="action-start"
-        />
-        {FLAGS.voice && (
-          <PrimaryAction
-            Icon={SparklesIcon}
-            title="Talk to BrainCue"
-            desc="Push-to-talk: ask by voice, hear the answer"
-            onClick={() => void api.voice.summon()}
-          />
-        )}
-        <PrimaryAction
-          Icon={FrameIcon}
-          title="Share screen"
-          desc="Capture a region — the answer streams to the Cue Card"
-          onClick={() => void api.capture.openSelector()}
-        />
-        <PrimaryAction
-          Icon={LibraryIcon}
-          title="Add context"
-          desc="Create a Space with a JD, docs, or notes"
-          onClick={() => navigate('/library?tab=spaces')}
-        />
-      </div>
-
-      {/* Status row — what BrainCue can currently see/hear, at a glance. */}
-      <div className="mt-3 flex flex-wrap items-center gap-2" aria-label="Capture status">
-        <StatusChip
-          label="Microphone"
-          value={micState === 'unknown' ? '—' : micState}
-          tone={micState === 'granted' ? 'ok' : micState === 'denied' ? 'warn' : 'idle'}
-        />
-        <StatusChip
-          label="Hears"
-          // A call is heard on both sides — the call and your microphone —
-          // and questions come from the call. A solo session is your mic only.
-          value={session?.mode === 'companion' ? 'microphone' : 'call + mic'}
-          tone="idle"
-        />
-        <StatusChip label="Screen" value="on demand" tone="idle" />
-        <StatusChip
-          label="Memory"
-          value={FLAGS.memory ? (settings?.memoryEnabled ? 'on' : 'off') : 'planned'}
-          tone={FLAGS.memory && settings?.memoryEnabled ? 'ok' : 'idle'}
-        />
-        <StatusChip
-          label="Active Space"
-          value={session ? (activeSpace ?? 'profile only') : 'none'}
-          tone={session ? 'ok' : 'idle'}
-        />
+        >
+          Other conversation
+        </SecondaryAction>
+        <SecondaryAction onClick={() => navigate('/mock')}>Practice</SecondaryAction>
+        <SecondaryAction onClick={() => void api.capture.openSelector()}>Solve from screen</SecondaryAction>
+        {FLAGS.voice && <SecondaryAction onClick={() => void api.voice.summon()}>Talk to BrainCue</SecondaryAction>}
       </div>
 
       {/* Recent activity */}
@@ -255,89 +233,98 @@ export default function HomePage() {
         </>
       )}
 
-      {/* What it can sit in on. These are shortcuts INTO the one start flow
-          with an activity preselected — not a second catalog to choose from.
-          Ordered by what BrainCue IS now: the conversations someone has every
-          day come first, and interviews — still fully shipped — sit after them
-          rather than defining the product. */}
-      <h3 className="mb-3 mt-8 text-xs font-medium uppercase tracking-wider text-neutral-500">
-        What it can sit in on
-      </h3>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {FLAGS.meeting && (
-          <ActivityCard
-            Icon={UsersIcon}
-            title={ACTIVITIES.meeting.label}
-            desc="Answers questions asked in the room, and surfaces context, action items, and decisions — only when confident. Remembers each call, so the next one starts where this one ended."
-            labs
-            tour="activity-meeting"
-            onClick={() => {
-              setStartActivity('meeting');
-              setStartOpen(true);
-            }}
-          />
-        )}
-        {FLAGS.companion && (
-          <ActivityCard
-            Icon={SparklesIcon}
-            title={`${ACTIVITIES.solo.label} · ${ACTIVITIES.game.label}`}
-            desc="An ambient presence while you work or play: remembers what you saved, flags tasks, offers context — only through deterministic gates you control."
-            labs
-            tour="activity-companion"
-            onClick={() => {
-              setStartActivity('solo');
-              setStartOpen(true);
-            }}
-          />
-        )}
-        <ActivityCard
-          Icon={MicIcon}
-          title={ACTIVITIES.job.label}
-          desc="You're the candidate. BrainCue hears the questions and streams grounded answer cues into the Cue Card."
-          tour="activity-interview"
-          onClick={() => {
-            setStartActivity('job');
-            setStartOpen(true);
-          }}
-        />
-        <ActivityCard
-          Icon={MockIcon}
-          title="Practice"
-          desc="Rehearse out loud: an AI interviewer asks with a voice, and every answer gets coached."
-          tour="activity-practice"
-        >
-          <div className="mt-3 flex gap-2">
-            <PracticeLink to="/mock" label="Mock interview" />
-            <PracticeLink to="/sparring" label="Sparring drill" />
+      {/* Everything that is not the interview — other activities, what it can
+          see and hear, what is still in Labs — grouped away, one click. */}
+      <details className="group mt-8 rounded-2xl border border-white/5 bg-neutral-900/40 px-4 py-3" data-tour="more-activities">
+        <summary className="cursor-pointer select-none text-xs font-medium uppercase tracking-wider text-neutral-500 hover:text-neutral-300">
+          More ways to use BrainCue
+        </summary>
+        <div className="pb-2">
+          {/* Status row — what BrainCue can currently see/hear, at a glance. */}
+          <div className="mt-4 flex flex-wrap items-center gap-2" aria-label="Capture status">
+            <StatusChip
+              label="Microphone"
+              value={micState === 'unknown' ? '—' : micState}
+              tone={micState === 'granted' ? 'ok' : micState === 'denied' ? 'warn' : 'idle'}
+            />
+            <StatusChip
+              label="Hears"
+              // A call is heard on both sides — the call and your microphone —
+              // and questions come from the call. A solo session is your mic only.
+              value={session?.mode === 'companion' ? 'microphone' : 'call + mic'}
+              tone="idle"
+            />
+            <StatusChip label="Screen" value="on demand" tone="idle" />
+            <StatusChip
+              label="Memory"
+              value={FLAGS.memory ? (settings?.memoryEnabled ? 'on' : 'off') : 'planned'}
+              tone={FLAGS.memory && settings?.memoryEnabled ? 'ok' : 'idle'}
+            />
+            <StatusChip
+              label="Active Space"
+              value={session ? (activeSpace ?? 'profile only') : 'none'}
+              tone={session ? 'ok' : 'idle'}
+            />
           </div>
-        </ActivityCard>
-        <ActivityCard
-          Icon={BoltIcon}
-          title="Solve from screen"
-          desc="Ctrl+Shift+S drag-selects a region; Ctrl+Shift+Enter solves what's on the clipboard — anytime, into the Cue Card."
-          static
-        />
-      </div>
 
-      {/* Labs — flag-gated modes graduate out of here when they ship. */}
-      {labs.length > 0 && (
-        <>
-          <h3 className="mb-3 mt-8 text-xs font-medium uppercase tracking-wider text-neutral-500">
-            Labs · coming soon
-          </h3>
-          <div className="flex flex-wrap gap-2">
-            {labs.map((l) => (
-              <span
-                key={l.label}
-                className="inline-flex items-center gap-1.5 rounded-full border border-white/5 bg-neutral-900/60 px-3 py-1.5 text-xs text-neutral-400"
-              >
-                <l.Icon className="h-3.5 w-3.5" />
-                {l.label}
-              </span>
-            ))}
+          {/* Shortcuts INTO the one start flow with an activity preselected —
+              not a second catalog to choose from. */}
+          <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {FLAGS.meeting && (
+              <ActivityCard
+                Icon={UsersIcon}
+                title={ACTIVITIES.meeting.label}
+                desc="Answers questions asked in the room, and surfaces context, action items and decisions — only when confident."
+                labs
+                tour="activity-meeting"
+                onClick={() => {
+                  setStartActivity('meeting');
+                  setStartOpen(true);
+                }}
+              />
+            )}
+            {FLAGS.companion && (
+              <ActivityCard
+                Icon={SparklesIcon}
+                title={`${ACTIVITIES.solo.label} · ${ACTIVITIES.game.label}`}
+                desc="An ambient presence while you work or play — only through gates you control."
+                labs
+                tour="activity-companion"
+                onClick={() => {
+                  setStartActivity('solo');
+                  setStartOpen(true);
+                }}
+              />
+            )}
+            <ActivityCard
+              Icon={BoltIcon}
+              title="Solve from screen"
+              desc="Ctrl+Shift+S drag-selects a region; Ctrl+Shift+Enter solves what's on the clipboard — into the Cue Card."
+              static
+            />
           </div>
-        </>
-      )}
+
+          {/* Labs — flag-gated modes graduate out of here when they ship. */}
+          {labs.length > 0 && (
+            <>
+              <h3 className="mb-3 mt-6 text-xs font-medium uppercase tracking-wider text-neutral-500">
+                Labs · coming soon
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {labs.map((l) => (
+                  <span
+                    key={l.label}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-white/5 bg-neutral-900/60 px-3 py-1.5 text-xs text-neutral-400"
+                  >
+                    <l.Icon className="h-3.5 w-3.5" />
+                    {l.label}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </details>
 
       <StartSessionModal
         open={startOpen}
@@ -348,31 +335,14 @@ export default function HomePage() {
   );
 }
 
-function PrimaryAction({
-  Icon,
-  title,
-  desc,
-  onClick,
-  tour,
-}: {
-  Icon: IconType;
-  title: string;
-  desc: string;
-  onClick: () => void;
-  tour?: string;
-}) {
+function SecondaryAction({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       type="button"
-      data-tour={tour}
       onClick={onClick}
-      className="rounded-2xl border border-white/5 bg-neutral-900/70 p-5 text-left shadow-lg shadow-black/20 transition-all duration-150 hover:-translate-y-0.5 hover:border-indigo-400/30 hover:bg-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400"
+      className="rounded-lg px-2.5 py-1.5 text-neutral-400 transition-colors hover:bg-neutral-800/70 hover:text-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400"
     >
-      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-300">
-        <Icon className="h-5 w-5" />
-      </span>
-      <span className="mt-3 block font-semibold text-neutral-100">{title}</span>
-      <span className="mt-1 block text-sm leading-relaxed text-neutral-400">{desc}</span>
+      {children}
     </button>
   );
 }
@@ -463,13 +433,3 @@ function ActivityCard({
   );
 }
 
-function PracticeLink({ to, label }: { to: string; label: string }) {
-  return (
-    <Link
-      to={to}
-      className="rounded-lg bg-neutral-800 px-3 py-1.5 text-xs font-medium text-neutral-200 ring-1 ring-white/5 transition-colors hover:bg-neutral-700"
-    >
-      {label}
-    </Link>
-  );
-}

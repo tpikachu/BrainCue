@@ -1,5 +1,4 @@
-import { openai } from './client';
-import { model } from './models';
+import { chatJson } from './chatTask';
 import type { ParsedResume, StoryCompetency, StoryDraft } from '@shared/types';
 
 /** Closed competency set the extractor may tag stories with. Keep in sync with
@@ -63,16 +62,13 @@ export async function generateStories(input: StoriesInput): Promise<StoryDraft[]
     resumeText: input.resumeText ?? undefined,
   });
 
-  const res = await openai().responses.create({
-    model: model('parsing'),
-    input: [
-      { role: 'system', content: SYSTEM },
-      { role: 'user', content: payload.slice(0, 24_000) },
-    ],
-    text: { format: { type: 'json_object' } },
+  // Routed: runs on the provider the parsing task resolves to (chatTask.ts).
+  const raw = await chatJson<{ stories?: unknown }>({
+    task: 'parsing',
+    system: SYSTEM,
+    user: payload.slice(0, 24_000),
+    maxOutputTokens: 8192,
   });
-
-  const raw = JSON.parse(res.output_text) as { stories?: unknown };
   const stories = Array.isArray(raw.stories) ? raw.stories : [];
   const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 

@@ -2,7 +2,6 @@ import type React from 'react';
 import { Link } from 'react-router-dom';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { api } from '../../../lib/api';
-import type { AppSettings } from '@shared/types';
 import { type SttEngine } from '@shared/stt';
 import { Badge, Card } from '../../../components/ui';
 import { PanelBody, PanelHeader } from './SettingsLayout';
@@ -43,10 +42,9 @@ export function SpeechPanel() {
     await load();
   };
   const setCloudModel = async (id: string) => {
-    // Read-modify-write against FRESH settings: the override map is shared with
-    // the Language Models table, which may have written since this page loaded.
-    const fresh = (await api.settings.get()) as AppSettings;
-    await api.settings.set({ models: { ...(fresh.models ?? {}), transcription: id } });
+    // One key, merged by main: the override map is shared with the Language
+    // Models table, which may have written since this page loaded.
+    await api.settings.set({ modelOverrides: { transcription: id } });
     await load();
   };
 

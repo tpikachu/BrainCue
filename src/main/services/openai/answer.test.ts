@@ -8,6 +8,8 @@ const h = vi.hoisted(() => ({
   lastBody: null as Record<string, unknown> | null,
   reasoning: false, // pretend the resolved answer model is a reasoning model
   emitText: true, // pretend the stream produced visible text
+  tier: undefined as string | undefined,
+  cached: undefined as number | undefined,
 }));
 vi.mock('./client', () => ({
   openai: () => ({
@@ -21,7 +23,7 @@ vi.mock('./client', () => ({
             yield { type: 'response.output_text.delta', delta: ' world' };
             yield { type: 'response.ignored.event' }; // non-delta events are skipped
           },
-          finalResponse: async () => ({ usage: { input_tokens: 12, output_tokens: 7 } }),
+          finalResponse: async () => ({ service_tier: h.tier, usage: { input_tokens: 12, output_tokens: 7, input_tokens_details: { cached_tokens: h.cached } } }),
         };
       },
     },
@@ -71,9 +73,31 @@ beforeEach(() => {
   h.lastBody = null;
   h.reasoning = false;
   h.emitText = true;
+  h.tier = undefined;
+  h.cached = undefined;
 });
 
 describe('streamAnswer — request body', () => {
+  it('Fast is explicit: a normal request leaves the provider default untouched', async () => {
+    await collect(streamAnswer(baseInput({ route: { provider: 'openai', model: 'gpt-6-luna' } })));
+    expect(h.lastBody).not.toHaveProperty('service_tier');
+  });
+
+  it('a supported Fast request carries the alias, and records the actual downgraded tier and cached tokens', async () => {
+    h.tier = 'default'; // requesting Fast does not prove the provider used it
+    h.cached = 1024;
+    const events = await collect(streamAnswer(baseInput({ processing: 'fast', route: { provider: 'openai', model: 'gpt-6-luna' } })));
+    expect(h.lastBody).toMatchObject({ model: 'gpt-6-luna', service_tier: 'priority', reasoning: { effort: 'none' }, max_output_tokens: 360 });
+    expect(events).toContainEqual({ type: 'usage', prompt: 12, completion: 7, requestedServiceTier: 'priority', serviceTier: 'default', cachedPromptTokens: 1024 });
+  });
+
+  it('Fast is not guessed for an unsupported or unknown model', async () => {
+    for (const model of ['gpt-4.1-mini', 'some-future-model']) {
+      await collect(streamAnswer(baseInput({ processing: 'fast', route: { provider: 'openai', model } })));
+      expect(h.lastBody).not.toHaveProperty('service_tier');
+    }
+  });
+
   it('GENERAL: bold lead sentence + 3–4 bullets, capped at 360 output tokens', async () => {
     await collect(streamAnswer(baseInput({ format: 'general' })));
     expect(h.lastBody!.max_output_tokens).toBe(360);
@@ -141,10 +165,10 @@ describe('streamAnswer — request body', () => {
     expect(h.lastBody!.max_output_tokens).toBe(360 + 160);
   });
 
-  it('on a reasoning answer model: sends a low effort + reasoning-token headroom', async () => {
-    h.reasoning = true;
+  it('on a reasoning answer model: sends its LOWEST accepted effort + reasoning-token headroom', async () => {
+    h.reasoning = true; // gpt-5-mini — catalog efforts start at "minimal"
     await collect(streamAnswer(baseInput({ format: 'general' })));
-    expect(h.lastBody!.reasoning).toEqual({ effort: 'low' });
+    expect(h.lastBody!.reasoning).toEqual({ effort: 'minimal' });
     expect(h.lastBody!.max_output_tokens).toBe(360 + 1024);
   });
 
@@ -183,12 +207,12 @@ describe('streamAnswer — request body', () => {
 
   it('embeds retrieved context tagged by source', async () => {
     await collect(streamAnswer(baseInput()));
-    expect(userPrompt()).toContain('(resume) Fixed a race condition');
+    expect(userPrompt()).toContain("(resume — the candidate's own background) Fixed a race condition");
   });
 
   it('numbers the context so answers can cite [i]', async () => {
     await collect(streamAnswer(baseInput()));
-    expect(userPrompt()).toContain('[1] (resume) Fixed a race condition');
+    expect(userPrompt()).toContain("[1] (resume — the candidate's own background) Fixed a race condition");
   });
 
   it('instructs inline [i] citations + a fabrication guard (system prompt)', async () => {
@@ -214,16 +238,16 @@ describe('streamAnswer — streamed events', () => {
 
   it('yields a usage event from finalResponse', async () => {
     const evs = await collect(streamAnswer(baseInput()));
-    expect(evs).toContainEqual({ type: 'usage', prompt: 12, completion: 7 });
+    expect(evs).toContainEqual({ type: 'usage', prompt: 12, completion: 7, requestedServiceTier: 'provider-default' });
   });
 
-  it('sets a riskWarning in meta only when context is empty', async () => {
+  it('the interview fallback does not flag missing documents alone as an answer error', async () => {
     const withCtx = (await collect(streamAnswer(baseInput()))).find((e) => e.type === 'meta');
     expect((withCtx as { riskWarning: string | null }).riskWarning).toBeNull();
     const noCtx = (await collect(streamAnswer(baseInput({ contextChunks: [] })))).find(
       (e) => e.type === 'meta',
     );
-    expect((noCtx as { riskWarning: string | null }).riskWarning).toBeTruthy();
+    expect((noCtx as { riskWarning: string | null }).riskWarning).toBeNull();
   });
 });
 
@@ -268,13 +292,17 @@ describe('answer framing', () => {
     }
   });
 
-  it('the interview guard is the v1 text; the conversation guard forbids invented figures', async () => {
+  it('what the candidate SAID counts as grounding — not "unverified" (live run 2026-11-17)', async () => {
     await collect(streamAnswer(baseInput({ framing: 'interview' })));
-    expect(system()).toContain(
-      '- FABRICATION GUARD: if the context can\'t support what\'s asked, do NOT make it up. Begin\n' +
-        '  the answer with "⚠", state in one short clause that it\'s not in their background, then\n' +
-        '  pivot to a grounded, cited, transferable-skills framing (this is the riskWarning case).',
-    );
+    expect(system()).toMatch(/what the candidate said in this conversation \("You said" lines/);
+    expect(system()).toMatch(/never call it unverified/);
+  });
+
+  it('the interview fallback keeps useful drafts honest; the conversation guard forbids invented figures', async () => {
+    await collect(streamAnswer(baseInput({ framing: 'interview' })));
+    expect(system()).toContain('missing or unrelated sources are not a reason to stop');
+    expect(system()).toContain('Use conditional wording');
+    expect(system()).toContain('Never invent past employers, projects, years, outcomes or personal figures');
     await collect(streamAnswer(baseInput({ framing: 'conversation' })));
     const sys = system();
     // Asked for a Q3 budget with no notes, the meeting answer used to state a
@@ -294,7 +322,7 @@ describe('answer framing', () => {
 
   it('the no-context risk line is framed for the room it is shown in', async () => {
     const interview = await collect(streamAnswer({ ...baseInput({ framing: 'interview' }), contextChunks: [] }));
-    expect(interview.at(-1)).toEqual({ type: 'meta', riskWarning: 'No matching profile experience found.' });
+    expect(interview.at(-1)).toEqual({ type: 'meta', riskWarning: null });
     const meeting = await collect(streamAnswer({ ...baseInput({ framing: 'conversation' }), contextChunks: [] }));
     expect(meeting.at(-1)).toEqual({
       type: 'meta',

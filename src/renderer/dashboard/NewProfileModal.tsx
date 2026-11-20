@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useProfileStore } from '../store/useProfileStore';
-import { Button, Field, Modal, TextInput } from '../components/ui';
+import { Button, Field, Modal, ModalCancel, TextInput } from '../components/ui';
 
 /**
  * Create a profile — the one thing BrainCue cannot work without.
@@ -25,6 +25,9 @@ export function NewProfileForm(props: {
   onCancel?: () => void;
   /** Reset the field when this flips to true (a modal reopening). */
   active?: boolean;
+  /** Told whenever the draft or the work in flight changes (the modal guards
+   *  its dismissal on it). */
+  onState?: (s: { dirty: boolean; busy: string | false }) => void;
 }) {
   const { create, load } = useProfileStore();
   const [name, setName] = useState('');
@@ -54,6 +57,11 @@ export function NewProfileForm(props: {
       setError(null);
     }
   }, [props.active]);
+
+  const onState = props.onState;
+  useEffect(() => {
+    onState?.({ dirty: !!name.trim(), busy: saving ? 'Creating the profile' : sampling ? 'Loading sample data' : false });
+  }, [name, saving, sampling, onState]);
 
   const submit = async () => {
     const trimmed = name.trim();
@@ -117,11 +125,7 @@ export function NewProfileForm(props: {
             Try sample data
           </Button>
         ) : (
-          props.onCancel && (
-            <Button variant="ghost" onClick={props.onCancel}>
-              Cancel
-            </Button>
-          )
+          props.onCancel && <ModalCancel />
         )}
         <Button
           variant="primary"
@@ -138,10 +142,12 @@ export function NewProfileForm(props: {
 
 /** The sidebar's "New profile…" — the form above in a dismissable dialog. */
 export function NewProfileModal(props: { open: boolean; onClose: () => void; onCreated?: (id: string) => void }) {
+  const [state, setState] = useState<{ dirty: boolean; busy: string | false }>({ dirty: false, busy: false });
   return (
-    <Modal open={props.open} onClose={props.onClose} title="New profile" width="max-w-md">
+    <Modal open={props.open} onClose={props.onClose} title="New profile" width="max-w-md" dirty={state.dirty} busy={state.busy}>
       <NewProfileForm
         active={props.open}
+        onState={setState}
         onCancel={props.onClose}
         onCreated={(id) => {
           props.onCreated?.(id);

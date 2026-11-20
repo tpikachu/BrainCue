@@ -18,6 +18,16 @@ const INTERVIEW_TYPES: InterviewType[] = [
 
 export default function MockPage() {
   const { settings, load: loadSettings } = useSettingsStore();
+  // A mock needs OpenAI (the interviewer's voice), the mock task's provider
+  // (questions) and the answer task's provider (the answer cues) — main says
+  // which one is missing.
+  const [practice, setPractice] = useState<{ ready: boolean; problem?: string } | null>(null);
+  useEffect(() => {
+    void api.settings
+      .readiness()
+      .then((r) => setPractice(r.features.mock))
+      .catch(() => setPractice(null));
+  }, [settings]);
 
   // Whose rehearsal this is was decided in the sidebar switcher.
   const profileId = useProfileStore((st) => st.activeId) ?? '';
@@ -82,8 +92,8 @@ export default function MockPage() {
   const start = async () => {
     if (!profileId) return;
     setError(null);
-    if (!settings?.apiKeyPresent) {
-      setError('Add your OpenAI API key in Settings first.');
+    if (practice && !practice.ready) {
+      setError(practice.problem ?? 'Practice is not set up yet — see Settings → Language Models.');
       return;
     }
     setBusy('Starting rehearsal & generating the first question…');
@@ -196,11 +206,11 @@ export default function MockPage() {
             </label>
           )}
 
-          {!settings?.apiKeyPresent && (
+          {practice && !practice.ready && (
             <p className="mt-3 text-xs text-amber-400">
-              No OpenAI key —{' '}
+              {practice.problem}{' '}
               <Link to="/settings/models" className="underline">
-                add it in Settings
+                Open Settings
               </Link>
             </p>
           )}

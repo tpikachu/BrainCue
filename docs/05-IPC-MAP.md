@@ -39,7 +39,7 @@ validates input with zod via the `handle()` helper. Errors are returned as
 | Channel | Request | Response |
 |---|---|---|
 | `settings:get` | — | `AppSettings` (no raw key — only `apiKeyPresent`; incl. `tourDone`, `sessionArchiveEnabled`) |
-| `settings:set` | `Partial<AppSettings>` (`models`, `overlay`, `dataConsentAck`, `tourDone`, `onboardingDone`, `stt`) | `AppSettings` (`stt: { engine: 'cloud' \| 'local', localModelId }` persists the engine choice and re-runs `applySttSelection()` — `local` takes effect only once the model is installed, see [22](22-LOCAL-STT.md); `onboardingDone` marks first-run setup finished/skipped) |
+| `settings:set` | `Partial<AppSettings>` (`models`, `overlay`, `dataConsentAck`, `tourDone`, `onboardingDone`, `stt`), plus `modelOverrides` / `effortOverrides` (`{ [task]: id \| null }` — one task's override merged in main against the stored map; `null` clears it. Controls use these, so a stale renderer copy never rewrites another key) | `AppSettings` (`stt: { engine: 'cloud' \| 'local', localModelId }` persists the engine choice and re-runs `applySttSelection()` — `local` takes effect only once the model is installed, see [22](22-LOCAL-STT.md); `onboardingDone` marks first-run setup finished/skipped) |
 | `settings:set-api-key` | `{ key }` | `{ apiKeyPresent: true }` |
 | `settings:clear-api-key` | — | `{ apiKeyPresent: false }` |
 | `settings:test-api-key` | — | `{ ok, model?, error? }` |
@@ -146,21 +146,23 @@ résumé, persisted, and indexed as `story` chunks so they ground live answers.
 | Channel | Request | Response |
 |---|---|---|
 | `session:start` | `{ profileId, interviewType, jobId, answerFormat, activity? }` | `Session` (`answerFormat` = general\|technical — the single answer style, default `general`; legacy values are mapped; `activity` is the ContextPackKind the user picked and the engine derives the mode from it) |
-| `session:resume` | `{ sessionId, answerFormat? }` | `Session` (re-activate an existing session row and continue it; interview type is restored from the row — one session per interview, type is dynamic) |
+| `session:resume` | `{ sessionId, answerFormat? }` | `Session` (re-activate an existing session row and continue it; interview type is restored from the row — one session per interview, type is dynamic. Refused before the row goes live when its Space is gone or another profile's, or when its activity needs one (an interview's role) and it has none — a deleted role sets the column null. M6) |
 | `session:stop` | `{ sessionId }` | `Session` |
 | `session:toggle-pause` | `{ sessionId }` | `{ paused }` |
 | `session:toggle-pause-active` | — | `{ paused, active }` (global shortcut target — toggles the live session) |
-| `session:stop-active` | — | `{ stopped }` (Cue Card target — stops the live session without a sessionId; the `stopped` sessionState broadcast tears down the dashboard store + mic too) |
+| `session:stop-active` | — | `{ stopped, rollback? }` (Cue Card target — stops the live session without a sessionId; the `stopped` sessionState broadcast tears down the dashboard store + mic too. If that session's failed start is still being rolled back, main runs THAT rollback instead — no save prompt, a new session removed — and returns its `RollbackResult` as `rollback`; M6) |
+| `session:rollback` | `{ sessionId, discard }` | `RollbackResult` `{ sessionId, stopped, removed?, error? }` (undo a start whose audio never attached: stop with no save prompt, then remove when `discard` (a new session). Held in main from BEFORE the stop until confirmed, so any later Stop — dashboard or Cue Card — follows the same policy. Every outcome is broadcast as `session:rollback-result`; M6) |
 | `session:audio-chunk` | `{ sessionId, audio:ArrayBuffer, mime }` | `{ accepted }` |
 | `session:realtime-audio` | `{ sessionId, pcm:ArrayBuffer, source?: 'system' \| 'mic' }` | *(one-way `send`, no response — low-latency Realtime STT)*. `source` = which captured stream the frame belongs to (the call's system audio or the user's microphone); each has its own transcriber in main. Absent = `system`. |
 | `session:list` | — | `SessionListItem[]` |
-| `session:get` | `{ id }` | `SessionDetail` (transcript + questions + answers + report) |
+| `session:page` | `{ profileId, query, limit (≤200), offset }` | `SessionPage` `{ items: SessionListItem[], total }` (history, one server-side page: newest first, searchable by Space title/company, activity, mode, type; question-type counts for the page's rows only; M6) |
+| `session:get` | `{ id }` | `SessionDetail` (transcript in capture order + questions with answers + report + the session's other `cards` (oldest first: meeting/companion cards, and answer cards not written for a detected question that has an answer row — e.g. a saved voice quick Ask, which has no question row or transcript. An answer row is authoritative even when empty: a paused correction clears it, and the older card, an answer to the old wording, is left out) + `spaceTitle`/`spaceCompany` — everything the history view needs, from the local DB; no model call) |
 | `session:delete` | `{ id }` | `{ deleted: true }` |
 | `session:generate-report` | `{ sessionId }` | `SessionReport` |
 | `session:get-report` | `{ sessionId }` | `SessionReport` |
 | `session:ask` | `{ sessionId, questionText }` | `{ questionId }` (manual ask; answer streams) |
 | `session:ask-active` | `{ questionText }` | `{ ok }` (Cue Card "Ask" box — manual ask for the active session, no id) |
-| `session:remember` | `{ id }` | `{ archived, memories }` (KEEP this conversation: writes its retrievable archive and extracts memory candidates. Called by the save prompt, never automatically — stopping a session remembers nothing. Both halves stay gated by the user's settings, so zeros are legitimate; failures come back as counts, not errors) |
+| `session:remember` | `{ id, packId?, only? }` | `RememberResult` `{ kept, packId, summary: KeepStep, memory: KeepStep, provider, archived, memories }` (KEEP this conversation: writes its retrievable archive and extracts memory candidates. Called by the save prompt, never automatically — stopping a session remembers nothing. Each half reports its own typed outcome — `done`, `nothing-new`, `off`, `space-off`, `no-space`, `practice`, `too-short`, `withheld` or `failed` with `error` — so a reason is never inferred from a zero count; `provider` names who was asked. `packId` is validated in main (exists, same profile) before anything is filed; a failure keeps the transcript and can be retried. `only: ['summary' | 'memory']` is a retry of just the failed halves: the other comes back `not-run`, so a confirmed half is never redone and its transcript is not sent again. M6) |
 | `session:set-interview-type` | `{ sessionId, interviewType }` | `{ ok }` (set the session-level type — chosen by the user in the save prompt at stop) |
 | `session:set-answer-prefs` | `{ interviewType?, format?, pronunciation? }` | `{ interviewType, format, pronunciation }` (live Cue Card controls; acts on the active session. `format` = general\|technical (legacy values mapped). The Cue Card's General \| Technical chip sends `format` AND the matching `interviewType` (general/technical) unless the session is `coding`; switching `interviewType` persists onto the session row + reframes later answers) |
 | `session:set-answering` | `{ enabled }` | `{ enabled, answered }` (coding "listen-only" toggle: when disabled, the interviewer is still transcribed but not auto-answered; enabling it also answers the question they just asked) |
@@ -312,9 +314,11 @@ correct/forget the memory in place.
 | `session:client-info` | `ClientInfo \| null` | overlay (active interview: company/title/notes + profileName + grounding flags hasResume/hasJd/hasCompany, for the Cue Card header + session bar + ⓘ panel; `null` clears on stop) |
 | `session:answer-prefs` | `AnswerPrefs` (`{ interviewType, format, pronunciation }`) | overlay (seeds the Cue Card answer-control toggles) |
 | `session:audio-level` | `{ level }` (0-1 RMS, ~12/sec) | overlay (drives the Cue Card mic meter; computed in `feedRealtimeAudio` since the stream lives in the dashboard renderer) |
-| `session:save-prompt` | `SavePrompt` (`{ sessionId, interviewType, jobTitle, questionCount }`) | dashboard (a session just stopped → prompt save-or-discard + pick the type) |
+| `session:save-prompt` | `SavePrompt` (`{ sessionId, interviewType, jobTitle, questionCount }`) | dashboard (a session just stopped → prompt save-or-discard + pick the type). Not sent for a failed start being rolled back (M6). |
+| `session:rollback-result` | `RollbackResult` | all (a failed start's rollback settled — from whichever window pressed Stop — so the dashboard and the Cue Card say the same thing; M6) |
 | `session:context` | `{ questionId, question, chunks }` | dashboard (debug: retrieved chunks) |
 | `session:error` | `{ message }` | dashboard + overlay |
+| `settings:changed` | `AppSettings` (key presence only, never a key) | dashboard + overlay — after any settings write or key change, and when a task's route moves without one (a model marked unavailable, new discovery) |
 | `capture:buffer` | `{ images: string[] }` | overlay (current multi-image problem captures, for the Cue Card thumbnail strip) |
 | `overlay:apply-settings` | `{ opacity, fontSize, mode }` | overlay |
 | `shortcut:fired` | `{ action }` | dashboard |

@@ -1,0 +1,1 @@
+ALTER TABLE `transcript_chunks` ADD `capture_seq` integer;

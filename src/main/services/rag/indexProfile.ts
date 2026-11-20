@@ -13,6 +13,8 @@ import { apiKeyStore } from '../security/apiKey';
 import type { Story, StoryDraft, StoryInput } from '@shared/types';
 
 async function embedChunks(rows: { id: string; content: string }[]): Promise<number> {
+  // No embedding key: the chunks stay, unembedded, and rank lexically.
+  if (!apiKeyStore.isPresent() || rows.length === 0) return 0;
   const embedder = providerFor('embedding');
   const identity = embedder.identity();
   if (rows.length) assertEmbeddingCompatibility(identity);
@@ -61,10 +63,9 @@ export async function reindexProfile(
       ),
     )
     .run();
-  // Without a key we can't embed, so there's nothing to (re)index — but the stale
-  // chunks above are already gone.
-  if (!apiKeyStore.isPresent()) return { chunks: 0, embedded: 0 };
-
+  // Chunking is local text work, so it ALWAYS runs: without an embedding key
+  // the chunks are still retrievable lexically (retriever.ts), and embedding
+  // them later is a re-index away. Only the embedding step needs the key.
   const sources: { type: 'resume' | 'note' | 'profile'; text: string }[] = [];
   if (profile.resumeText) sources.push({ type: 'resume', text: profile.resumeText });
   // "About you" (ProfileAbout). Each section is indexed as its own chunk, led by
@@ -99,6 +100,13 @@ export async function reindexProfile(
   return { chunks: rows.length, embedded: await embedChunks(rows) };
 }
 
+/** Only embedding failed; current text chunks were already written. */
+export class JobEmbeddingError extends Error {
+  constructor(cause: unknown) {
+    super('Semantic indexing failed; the current documents remain searchable by keyword.', { cause });
+  }
+}
+
 /** (Re)index a single job's context (jobId set): its JD plus any company research
  *  scraped from the company website. Both are scoped to the job. */
 export async function indexJob(jobId: string): Promise<{ chunks: number; embedded: number }> {
@@ -112,7 +120,7 @@ export async function indexJob(jobId: string): Promise<{ chunks: number; embedde
   // Always clear this job's chunks first (embeddings cascade), so removing a JD or
   // company research cleans up even with no key.
   db().delete(schema.chunks).where(eq(schema.chunks.packId, jobId)).run();
-  if (!apiKeyStore.isPresent()) return { chunks: 0, embedded: 0 };
+  // As for the profile: chunk always, embed only with a key.
 
   const sources: { type: 'jd' | 'company' | 'tailored'; text: string }[] = [];
   if (job.jdText) sources.push({ type: 'jd', text: job.jdText });
@@ -126,7 +134,7 @@ export async function indexJob(jobId: string): Promise<{ chunks: number; embedde
   // The Space's own column wins. The applications table is the legacy source:
   // each application owned a hidden pack, which is exactly the coupling that
   // made a tailored résumé unattachable to a Space the user actually has.
-  const tailored = job.tailoredResume ?? applicationsRepo.getByJobId(jobId)?.tailoredResume ?? null;
+  const tailored = job.tailoredResume?.trim() || job.resumeText?.trim() || applicationsRepo.getByJobId(jobId)?.tailoredResume || null;
   if (tailored) sources.push({ type: 'tailored', text: tailored });
   if (sources.length === 0) return { chunks: 0, embedded: 0 };
 
@@ -149,7 +157,11 @@ export async function indexJob(jobId: string): Promise<{ chunks: number; embedde
       rows.push({ id, content: c.content });
     }
   }
-  return { chunks: rows.length, embedded: await embedChunks(rows) };
+  try {
+    return { chunks: rows.length, embedded: await embedChunks(rows) };
+  } catch (e) {
+    throw new JobEmbeddingError(e);
+  }
 }
 
 /** Flatten a STAR story into one embeddable/retrievable text blob (kept atomic —

@@ -59,6 +59,8 @@ vi.mock('../keys', () => ({
 }));
 vi.mock('../../services/openai/models', () => ({
   resolveModel: () => ({ provider: h.provider, model: h.model }),
+  reasoningEffort: () => null,
+  isReasoningModel: () => false,
 }));
 
 import OpenAI from 'openai';

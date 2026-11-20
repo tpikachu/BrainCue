@@ -2,6 +2,7 @@ import { streamAnswer } from '../../openai/answer';
 import { predictFollowup } from '../../openai/followup';
 import { reactiveQuestionPolicy } from '../trigger/reactiveQuestionPolicy';
 import type { ModeDefinition } from '../modeDefinition';
+import { SETTINGS_KEYS, settingsRepo } from '../../../db/repositories/settings.repo';
 
 /**
  * Interview Copilot as a ModeDefinition — the v1 pipeline's interview-specific
@@ -30,6 +31,7 @@ export const interviewMode: ModeDefinition = {
       contextChunks: input.contextChunks,
       memories: input.memories,
       history: input.history,
+      conversation: input.conversation,
       profile: input.profile,
       // Answer format + pronunciation are chosen per run (this round) and can
       // be toggled live from the Cue Card.
@@ -39,6 +41,10 @@ export const interviewMode: ModeDefinition = {
       // A behavioral question gets the story shape automatically (no control).
       questionType: input.questionType,
       signal: input.signal,
+      route: input.route,
+      ...(input.route?.provider === 'openai' && input.questionType !== 'coding' && settingsRepo.get(SETTINGS_KEYS.openaiInterviewFast) !== '0'
+        ? { processing: 'fast' as const }
+        : {}),
     });
   },
 

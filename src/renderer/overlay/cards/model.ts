@@ -54,12 +54,20 @@ export function appendById(cards: CardModel[], contributionId: string, chunk: st
   );
 }
 
+/** A question that was NOT answered (main marked it missed: paused, late, or
+ *  waiting behind others) and has not been answered since. It stays visible
+ *  with its retry whatever else arrives. */
+export function isMissedCard(c: CardModel): boolean {
+  return !!c.meta?.missed && !c.streaming && !c.body.trim();
+}
+
 /** Add a new card. With history ON, prior cards collapse + stop streaming and
- *  are kept; with history OFF, they're replaced (only the new card remains). */
+ *  are kept; with history OFF, they're replaced (only the new card remains) —
+ *  except a missed question, which is never dropped silently. */
 export function addCard(cards: CardModel[], card: CardModel, historyEnabled: boolean): CardModel[] {
   const prior = historyEnabled
     ? cards.map((c) => ({ ...c, collapsed: true, streaming: false }))
-    : [];
+    : cards.filter(isMissedCard);
   return [...prior, card];
 }
 

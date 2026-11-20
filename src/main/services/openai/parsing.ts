@@ -1,5 +1,4 @@
-import { openai } from './client';
-import { model } from './models';
+import { chatJson } from './chatTask';
 import type { ParsedCompany, ParsedJd, ParsedResume } from '@shared/types';
 
 // NOTE (skeleton): these use the Responses API with a JSON instruction. Swap to
@@ -26,15 +25,8 @@ interviewAngles[] (concrete ways a candidate could tailor answers to this compan
 Only use information present in the text; leave arrays empty if unknown. Return JSON only.`;
 
 async function extractJson<T>(systemPrompt: string, text: string): Promise<T> {
-  const res = await openai().responses.create({
-    model: model('parsing'),
-    input: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: text.slice(0, 24_000) },
-    ],
-    text: { format: { type: 'json_object' } },
-  });
-  return JSON.parse(res.output_text) as T;
+  // Routed: runs on the provider the parsing task resolves to (chatTask.ts).
+  return chatJson<T>({ task: 'parsing', system: systemPrompt, user: text.slice(0, 24_000), maxOutputTokens: 8192 });
 }
 
 export async function parseResume(text: string): Promise<ParsedResume> {

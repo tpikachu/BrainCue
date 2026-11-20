@@ -1,0 +1,249 @@
+import { percentile, summarize, type LatencyCategory, type LatencySummary, type QuestionTiming, type StageSummary } from './latency';
+
+/**
+ * PERF-01 report (M7.2b): turns finished latency records — the rows of
+ * `<userData>/metrics/latency.jsonl` from a live run, or the offline
+ * benchmark's — into the acceptance view: per category, cold and warm, the
+ * censored final → first useful paint p50/p95, every stage, outcomes, routes
+ * and context sizes, judged against the targets.
+ *
+ * A SIMULATED report says so in its first line and never says "met": only a
+ * live run on the reference configuration can meet a target.
+ *
+ * A live report is judged only on VALIDATED evidence: the run checked
+ * against its manifest (bench/perf01.evidence.ts). Without that check, or
+ * with any issue found, every verdict is "invalid evidence". The latency
+ * values stay in the report as diagnostics, never as acceptance.
+ */
+
+export const TARGETS = {
+  warmUsefulP50Ms: 1500,
+  warmUsefulP95Ms: 3000,
+  decisionP95Ms: 1500,
+  minWarmSamples: 30,
+  minColdSamples: 5,
+} as const;
+
+/** A record plus the benchmark's own label for it (never in the app's file). */
+export type Row = QuestionTiming & { fixtureId?: string };
+
+export type Verdict = 'met' | 'not met' | 'insufficient samples' | 'simulated — not acceptance' | 'invalid evidence';
+
+/** The evidence check of a live run (bench/perf01.evidence.ts validateEvidence). */
+export interface EvidenceCheck {
+  valid: boolean;
+  issues: { code: string; detail: string }[];
+}
+
+export interface Perf01Report {
+  title: string;
+  simulated: boolean;
+  generatedAt: string;
+  /** Anything the run wants on record: hardware, network/STT, config, KB size. */
+  run: Record<string, unknown>;
+  /** Live runs: the evidence check the verdicts rest on (null when simulated). */
+  evidence: EvidenceCheck | null;
+  /** One sample per question: its latest take. Earlier takes are counted here. */
+  superseded: number;
+  summary: LatencySummary;
+  /** Final → decision over the question records (the in-app summary also
+   *  counts every non-question turn — see \`decisionsAllTurns\`). */
+  decisionsQuestions: StageSummary;
+  decisionsAllTurns?: StageSummary;
+  verdicts: Record<'general' | 'technical', { usefulP50: Verdict; usefulP95: Verdict; samples: Verdict; cold: Verdict }>;
+  decision: Verdict;
+  routes: Record<string, number>;
+  processing: Record<string, number>;
+  cachedPromptTokens: StageSummary;
+  context: { chunks: StageSummary; memories: StageSummary; promptTokens: StageSummary; completionTokens: StageSummary; lexical: number };
+  /** Every question that did not paint an answer, by id — never dropped. */
+  unanswered: { id: string; category: LatencyCategory; outcome: string; reason?: string }[];
+}
+
+const stat = (vals: number[]): StageSummary => ({ n: vals.length, p50: percentile(vals, 50), p95: percentile(vals, 95) });
+
+/** The latest take of each question (take numbers only grow within a process). */
+function latestTakes(rows: Row[]): { latest: Row[]; superseded: number } {
+  const byQuestion = new Map<string, Row>();
+  let superseded = 0;
+  for (const r of rows) {
+    if (r.outcome === 'superseded') {
+      superseded++;
+      continue;
+    }
+    const key = `${r.sessionId}\u0000${r.questionId}`;
+    const prev = byQuestion.get(key);
+    if (!prev || r.take > prev.take || (r.take === prev.take && (r.finalAt ?? 0) >= (prev.finalAt ?? 0))) byQuestion.set(key, r);
+  }
+  return { latest: [...byQuestion.values()], superseded };
+}
+
+export function buildReport(
+  rows: Row[],
+  opts: { simulated: boolean; title: string; run?: Record<string, unknown>; decisionsAllTurns?: StageSummary; evidence?: EvidenceCheck; now?: Date },
+): Perf01Report {
+  const { latest, superseded } = latestTakes(rows);
+  const summary = summarize(latest, []);
+  const decisionsQuestions = stat(
+    latest.filter((r) => r.decidedAt !== undefined && r.decidedAt >= r.finalAt).map((r) => r.decidedAt! - r.finalAt),
+  );
+  // A live verdict needs validated evidence: none, or any issue, and nothing is judged.
+  const invalid = !opts.simulated && !opts.evidence?.valid;
+  const judge = (ok: boolean | null): Verdict =>
+    opts.simulated ? 'simulated — not acceptance' : invalid ? 'invalid evidence' : ok === null ? 'not met' : ok ? 'met' : 'not met';
+  const counted = (): Verdict => (opts.simulated ? 'simulated — not acceptance' : invalid ? 'invalid evidence' : 'met');
+  const verdicts = {} as Perf01Report['verdicts'];
+  for (const c of ['general', 'technical'] as const) {
+    const warm = summary.byCategory[c].warm;
+    const cold = summary.byCategory[c].cold;
+    const enough = warm.endToEnd.n >= TARGETS.minWarmSamples;
+    verdicts[c] = {
+      samples: enough ? counted() : 'insufficient samples',
+      usefulP50: enough ? judge(warm.endToEnd.p50 === null ? null : warm.endToEnd.p50 <= TARGETS.warmUsefulP50Ms) : 'insufficient samples',
+      usefulP95: enough ? judge(warm.endToEnd.p95 === null ? null : warm.endToEnd.p95 <= TARGETS.warmUsefulP95Ms) : 'insufficient samples',
+      cold: cold.samples >= TARGETS.minColdSamples ? counted() : 'insufficient samples',
+    };
+  }
+  const routes: Record<string, number> = {};
+  const processing: Record<string, number> = {};
+  for (const r of latest) {
+    const key = r.provider ? `${r.provider}/${r.model ?? '?'} · effort ${r.effort ?? '?'}` : 'no route (never dispatched)';
+    routes[key] = (routes[key] ?? 0) + 1;
+    const tier = `requested ${r.requestedServiceTier ?? 'unrecorded'} → used ${r.serviceTier ?? 'unrecorded'}`;
+    processing[tier] = (processing[tier] ?? 0) + 1;
+  }
+  const nums = (f: (r: Row) => number | undefined) => latest.map(f).filter((v): v is number => v !== undefined);
+  return {
+    title: opts.title,
+    simulated: opts.simulated,
+    generatedAt: (opts.now ?? new Date()).toISOString(),
+    run: opts.run ?? {},
+    evidence: opts.simulated ? null : (opts.evidence ?? { valid: false, issues: [{ code: 'not-validated', detail: 'no evidence check was supplied' }] }),
+    superseded,
+    summary,
+    decisionsQuestions,
+    ...(opts.decisionsAllTurns ? { decisionsAllTurns: opts.decisionsAllTurns } : {}),
+    verdicts,
+    // Simulated runs may fall back to the question records' decision times.
+    // A live run never does: the target is over EVERY evaluated turn, so
+    // without that evidence there is no decision verdict.
+    decision: decisionVerdict(opts.simulated, invalid, opts.decisionsAllTurns, decisionsQuestions, judge),
+    routes,
+    processing,
+    cachedPromptTokens: stat(nums((r) => r.cachedPromptTokens)),
+    context: {
+      chunks: stat(nums((r) => r.chunks)),
+      memories: stat(nums((r) => r.memories)),
+      promptTokens: stat(nums((r) => r.promptTokens)),
+      completionTokens: stat(nums((r) => r.completionTokens)),
+      lexical: latest.filter((r) => r.lexical?.length).length,
+    },
+    unanswered: latest
+      .filter((r) => r.outcome !== 'answered' || r.firstUsefulAt === undefined)
+      .map((r) => ({
+        id: r.fixtureId ?? r.questionId,
+        category: r.category,
+        outcome: r.outcome === 'answered' ? 'answered, never painted' : (r.outcome ?? 'unfinished'),
+        ...(r.reason ? { reason: r.reason } : {}),
+      })),
+  };
+}
+
+function decisionVerdict(
+  simulated: boolean,
+  invalid: boolean,
+  allTurns: StageSummary | undefined,
+  questions: StageSummary,
+  judge: (ok: boolean | null) => Verdict,
+): Verdict {
+  if (!simulated && (invalid || !allTurns)) return 'invalid evidence';
+  const basis = allTurns ?? questions;
+  if (basis.n === 0) return 'insufficient samples';
+  return judge(basis.p95 === null ? null : basis.p95 <= TARGETS.decisionP95Ms);
+}
+
+/** Parse a latency.jsonl file's text (blank lines and bad lines skipped and counted). */
+export function parseJsonl(text: string): { rows: Row[]; skipped: number } {
+  const rows: Row[] = [];
+  let skipped = 0;
+  for (const line of text.replace(/^﻿/, '').split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const r = JSON.parse(line) as Row;
+      // Older records (before categories/takes) default to general / take 0.
+      if (typeof r.questionId === 'string' && typeof r.finalAt === 'number')
+        rows.push({ ...r, category: r.category ?? 'general', take: r.take ?? 0 });
+      else skipped++;
+    } catch {
+      skipped++;
+    }
+  }
+  return { rows, skipped };
+}
+
+const ms = (v: number | null) => (v === null ? '—' : `${Math.round(v).toLocaleString('en-US')} ms`);
+
+/** The report as Markdown — for the handoff and the evidence folder. */
+export function renderMarkdown(r: Perf01Report): string {
+  const out: string[] = [];
+  out.push(`# ${r.title}`, '');
+  const invalid = !r.simulated && !r.evidence?.valid;
+  out.push(
+    r.simulated
+      ? '**SIMULATED — offline latency model, simulated providers. Not live-provider evidence; no target is met by this report.**'
+      : invalid
+        ? '**INVALID OR INCOMPLETE EVIDENCE — not acceptance.** The run does not match its manifest (see "Evidence check"). The latency values below are diagnostics only.'
+        : '**Live run, evidence validated.** Verdicts below are against the PERF-01 targets.',
+    '',
+  );
+  out.push(`Generated ${r.generatedAt}.`, '');
+  if (r.evidence) {
+    out.push('## Evidence check', '');
+    out.push(...(r.evidence.issues.length ? r.evidence.issues.map((i) => `- **${i.code}**: ${i.detail}`) : ['- valid: every planned block and fixture, once, with its route, grounding and decision evidence']), '');
+  }
+  if (Object.keys(r.run).length) {
+    out.push('## Run', '', '```json', JSON.stringify(r.run, null, 2), '```', '');
+  }
+  out.push('## Final → first useful paint (censored: an unanswered question counts as slower than any answer)', '');
+  out.push('| Category | Split | n | unanswered | p50 | p95 | ≤ 1.5 s | ≤ 3 s |', '| --- | --- | --- | --- | --- | --- | --- | --- |');
+  for (const c of ['general', 'technical', 'coding'] as const)
+    for (const split of ['warm', 'cold'] as const) {
+      const e = r.summary.byCategory[c][split].endToEnd;
+      if (c === 'coding' && e.n === 0) continue;
+      out.push(`| ${c} | ${split} | ${e.n} | ${e.unanswered} | ${ms(e.p50)} | ${ms(e.p95)} | ${e.withinTarget.le1500} | ${e.withinTarget.le3000} |`);
+    }
+  out.push('', '## Verdicts', '', '| Category | warm n ≥ 30 | warm p50 ≤ 1.5 s | warm p95 ≤ 3 s | cold n ≥ 5 |', '| --- | --- | --- | --- | --- |');
+  for (const c of ['general', 'technical'] as const) {
+    const v = r.verdicts[c];
+    out.push(`| ${c} | ${v.samples} | ${v.usefulP50} | ${v.usefulP95} | ${v.cold} |`);
+  }
+  const d = r.decisionsAllTurns ?? r.decisionsQuestions;
+  out.push('', `Final → decision p95 ≤ 1.5 s: **${r.decision}** (${r.decisionsAllTurns ? 'every evaluated turn' : 'question records only'}: n ${d.n}, p50 ${ms(d.p50)}, p95 ${ms(d.p95)}).`, '');
+  out.push('## Stages (warm, p50 / p95)', '', '| Stage | general | technical |', '| --- | --- | --- |');
+  for (const stage of Object.keys(r.summary.byCategory.all.warm.stages) as (keyof typeof r.summary.byCategory.all.warm.stages)[]) {
+    const g = r.summary.byCategory.general.warm.stages[stage];
+    const t = r.summary.byCategory.technical.warm.stages[stage];
+    out.push(`| ${stage} | ${ms(g.p50)} / ${ms(g.p95)} (n ${g.n}) | ${ms(t.p50)} / ${ms(t.p95)} (n ${t.n}) |`);
+  }
+  out.push('', '## Outcomes', '', '| Category | answered | empty | failed | aborted | missed |', '| --- | --- | --- | --- | --- | --- |');
+  for (const c of ['general', 'technical', 'coding'] as const) {
+    const o = r.summary.byCategory[c].all.outcomes;
+    out.push(`| ${c} | ${o.answered} | ${o.empty} | ${o.failed} | ${o.aborted} | ${o.missed} |`);
+  }
+  out.push('', `Superseded earlier takes (not samples): ${r.superseded}.`, '');
+  out.push('## Routes', '', ...Object.entries(r.routes).map(([k, n]) => `- ${k}: ${n}`), '');
+  out.push('## Processing tiers', '', ...Object.entries(r.processing).map(([k, n]) => `- ${k}: ${n}`),
+    `- cached input tokens (reported n=${r.cachedPromptTokens.n}): p50 ${r.cachedPromptTokens.p50 ?? '—'} / p95 ${r.cachedPromptTokens.p95 ?? '—'}`, '');
+  const c = r.context;
+  out.push(
+    '## Context sizes (p50 / p95)',
+    '',
+    `- chunks: ${c.chunks.p50 ?? '—'} / ${c.chunks.p95 ?? '—'}; memories: ${c.memories.p50 ?? '—'} / ${c.memories.p95 ?? '—'}`,
+    `- prompt tokens: ${c.promptTokens.p50 ?? '—'} / ${c.promptTokens.p95 ?? '—'}; completion tokens: ${c.completionTokens.p50 ?? '—'} / ${c.completionTokens.p95 ?? '—'}`,
+    `- answers grounded lexically after a late embedding: ${c.lexical}`,
+    '',
+  );
+  out.push('## Unanswered or unpainted', '');
+  out.push(...(r.unanswered.length ? r.unanswered.map((u) => `- ${u.id} (${u.category}): ${u.outcome}${u.reason ? ` — ${u.reason}` : ''}`) : ['- none']), '');
+  return out.join('\n');
+}

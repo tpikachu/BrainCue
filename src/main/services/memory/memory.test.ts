@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
   chatJson: (async () => ({})) as (req: { system: string; user: string }) => Promise<unknown>,
   chatCalls: 0,
   embedCalls: 0,
+  embedFail: false,
   identity: { provider: 'fake', model: 'test-embed', dim: 4 },
 }));
 
@@ -55,6 +56,7 @@ vi.mock('../../providers/registry', () => ({
         identity: () => h.identity,
         embedOne: async (text: string) => {
           h.embedCalls += 1;
+          if (h.embedFail) throw new Error('embedding service unavailable');
           return fakeVec(text);
         },
       };
@@ -70,7 +72,8 @@ import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo
 import { extractMemoryCandidates, extractionSchema } from './extractor';
 import { approveMemory, createMemory, updateMemory } from './memoryService';
 import { buildIndex, hasExactAnchor, lexicalScore, tokenize } from './lexical';
-import { MEMORY_MIN_SCORE, recallMemories } from './recall';
+import { MEMORY_MIN_SCORE, markRecalled, recallMemories } from './recall';
+import { clearLiveEmbedCache } from '../rag/liveEmbed';
 
 let seq = 0;
 const T0 = 1_700_000_000_000;
@@ -136,6 +139,8 @@ beforeAll(async () => {
 beforeEach(() => {
   h.chatCalls = 0;
   h.embedCalls = 0;
+  h.embedFail = false;
+  clearLiveEmbedCache();
   settingsRepo.set(SETTINGS_KEYS.memoryEnabled, '1');
 });
 
@@ -312,6 +317,20 @@ describe('review lifecycle', () => {
 });
 
 describe('scoped hybrid recall', () => {
+  it.each([
+    'Would you consider relocation for this role?',
+    'Could you tell me about relocation?',
+    'Please describe your relocation constraints.',
+  ])('lexical-only recall ignores question boilerplate: %s', async (query) => {
+    const pid = seedProfile();
+    const id = seedApproved(pid, 'For relocation questions: open to relocating to Rotterdam from June; not open to full-time travel.');
+    seedApproved(pid, 'For compensation questions: target base salary of 160000 euros.');
+    const out = await recallMemories(pid, query, null, T0, { lexicalOnly: true });
+    expect(out.map((m) => m.id)).toEqual([id]);
+    expect(h.embedCalls).toBe(0);
+    expect(await recallMemories(pid, 'Would you consider a quarterly budget?', null, T0, { lexicalOnly: true })).toEqual([]);
+  });
+
   it('approved-only, scope-aware, expiry- and identity-filtered, capped, floor-gated', async () => {
     const pid = seedProfile();
     const p1 = seedPack(pid);
@@ -485,6 +504,35 @@ describe('hybrid recall', () => {
     // lexical path exists to surface exact anchors (an id, a figure, a name),
     // not to let a vague query drag in every memory that shares its filler.
     expect(await recallMemories(pid, 'team plan', null, T0)).toEqual([]);
+  });
+
+  // M7.2b: the query embedding on the live path is bounded (rag/liveEmbed.ts).
+  // When it is late or fails, recall used to return NOTHING; it now still
+  // surfaces what the question names, and says it fell back.
+  it('without a query embedding, a memory the question names is still recalled — lexically', async () => {
+    const pid = seedProfile();
+    seedApproved(pid, 'Ticket ATL-4471 tracks the stripe api checkout regression.');
+    seedApproved(pid, 'Prefers concise bullet answers in meetings.');
+    h.embedFail = true;
+    let fellBack = 0;
+    const out = await recallMemories(pid, 'status of ATL-4471', null, T0, { onLexical: () => fellBack++ });
+    expect(out.map((m) => m.content)).toEqual(['Ticket ATL-4471 tracks the stripe api checkout regression.']);
+    expect(out[0].score).toBe(0);
+    expect(fellBack).toBe(1);
+    // Nothing named, nothing recalled: the fallback never guesses by topic.
+    expect(await recallMemories(pid, 'quarterly budget spreadsheet', null, T0)).toEqual([]);
+  });
+
+  it('markUsed: false leaves recency alone until the caller marks what an answer used', async () => {
+    const pid = seedProfile();
+    const id = seedApproved(pid, 'Prefers concise bullet answers in meetings.');
+    const lastUsed = () => h.db.select().from(schema.memories).all().find((r) => r.id === id)!.lastUsedAt;
+    const before = lastUsed();
+    const out = await recallMemories(pid, 'concise bullet answers', null, T0 + 5, { markUsed: false });
+    expect(out.map((m) => m.id)).toEqual([id]);
+    expect(lastUsed()).toBe(before);
+    markRecalled(out, T0 + 9);
+    expect(lastUsed()).toBe(T0 + 9);
   });
 });
 

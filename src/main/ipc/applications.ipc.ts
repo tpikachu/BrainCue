@@ -42,7 +42,7 @@ export function registerApplicationsIpc(): void {
     }),
     async ({ profileId, baseResumeText, jdText, questions }) => {
       if (!apiKeyStore.isPresent())
-        throw new Error('Add your OpenAI API key in Settings to tailor a resume.');
+        throw new Error('Tailoring runs on OpenAI only for now — add an OpenAI key in Settings → Language Models to tailor a résumé.');
 
       // Resolve the BASE resume text.
       let baseResume: string;
@@ -146,7 +146,7 @@ export function registerApplicationsIpc(): void {
     z.object({ id: z.string().min(1), questions: z.array(z.string()).min(1) }),
     async ({ id, questions }) => {
       if (!apiKeyStore.isPresent())
-        throw new Error('Add your OpenAI API key in Settings to answer questions.');
+        throw new Error('Application answers run on OpenAI only for now — add an OpenAI key in Settings → Language Models.');
       const app = applicationsRepo.get(id);
       if (!app) throw new Error('Application not found');
       const trimmed = questions.map((q) => q.trim()).filter(Boolean);

@@ -1,5 +1,6 @@
 import { openai } from './client';
-import { model, reasoningParam } from './models';
+import { model } from './models';
+import { effortFor, reasoningBody } from '../../providers/effort';
 import { visionSolvePrompt } from './codingPrompt';
 import type { AnswerEvent } from './answer';
 import type { AnswerFormat } from '@shared/types';
@@ -16,7 +17,10 @@ export async function* solveFromImages(
   language: string,
   format: AnswerFormat,
   signal?: AbortSignal,
+  /** The solve's captured model (its route); the task's model otherwise. */
+  pinnedModel?: string,
 ): AsyncGenerator<AnswerEvent> {
+  const m = pinnedModel ?? model('coding');
   const { system, intro } = visionSolvePrompt(dataUrls.length, language, format);
   const content = [
     { type: 'input_text' as const, text: intro },
@@ -28,8 +32,8 @@ export async function* solveFromImages(
   ];
   const stream = await openai().responses.stream(
     {
-      model: model('coding'),
-      ...reasoningParam('coding'),
+      model: m,
+      ...reasoningBody(effortFor('coding', 'openai', m)),
       input: [
         { role: 'system', content: system },
         { role: 'user', content },

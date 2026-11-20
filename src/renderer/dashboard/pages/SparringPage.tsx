@@ -33,6 +33,15 @@ function toBase64(buf: ArrayBuffer): string {
 
 export default function SparringPage() {
   const { settings, load: loadSettings } = useSettingsStore();
+  // Sparring needs OpenAI (voice + transcribing the answer) and the mock
+  // task's provider (questions + feedback) — main says which is missing.
+  const [practice, setPractice] = useState<{ ready: boolean; problem?: string } | null>(null);
+  useEffect(() => {
+    void api.settings
+      .readiness()
+      .then((r) => setPractice(r.features.sparring))
+      .catch(() => setPractice(null));
+  }, [settings]);
   const recorder = useAnswerRecorder();
 
   // Whose rehearsal this is was decided in the sidebar switcher.
@@ -141,8 +150,8 @@ export default function SparringPage() {
   const start = async () => {
     if (!profileId) return;
     setError(null);
-    if (!settings?.apiKeyPresent) {
-      setError('Add your OpenAI API key in Settings first.');
+    if (practice && !practice.ready) {
+      setError(practice.problem ?? 'Practice is not set up yet — see Settings → Language Models.');
       return;
     }
     setBusy('Starting & generating the first question…');
@@ -301,11 +310,11 @@ export default function SparringPage() {
             </label>
           )}
 
-          {!settings?.apiKeyPresent && (
+          {practice && !practice.ready && (
             <p className="mt-3 text-xs text-amber-400">
-              No OpenAI key —{' '}
+              {practice.problem}{' '}
               <Link to="/settings/models" className="underline">
-                add it in Settings
+                Open Settings
               </Link>
             </p>
           )}

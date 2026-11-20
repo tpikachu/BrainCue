@@ -8,17 +8,13 @@ const h = vi.hoisted(() => ({
   lastBody: null as Record<string, unknown> | null,
   reply: '{}',
 }));
-vi.mock('./client', () => ({
-  openai: () => ({
-    responses: {
-      create: (body: Record<string, unknown>) => {
-        h.lastBody = body;
-        return { output_text: h.reply };
-      },
-    },
-  }),
+// Capture the routed request (chatTask.ts) and feed back a fixed JSON reply.
+vi.mock('./chatTask', () => ({
+  chatJson: async (req: Record<string, unknown>) => {
+    h.lastBody = req;
+    return JSON.parse(h.reply);
+  },
 }));
-vi.mock('./models', () => ({ model: (k: string) => `model:${k}` }));
 
 import { generateBrief } from './brief';
 
@@ -53,9 +49,9 @@ function input(over: Partial<Parameters<typeof generateBrief>[0]> = {}) {
 }
 
 const systemPrompt = () =>
-  String((h.lastBody!.input as { role: string; content: string }[])[0].content);
+  String(h.lastBody!.system);
 const userPrompt = () =>
-  String((h.lastBody!.input as { role: string; content: string }[])[1].content);
+  String(h.lastBody!.user);
 
 const FULL = JSON.stringify({
   summary: 'Reliability-focused backend round.',
@@ -76,8 +72,7 @@ beforeEach(() => {
 describe('generateBrief — request', () => {
   it('uses the parsing model and asks for JSON', async () => {
     await generateBrief(input());
-    expect(h.lastBody!.model).toBe('model:parsing');
-    expect(h.lastBody!.text).toEqual({ format: { type: 'json_object' } });
+    expect(h.lastBody!.task).toBe('parsing');
   });
 
   it('instructs grounding-only (no fabrication) in the system prompt', async () => {

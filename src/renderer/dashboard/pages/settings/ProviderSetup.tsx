@@ -12,10 +12,12 @@ import { Badge, Button, Field, TextInput } from '../../../components/ui';
  * encrypted; this window only ever learns a boolean per provider.
  */
 
+/** Fast / Balanced / Quality — stored under the legacy preset values so an
+ *  older build reading the same database still understands them. */
 export const PRESET_OPTIONS: { value: string; label: string; hint: string }[] = [
-  { value: 'balanced', label: 'Balanced', hint: 'Fast + smart (default)' },
-  { value: 'low_cost', label: 'Low cost', hint: 'Cheapest tiers' },
-  { value: 'best', label: 'Best', hint: 'Max quality' },
+  { value: 'low_cost', label: 'Fast', hint: 'Lowest latency' },
+  { value: 'balanced', label: 'Balanced', hint: 'Fast + stronger (default)' },
+  { value: 'best', label: 'Quality', hint: 'Best answers, still live' },
 ];
 
 export function ProviderTiles({
@@ -47,7 +49,6 @@ export function ProviderTiles({
           >
             <span className="truncate">
               {p.name}
-              {p.id === 'openai' && <span className="ml-1.5 text-[10px] uppercase tracking-wider text-neutral-500">required</span>}
             </span>
             <span
               title={has ? 'Key configured' : 'No key'}
@@ -146,11 +147,13 @@ export function ProviderKeyBlock({
         </a>
       </div>
       <p className="mb-3 text-xs text-neutral-500">
+        {/* Any one keyed provider runs interviews (services/readiness.ts);
+            OpenAI is the only one that also covers the extras below. */}
         {provider === 'openai'
-          ? 'Required: retrieval (embeddings), cloud transcription, voice and the default models run here.'
+          ? 'Answers, plus cloud transcription, meaning-based document matching and voice practice.'
           : info.transport === 'openai-compatible'
-            ? `Optional extra, reached through ${info.name}’s OpenAI-compatible endpoint. Chosen per task later.`
-            : `Optional extra, reached through ${info.name}’s own API. Chosen per task later.`}
+            ? `Answers, reached through ${info.name}’s OpenAI-compatible endpoint.`
+            : `Answers, reached through ${info.name}’s own API.`}
       </p>
       <Field label={has ? 'Replace key' : 'API key'}>
         <div className="flex gap-2">

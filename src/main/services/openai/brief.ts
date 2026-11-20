@@ -1,5 +1,4 @@
-import { openai } from './client';
-import { model } from './models';
+import { chatJson } from './chatTask';
 import type { InterviewBrief, ParsedCompany, ParsedJd, ParsedResume } from '@shared/types';
 
 export interface BriefInput {
@@ -46,16 +45,13 @@ export async function generateBrief(input: BriefInput): Promise<InterviewBrief> 
     companyResearch: input.companyResearch,
   });
 
-  const res = await openai().responses.create({
-    model: model('parsing'),
-    input: [
-      { role: 'system', content: SYSTEM },
-      { role: 'user', content: payload.slice(0, 24_000) },
-    ],
-    text: { format: { type: 'json_object' } },
+  // Routed: runs on the provider the parsing task resolves to (chatTask.ts).
+  const raw = await chatJson<Partial<InterviewBrief>>({
+    task: 'parsing',
+    system: SYSTEM,
+    user: payload.slice(0, 24_000),
+    maxOutputTokens: 8192,
   });
-
-  const raw = JSON.parse(res.output_text) as Partial<InterviewBrief>;
   const coverage = (v: unknown): 'strong' | 'partial' | 'missing' =>
     v === 'strong' || v === 'missing' ? v : 'partial';
 

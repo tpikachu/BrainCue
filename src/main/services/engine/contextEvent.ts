@@ -14,9 +14,27 @@ export type ContextEvent =
   /** `speaker` defaults to the mode's remote speaker (the trigger stream);
    *  the user's own mic turns carry the mode's local speaker and are recorded
    *  without ever running the trigger. */
-  | { kind: 'transcript_final'; sessionId: string; text: string; speaker?: Speaker }
+  | {
+      kind: 'transcript_final';
+      sessionId: string;
+      text: string;
+      speaker?: Speaker;
+      /** When the turn's speech ended and when the final arrived — the
+       *  latency record's anchors (metrics/latency.ts). */
+      timing?: TurnTiming;
+    }
   | { kind: 'transcript_delta'; sessionId: string; text: string }
   | { kind: 'direct_ask'; sessionId: string; text: string }
   | { kind: 'screen_capture'; sessionId: string; imageDataUrl: string }
   | { kind: 'clipboard_text'; sessionId: string; text: string }
   | { kind: 'session_control'; sessionId: string; action: 'pause' | 'resume' | 'stop' };
+
+/** When a final turn's speech ended and when the final arrived — the latency
+ *  record's anchors (metrics/latency.ts). `speechEndSource` says which
+ *  anchor: the server VAD's speech-stopped, or (engines without one) the last
+ *  interim word, which is approximate. */
+export interface TurnTiming {
+  speechEndAt?: number;
+  speechEndSource?: 'vad' | 'last-delta';
+  finalAt?: number;
+}

@@ -10,7 +10,21 @@ import type { AppSettings, AudioPrefs, OverlayPrefs } from '@shared/types';
 import { handle, NoInput } from './helpers';
 import { apiKeyStore } from '../services/security/apiKey';
 import { listModels, testApiKey } from '../services/openai/client';
-import { defaultEfforts, modelPreset, presetModels } from '../services/openai/models';
+import {
+  chatProviderSetting,
+  defaultEfforts,
+  modelPreference,
+  modelPreset,
+  onRoutesChanged,
+  presetModels,
+  resolveTask,
+  resolveTaskAuto,
+} from '../services/openai/models';
+import { qualifyModel } from '@shared/providers';
+import { mergeOverrides } from '@shared/settingsOverrides';
+import { POLICY_TASKS } from '@shared/modelPolicy';
+import { clearDiscovery, refreshDiscovery, storeDiscovery } from '../services/models/discovery';
+import { getReadiness } from '../services/readiness';
 import { SETTINGS_KEYS, settingsRepo } from '../db/repositories/settings.repo';
 import { profilesRepo } from '../db/repositories/profiles.repo';
 import { readCompanionPrefs } from '../services/engine/modes/companion.mode';
@@ -41,11 +55,36 @@ const activeProfileId = (): string | null =>
     profilesRepo.list().map((p) => p.id),
   );
 
+/** Per chat task: the route the next request uses, the "Automatic" route,
+ *  and why the two differ from what was asked. */
+function routeFields(): Pick<AppSettings, 'effectiveModels' | 'autoModels' | 'modelNotices'> {
+  const effectiveModels: Record<string, string> = {};
+  const autoModels: Record<string, string> = {};
+  const modelNotices: Record<string, string> = {};
+  for (const t of POLICY_TASKS) {
+    const r = resolveTask(t);
+    effectiveModels[t] = qualifyModel(r.provider, r.model);
+    if (r.notice) modelNotices[t] = r.notice;
+    const a = resolveTaskAuto(t);
+    autoModels[t] = qualifyModel(a.provider, a.model);
+  }
+  return { effectiveModels, autoModels, modelNotices };
+}
+
+/** Tell every window. Settings carry key PRESENCE only, never a key. */
+function settingsChanged(): void {
+  broadcast(EVENTS.settingsChanged, readSettings());
+}
+
 function readSettings(): AppSettings {
   return {
     apiKeyPresent: apiKeyStore.isPresent(),
     models: settingsRepo.getJson(SETTINGS_KEYS.models, {}),
     modelPreset: modelPreset(),
+    chatProvider: chatProviderSetting(),
+    modelPreference: modelPreference(),
+    openaiInterviewFast: settingsRepo.get(SETTINGS_KEYS.openaiInterviewFast) !== '0',
+    ...routeFields(),
     modelDefaults: { ...presetModels() }, // effective per-task defaults for the active preset
     reasoningEfforts: settingsRepo.getJson(SETTINGS_KEYS.reasoningEfforts, {}),
     reasoningEffortDefaults: { ...defaultEfforts },
@@ -79,7 +118,15 @@ function readSettings(): AppSettings {
 const settingsPatch = z.object({
   models: z.record(z.string()).optional(),
   modelPreset: z.enum(['balanced', 'low_cost', 'best']).optional(),
+  modelPreference: z.enum(['fast', 'balanced', 'quality']).optional(),
+  openaiInterviewFast: z.boolean().optional(),
+  chatProvider: z.enum(['openai', 'anthropic', 'google', 'groq', 'openrouter']).nullable().optional(),
   reasoningEfforts: z.record(z.string()).optional(),
+  // One task's model / effort, merged HERE against the stored map (null or ''
+  // clears it). A renderer never writes back a whole map it read earlier, so
+  // a stale copy cannot restore another key (M7.2a review, AI-01).
+  modelOverrides: z.record(z.string().max(200).nullable()).optional(),
+  effortOverrides: z.record(z.string().max(40).nullable()).optional(),
   overlay: z
     .object({
       opacity: z.number().min(0).max(1),
@@ -136,6 +183,10 @@ const settingsPatch = z.object({
 const providerId = z.enum(['openai', 'anthropic', 'google', 'groq', 'openrouter']);
 
 export function registerSettingsIpc(): void {
+  // A route that moves without a settings write (model unavailable, new
+  // discovery list) relabels the dashboard and the Cue Card too.
+  onRoutesChanged(settingsChanged);
+
   handle(IPC.app.getInfo, NoInput, () => ({
     version: app.getVersion(),
     platform: process.platform,
@@ -147,9 +198,32 @@ export function registerSettingsIpc(): void {
     if (patch.activeProfileId !== undefined)
       settingsRepo.set(SETTINGS_KEYS.activeProfileId, patch.activeProfileId ?? '');
     if (patch.models) settingsRepo.setJson(SETTINGS_KEYS.models, patch.models);
+    if (patch.modelOverrides)
+      settingsRepo.setJson(
+        SETTINGS_KEYS.models,
+        mergeOverrides(settingsRepo.getJson(SETTINGS_KEYS.models, {}), patch.modelOverrides),
+      );
     if (patch.modelPreset) settingsRepo.set(SETTINGS_KEYS.modelPreset, patch.modelPreset);
+    // Stored under the legacy preset names, so an older build reading this
+    // database still sees a preset it understands.
+    if (patch.modelPreference)
+      settingsRepo.set(
+        SETTINGS_KEYS.modelPreset,
+        patch.modelPreference === 'fast' ? 'low_cost' : patch.modelPreference === 'quality' ? 'best' : 'balanced',
+      );
+    if (patch.chatProvider !== undefined) {
+      if (patch.chatProvider) settingsRepo.set(SETTINGS_KEYS.chatProvider, patch.chatProvider);
+      else settingsRepo.delete(SETTINGS_KEYS.chatProvider);
+    }
     if (patch.reasoningEfforts)
       settingsRepo.setJson(SETTINGS_KEYS.reasoningEfforts, patch.reasoningEfforts);
+    if (patch.openaiInterviewFast !== undefined)
+      settingsRepo.set(SETTINGS_KEYS.openaiInterviewFast, patch.openaiInterviewFast ? '1' : '0');
+    if (patch.effortOverrides)
+      settingsRepo.setJson(
+        SETTINGS_KEYS.reasoningEfforts,
+        mergeOverrides(settingsRepo.getJson(SETTINGS_KEYS.reasoningEfforts, {}), patch.effortOverrides),
+      );
     if (patch.overlay) {
       settingsRepo.setJson(SETTINGS_KEYS.overlayPrefs, patch.overlay);
       broadcast(EVENTS.overlayApplySettings, patch.overlay, ['overlay']);
@@ -184,7 +258,9 @@ export function registerSettingsIpc(): void {
       writeSttPrefs({ ...patch.stt, localModelId: localSttModel(patch.stt.localModelId) ? patch.stt.localModelId : DEFAULT_STT_PREFS.localModelId });
       applySttSelection();
     }
-    return readSettings();
+    const next = readSettings();
+    broadcast(EVENTS.settingsChanged, next);
+    return next;
   });
 
   // Per-provider keys: same isolation as the OpenAI key (main only, encrypted,
@@ -194,11 +270,16 @@ export function registerSettingsIpc(): void {
     z.object({ provider: providerId, key: z.string().min(1) }),
     ({ provider, key }) => {
       providerKeys.set(provider, key);
+      // Learn what the new key can see — in the background, off any answer path.
+      void refreshDiscovery([provider], true);
+      settingsChanged();
       return { providerKeys: providerKeys.presence() };
     },
   );
   handle(IPC.settings.clearProviderKey, z.object({ provider: providerId }), ({ provider }) => {
     providerKeys.clear(provider);
+    clearDiscovery(provider); // also re-broadcasts (routes changed)
+    settingsChanged();
     return { providerKeys: providerKeys.presence() };
   });
   handle(IPC.settings.testProviderKey, z.object({ provider: providerId }), ({ provider }) =>
@@ -207,20 +288,29 @@ export function registerSettingsIpc(): void {
 
   handle(IPC.settings.setApiKey, z.object({ key: z.string().min(1) }), ({ key }) => {
     apiKeyStore.set(key);
+    settingsChanged();
     return { apiKeyPresent: true };
   });
 
   handle(IPC.settings.clearApiKey, NoInput, () => {
     apiKeyStore.clear();
+    settingsChanged();
     return { apiKeyPresent: false };
   });
 
   handle(IPC.settings.testApiKey, NoInput, () => testApiKey());
 
   handle(IPC.settings.listModels, NoInput, () => listModels());
-  handle(IPC.settings.listProviderModels, z.object({ provider: providerId }), ({ provider }) =>
-    listProviderModels(provider),
-  );
+  handle(IPC.settings.listProviderModels, z.object({ provider: providerId }), async ({ provider }) => {
+    const ids = await listProviderModels(provider);
+    storeDiscovery(provider, ids); // the picker's fetch doubles as a discovery refresh
+    return ids;
+  });
+  handle(IPC.settings.readiness, NoInput, () => getReadiness());
+  handle(IPC.settings.refreshModels, NoInput, async () => {
+    await refreshDiscovery(undefined, true);
+    return getReadiness();
+  });
 
   // Re-binds the global shortcuts live (no restart needed).
   handle(

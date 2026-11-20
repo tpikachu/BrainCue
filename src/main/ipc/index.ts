@@ -7,6 +7,7 @@ import { registerApplicationsIpc } from './applications.ipc';
 import { registerNotesIpc } from './notes.ipc';
 import { registerStoriesIpc } from './stories.ipc';
 import { registerSessionIpc } from './session.ipc';
+import { registerMetricsIpc } from './metrics.ipc';
 import { registerContributionsIpc } from './contributions.ipc';
 import { registerMemoryIpc } from './memory.ipc';
 import { registerVoiceIpc } from './voice.ipc';
@@ -32,6 +33,7 @@ export function registerIpc(): void {
   registerNotesIpc();
   registerStoriesIpc();
   registerSessionIpc();
+  registerMetricsIpc();
   registerContributionsIpc();
   registerMemoryIpc();
   registerVoiceIpc();

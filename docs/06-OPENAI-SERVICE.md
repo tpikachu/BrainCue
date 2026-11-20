@@ -101,7 +101,15 @@ the coding solver can run on `claude-fable-5-1` while the live cue stays on
 
 ## Model configuration (`models.ts`)
 
-Resolution order: **per-task user override (`settings.models[key]`) → active preset's
+> **Superseded 2026-11-17** by provider-aware selection — see
+> [23-INTERVIEW-COPILOT.md](./23-INTERVIEW-COPILOT.md) §5. Chat tasks now resolve
+> through `shared/modelPolicy.ts` (provider + Fast/Balanced/Quality → ordered
+> candidates filtered by the account's model list), with catalog capability
+> metadata instead of name regexes. The table below is the v2.2 history: its
+> classify default (`gpt-4.1-nano`) was retired by OpenAI on 2026-10-23, which
+> silently disabled automatic question detection until this change.
+
+Resolution order (v2.2): **per-task user override (`settings.models[key]`) → active preset's
 table → built-in default**. There are three presets (`settings.modelPreset`):
 
 ```ts
@@ -199,9 +207,13 @@ jobs that have them — live sessions ground in the TAILORED resume + JD.
 ### embeddings.ts — `embed(texts: string[]) => Float32Array[]`
 Batches inputs, returns vectors; caller stores BLOBs. Records model + dim.
 
-### questions.ts — `classifyQuestion(text) => DetectedQuestion`
-Small/fast model. Returns `{ text, type, confidence, strategy }`. Also used as a
-cheap "is this actually a question?" gate before answer generation.
+### questions.ts — `classifyQuestion(text, { recent, signal }) => ClassifiedQuestion`
+Classify-tier model, with the last few speaker-labelled turns as context and a
+zod-validated output (a wrong-typed field fails closed). Called only for turns
+the detection rules cannot decide — see
+[23-INTERVIEW-COPILOT.md](./23-INTERVIEW-COPILOT.md) §1 (rules, 1.2 s timeout,
+late verdicts) and §2 (the scheduling policy). A model the account no longer
+has is reported so the next turn resolves to the next candidate.
 
 ### answer.ts — `streamAnswer(input) => AsyncIterable<AnswerEvent>`
 Input: `{ question, contextChunks, profile, format, pronunciation, interviewType, questionType?, signal? }`.

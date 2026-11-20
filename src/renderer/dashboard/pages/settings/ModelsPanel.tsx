@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { api } from '../../../lib/api';
-import type { AppSettings } from '@shared/types';
+import type { AppSettings, Readiness } from '@shared/types';
 import { FLAGS } from '@shared/flags';
 import { CLOUD_PROVIDERS, modelLabel, parseModelId, qualifyModel, type CloudProviderId } from '@shared/providers';
 import { Badge, Button, Card, Dropdown, Field, TextInput, type DropdownOption } from '../../../components/ui';
@@ -10,6 +10,7 @@ import { addKeyProvider, pickerRows, type AccountModels } from '../../../lib/mod
 import { PanelBody, PanelHeader } from './SettingsLayout';
 import { settingsSection } from './sections';
 import { PRESET_OPTIONS, PresetPicker, ProviderKeyBlock, ProviderTiles } from './ProviderSetup';
+import { supportsOpenAiFast } from '@shared/openaiProcessing';
 
 /**
  * One row of the per-task table. `chat` tasks can run on any provider with a
@@ -20,8 +21,8 @@ import { PRESET_OPTIONS, PresetPicker, ProviderKeyBlock, ProviderTiles } from '.
 const MODEL_FIELDS: { key: string; label: string; hint: string; chat: boolean; suggest: string[] }[] = [
   {
     key: 'answer',
-    label: 'Live answer',
-    hint: 'Writes the cue that streams into the Cue Card (latency matters).',
+    label: 'Interview answers',
+    hint: 'The live answer to each question, in every session — interviews and meetings (latency matters).',
     chat: true,
     suggest: [],
   },
@@ -147,16 +148,28 @@ function ModelsCard({
   const [account, setAccount] = useState<AccountModels>({});
   const [loadingList, setLoadingList] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [savingProcessing, setSavingProcessing] = useState(false);
   // Tasks whose picker is showing the free-text OpenRouter id field.
   const [customFor, setCustomFor] = useState<Record<string, boolean>>({});
-  // Keys the user edited in THIS card since the last sync — Save only writes these,
-  // so a stale page can't silently revert overrides written elsewhere (the Cue
-  // Card's picker persists models.answer/coding while a session runs).
-  const dirty = useRef(new Set<string>());
+  // Tasks edited in THIS card and not yet confirmed saved, each with its edit's
+  // sequence number. Save writes only these, so a stale page can't revert
+  // overrides written elsewhere (the Cue Card's chips write answer/coding
+  // while a session runs).
+  const dirty = useRef(new Map<string, number>());
+  const editSeq = useRef(0);
 
+  // Main sends a fresh map with EVERY settings push — a discovery list, a
+  // failover, another window's write — even when no override changed. Each
+  // one refreshes the tasks not edited here and leaves the edited drafts as
+  // they are; resetting the whole draft on it discarded an unsaved choice,
+  // and Save then wrote nothing while saying "saved" (M7.2a review, AI-02).
   useEffect(() => {
-    setOverrides(settings.models ?? {});
-    dirty.current.clear();
+    const stored = settings.models ?? {};
+    setOverrides((draft) => {
+      const next: Record<string, string> = { ...stored };
+      for (const key of dirty.current.keys()) next[key] = draft[key] ?? '';
+      return next;
+    });
   }, [settings.models]);
   useEffect(() => setPreset(settings.modelPreset ?? 'balanced'), [settings.modelPreset]);
 
@@ -165,16 +178,38 @@ function ModelsCard({
   const customized = Object.entries(overrides).some(
     ([k, v]) => v && v.trim() && v !== (settings.modelDefaults?.[k] ?? ''),
   );
+  // Advanced opens by itself when overrides are active, and otherwise stays
+  // as the user left it: an incoming snapshot never closes it mid-edit.
+  const [advancedOpen, setAdvancedOpen] = useState(customized);
+  useEffect(() => {
+    if (customized) setAdvancedOpen(true);
+  }, [customized]);
 
-  // Switch the cost/quality preset. Picking one is a clean switch — it clears the
-  // per-task overrides, so the config matches the preset (no lingering "Custom").
+  // What the policy picked (provider-aware), and why — from main.
+  const [readiness, setReadiness] = useState<Readiness | null>(null);
+  const loadReadiness = () =>
+    api.settings
+      .readiness()
+      .then(setReadiness)
+      .catch(() => setReadiness(null));
+  useEffect(() => {
+    void loadReadiness();
+  }, [settings]);
+
+  // Switch Fast / Balanced / Quality. Explicit per-task overrides are KEPT —
+  // they are the user's own choices; an override that cannot run is
+  // corrected by the policy (with the reason shown), not silently wiped.
   const selectPreset = async (p: string) => {
     setPreset(p);
-    setOverrides({});
-    dirty.current.clear();
-    await api.settings.set({ modelPreset: p, models: {} });
+    await api.settings.set({ modelPreset: p });
     await onSaved();
-    setStatus(`Preset: ${PRESET_OPTIONS.find((o) => o.value === p)?.label ?? p}.`);
+    const label = PRESET_OPTIONS.find((o) => o.value === p)?.label ?? p;
+    setStatus(customized ? `${label} — your per-task overrides in Advanced still apply.` : `${label}.`);
+  };
+
+  const selectProvider = async (p: string) => {
+    await api.settings.set({ chatProvider: p === 'auto' ? null : p });
+    await onSaved();
   };
 
   const keyedChat = CLOUD_PROVIDERS.filter(
@@ -209,22 +244,30 @@ function ModelsCard({
   }, [keyedSignature]);
 
   const setOverride = (key: string, v: string) => {
-    dirty.current.add(key);
+    dirty.current.set(key, ++editSeq.current);
     setOverrides((o) => ({ ...o, [key]: v }));
   };
 
   const save = async () => {
-    // Read-modify-write against FRESH settings, touching only the keys edited in
-    // this card. Empty means "use default". A whole-map write from a stale page
-    // would silently revert overrides written elsewhere while it sat open.
-    const fresh = (await api.settings.get()) as AppSettings;
-    const merged: Record<string, string> = { ...(fresh.models ?? {}) };
-    for (const key of dirty.current) {
-      const v = (overrides[key] ?? '').trim();
-      if (v) merged[key] = v;
-      else delete merged[key];
+    // Only the keys edited in this card, merged by main against the stored
+    // map (empty → default). A whole-map write from a stale page would
+    // silently revert overrides written elsewhere while it sat open.
+    const sent = new Map(dirty.current);
+    if (sent.size === 0) {
+      setStatus('No model changes to save.');
+      return;
     }
-    await api.settings.set({ models: merged });
+    const edits: Record<string, string | null> = {};
+    for (const key of sent.keys()) edits[key] = (overrides[key] ?? '').trim() || null;
+    try {
+      await api.settings.set({ modelOverrides: edits });
+    } catch (e) {
+      setStatus(`Could not save models — ${(e as Error).message}`); // drafts kept, still unsaved
+      return;
+    }
+    // Confirmed: these drafts are now the stored values — unless the task was
+    // edited again while the save was in flight; that newer draft stays.
+    for (const [key, seq] of sent) if (dirty.current.get(key) === seq) dirty.current.delete(key);
     await onSaved();
     setStatus('Models saved.');
   };
@@ -235,8 +278,23 @@ function ModelsCard({
     setCustomFor({});
     await api.settings.set({ models: {} });
     await onSaved();
-    setStatus('Reset to defaults.');
+    setStatus('Model overrides reset.');
   };
+
+  const setFastProcessing = async (enabled: boolean) => {
+    setSavingProcessing(true);
+    try {
+      await api.settings.set({ openaiInterviewFast: enabled });
+      await onSaved();
+      setStatus(enabled ? 'OpenAI Fast processing enabled for supported interview models.' : 'Provider-default processing restored.');
+    } catch (e) {
+      setStatus(`Could not save processing preference — ${(e as Error).message}`);
+    } finally {
+      setSavingProcessing(false);
+    }
+  };
+  const answerRoute = parseModelId(settings.effectiveModels?.answer ?? '');
+  const fastApplies = answerRoute.provider === 'openai' && supportsOpenAiFast(answerRoute.model);
 
   // Non-chat rows (embeddings, speech) stay on OpenAI and offer their known
   // ids as suggestions; the field is free text for anything newer.
@@ -251,8 +309,12 @@ function ModelsCard({
    *  beyond the catalog; keyless providers collapse to "Add key"), then the
    *  free-text OpenRouter entry when that key exists. */
   const chatRows = (key: string, def: string, current: string): DropdownOption[] => {
+    // The policy's pick for this task on the chosen provider with NO
+    // override (not the OpenAI preset table — a Claude user's default is a
+    // Claude model; not the override either, which this row would clear).
+    const effective = settings.autoModels?.[key] ?? settings.effectiveModels?.[key] ?? def;
     const rows: DropdownOption[] = [
-      { value: '', label: `Default — ${modelLabel(def)}`, description: 'From the preset' },
+      { value: '', label: `Default — ${modelLabel(effective)}`, description: 'Picked for your provider and preference' },
       ...pickerRows(key, settings.providerKeys, current, { addKeyDisabled: false }, account),
     ];
     if (settings.providerKeys?.openrouter) {
@@ -269,27 +331,92 @@ function ModelsCard({
   return (
     <Card>
       <div className="mb-1 flex items-center justify-between">
-        <h3 className="font-medium">Models per task</h3>
-        <Button variant="ghost" onClick={loadLists} loading={loadingList} disabled={!keyedChat.length}>
+        <h3 className="font-medium">Answer model</h3>
+        <Button
+          variant="ghost"
+          onClick={async () => {
+            await loadLists();
+            setReadiness(await api.settings.refreshModels());
+          }}
+          loading={loadingList}
+          disabled={!keyedChat.length}
+        >
           Refresh model lists
         </Button>
       </div>
       <p className="mb-4 text-sm text-neutral-400">
-        Pick a preset, or override any single task below. Every dropdown lists every model from each
-        provider you have a key for — ★ marks the ones suited to that task — plus whatever else your
-        key can see. Non-OpenAI picks are stored as <span className="font-mono">provider/model</span>.
+        Choose a provider and a preference — BrainCue picks a suitable model for each job (question
+        detection, live answers, parsing, the coding solver) from what your key can actually use.
       </p>
 
-      {/* Cost/quality preset — sets the per-task defaults; overrides below still win. */}
-      <div className="mb-4">
-        <span className="mb-1.5 block text-xs font-medium text-neutral-400">Preset</span>
-        <PresetPicker value={preset} customized={customized} onSelect={(p) => void selectPreset(p)} />
-        <p className="mt-1.5 text-xs text-neutral-500">
-          The live answer &amp; question detection stay on fast, non-reasoning models in every preset
-          (even “Best”) — a reasoning model there would add latency without helping. “Best” reserves
-          a reasoning model for the coding solver.
-        </p>
+      <div className="mb-4 grid gap-3 sm:grid-cols-[minmax(0,14rem)_1fr]">
+        <Field label="Provider">
+          <Dropdown
+            value={settings.chatProvider ?? 'auto'}
+            onChange={(v) => void selectProvider(v)}
+            options={[
+              { value: 'auto', label: 'Automatic', description: 'The first provider you have a key for' },
+              ...CLOUD_PROVIDERS.filter((p) => p.capabilities.includes('chat')).map((p) => ({
+                value: p.id,
+                label: p.name,
+                description: settings.providerKeys?.[p.id] ? 'Key stored' : 'No key yet',
+                disabled: !settings.providerKeys?.[p.id],
+              })),
+            ]}
+          />
+        </Field>
+        <div>
+          <span className="mb-1.5 block text-xs font-medium text-neutral-400">Preference</span>
+          <PresetPicker value={preset} customized={false} onSelect={(p) => void selectPreset(p)} />
+        </div>
       </div>
+      {readiness && (
+        <div className="mb-4 rounded-lg border border-white/5 bg-neutral-950/60 px-3 py-2 text-xs">
+          <p className="text-neutral-300">{readiness.chat.explanation}</p>
+          {readiness.chat.notice && <p className="mt-1 text-amber-300">{readiness.chat.notice}</p>}
+          {readiness.chat.problem && (
+            <p className="mt-1 text-red-300">
+              {readiness.chat.problem} {readiness.chat.action}
+            </p>
+          )}
+          <p className="mt-1 text-neutral-500">
+            Question detection: {modelLabel(settings.effectiveModels?.classify ?? '')}. Live tasks always run
+            with the lowest reasoning effort the model allows — first-token time matters most there.
+          </p>
+        </div>
+      )}
+      {fastApplies && settings.openaiInterviewFast !== false && (
+        <p className="mb-4 text-xs text-neutral-400">
+          Normal OpenAI interview answers request Fast processing at higher token rates (2× Standard).
+          You can turn it off in Advanced.
+        </p>
+      )}
+
+      <details className="group" open={advancedOpen} onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}>
+        <summary className="mb-3 cursor-pointer select-none text-sm font-medium text-neutral-300">
+          Advanced — choose a model per task{customized ? ' (overrides active)' : ''}
+        </summary>
+        {settings.providerKeys?.openai && (
+          <div className="mb-4 rounded-lg border border-white/10 p-3">
+            <label className="flex items-center gap-2 text-sm text-neutral-200">
+              <input type="checkbox" checked={settings.openaiInterviewFast ?? true}
+                disabled={savingProcessing} onChange={(e) => void setFastProcessing(e.target.checked)} />
+              OpenAI Fast processing for interview answers
+            </label>
+            <p className="mt-2 text-xs text-neutral-400">
+              Higher token rates (2× Standard on supported GPT-6 models). Requests faster processing
+              for normal interview answers; speed is not guaranteed. Coding keeps its own allowance.
+              Applies to the next answer and keeps your chosen provider and model.
+            </p>
+            {!fastApplies && <p className="mt-1 text-xs text-neutral-500">Your current answer model does not use this option.</p>}
+          </div>
+        )}
+        <p className="mb-4 text-sm text-neutral-400">
+          An override wins over the automatic pick while it can run; if its provider has no key or your
+          account no longer lists it, the automatic pick is used and the reason is shown above. Every
+          dropdown lists each provider you have a key for — ★ marks the ones suited to that task. Non-OpenAI
+          picks are stored as <span className="font-mono">provider/model</span>.
+        </p>
 
       <div className="space-y-4">
         {MODEL_FIELDS.map((f) => {
@@ -354,9 +481,10 @@ function ModelsCard({
           Save models
         </Button>
         <Button variant="ghost" onClick={reset}>
-          Reset to defaults
+          Reset model overrides
         </Button>
       </div>
+      </details>
       {status && <p className="mt-3 text-sm text-neutral-300">{status}</p>}
     </Card>
   );

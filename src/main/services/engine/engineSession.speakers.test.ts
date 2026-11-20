@@ -32,13 +32,14 @@ vi.mock('../../ipc/contributionBridge', () => ({
   emitContributionMeta: vi.fn(),
   emitContributionOpen: vi.fn(),
   emitContributionReset: vi.fn(),
+  emitContributionTake: () => {},
 }));
 vi.mock('../../providers/normalizeError', () => ({ normalizeProviderError: (e: unknown) => String(e) }));
 vi.mock('../../db/repositories/profiles.repo', () => ({
   profilesRepo: { get: () => ({ id: 'p1', name: 'Test User', language: 'en' }) },
 }));
 vi.mock('../security/logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
-vi.mock('../memory/recall', () => ({ recallMemories: async () => [] }));
+vi.mock('../memory/recall', () => ({ recallMemories: async () => [], markRecalled: () => {}, revalidateRecalled: (_p: string, _k: unknown, m: unknown) => m }));
 vi.mock('./grounding', () => ({ ground: async () => [] }));
 vi.mock('./persistence/enginePersistence', () => ({
   enginePersistence: {
@@ -132,7 +133,8 @@ describe('onTranscriptFinal — whose turn it is', () => {
     const s = session();
     await s.onTranscriptFinal('Tell me about a migration you led?');
     expect(h.persisted[0].speaker).toBe('interviewer');
-    expect(trigger).toHaveBeenCalledWith('Tell me about a migration you led?');
+    // The trigger now also receives the recent turns (detection context).
+    expect(trigger).toHaveBeenCalledWith('Tell me about a migration you led?', expect.objectContaining({ recent: expect.any(Array) }));
     expect(h.generateInputs).toHaveLength(1);
   });
 
@@ -153,10 +155,11 @@ describe('onTranscriptFinal — whose turn it is', () => {
     expect(trigger).toHaveBeenCalledTimes(1);
     await s.onTranscriptFinal('What about the timeline?', 'interviewer');
     expect(h.generateInputs).toHaveLength(1);
-    expect(h.generateInputs[0].history).toEqual([
-      // Remote turns keep the v1 item shape (no speaker) — pinned by parity.
-      { role: 'heard', text: 'So, a few topics today.' },
-      { role: 'heard', text: 'I already covered the timeline in my intro.', speaker: 'candidate' },
+    const c = h.generateInputs[0].conversation as { recent: { role: string; text: string }[] };
+    expect(c.recent.map((t) => [t.role, t.text])).toEqual([
+      ['interviewer', 'So, a few topics today.'],
+      // The user's own words are the CANDIDATE's — "You said:" in the prompt.
+      ['candidate', 'I already covered the timeline in my intro.'],
     ]);
   });
 

@@ -120,3 +120,29 @@ describe('jobsRepo.update persists what it is given', () => {
     ).toEqual([]);
   });
 });
+
+describe('contextPacksRepo.page — interview-only lists, filtered and paged server-side', () => {
+  it('returns only the Spaces of the asked activity, with an exact total', () => {
+    const pid = `jp-p${++seq}`;
+    h.db.insert(schema.profiles).values({ id: pid, name: 'Alex' }).run();
+    const kinds = ['job', 'meeting', 'job', 'project', 'subject', 'job', 'legacy-kind'];
+    kinds.forEach((kind, i) =>
+      h.db.insert(schema.contextPacks).values({ id: `${pid}-s${i}`, profileId: pid, kind, title: `S${i}` }).run(),
+    );
+    const interviews = jobsRepo.page({ profileId: pid, limit: 2, offset: 0, activity: 'job' });
+    expect(interviews.total).toBe(3);
+    expect(interviews.items).toHaveLength(2);
+    expect(interviews.items.every((s) => s.kind === 'job')).toBe(true);
+    const rest = jobsRepo.page({ profileId: pid, limit: 2, offset: 2, activity: 'job' });
+    expect(rest.items.map((s) => s.kind)).toEqual(['job']);
+    // Without a filter every Space is still listed (the Library).
+    expect(jobsRepo.page({ profileId: pid, limit: 100, offset: 0 }).total).toBe(kinds.length);
+    // An unknown kind reads as "something else" (custom), as in the start flow.
+    expect(jobsRepo.page({ profileId: pid, limit: 100, offset: 0, activity: 'custom' }).items.map((s) => s.title)).toEqual(['S6']);
+    // Scoped to the profile: another profile's interviews never appear.
+    const other = `jp-p${++seq}`;
+    h.db.insert(schema.profiles).values({ id: other, name: 'Sam' }).run();
+    h.db.insert(schema.contextPacks).values({ id: `${other}-s`, profileId: other, kind: 'job', title: 'Theirs' }).run();
+    expect(jobsRepo.page({ profileId: pid, limit: 100, offset: 0, activity: 'job' }).total).toBe(3);
+  });
+});

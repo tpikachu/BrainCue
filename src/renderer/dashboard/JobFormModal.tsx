@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { FLAGS } from '@shared/flags';
 import { ACTIVITIES, ACTIVITY_ORDER, DEFAULT_ACTIVITY, activity, isInterviewSpace } from '@shared/activities';
 import type { CompanionSpaceOverrides, ContextPackKind, Job } from '@shared/types';
-import { Button, Field, Modal, Select, Switch, TextArea, TextInput } from '../components/ui';
+import { Button, Field, Modal, ModalCancel, Select, Switch, TextArea, TextInput } from '../components/ui';
 import { UploadIcon } from '../components/icons';
 
 type Notice = { tone: 'ok' | 'err'; text: string } | null;
@@ -20,6 +20,7 @@ export function JobFormModal({
   profileId,
   job,
   initialKind,
+  lockKind = false,
   onClose,
   onSaved,
   onDeleted,
@@ -31,12 +32,15 @@ export function JobFormModal({
    *  user already picked, so creating a Space mid-start does not ask the same
    *  question a second time (and cannot answer it differently). */
   initialKind?: ContextPackKind;
+  /** The caller already knows what this is (the interview path creates
+   *  interview roles): the kind is fixed and its picker is not shown. */
+  lockKind?: boolean;
   onClose: () => void;
   onSaved: (job: Job) => void;
   onDeleted?: (id: string) => void;
 }) {
   const editing = !!job;
-  const empty = { title: '', company: '', jdUrl: '', jdText: '', companyUrl: '', notes: '' };
+  const empty = { title: '', company: '', jdUrl: '', jdText: '', companyUrl: '', notes: '', resumeText: '', resumeSource: 'profile' as 'profile' | 'space' };
   const [form, setForm] = useState(empty);
   // New Spaces default to the daily case, or to the activity the caller is
   // already in. Editing keeps whatever the Space already is, so v1 job rows
@@ -46,6 +50,8 @@ export function JobFormModal({
   const [companion, setCompanion] = useState<CompanionSpaceOverrides>({});
   const [saving, setSaving] = useState(false);
   const [fetching, setFetching] = useState(false);
+  const [uploadingResume, setUploadingResume] = useState(false);
+  const resumeGeneration = useRef(0);
   const [jdNotice, setJdNotice] = useState<Notice>(null);
   const [notice, setNotice] = useState<Notice>(null);
   // The tailored résumé lives on the Space, so it is loaded from and written
@@ -57,34 +63,81 @@ export function JobFormModal({
   // The answer to the offer, applied when the Space is saved — so a brand-new
   // Space is created AND tailored in one action.
   const [tailorWanted, setTailorWanted] = useState(false);
+  /** What the fields held when opened (or last saved): anything else is an
+   *  unsaved draft, and an accidental Escape/backdrop/× asks before dropping it. */
+  const [baseline, setBaseline] = useState('');
+  const snapshot = (f: typeof form, k: ContextPackKind, c: CompanionSpaceOverrides) => JSON.stringify([f, k, c]);
 
   // Reset the form to the (edited) job each time the modal opens.
   useEffect(() => {
+    ++resumeGeneration.current;
+    setUploadingResume(false);
     if (!open) return;
-    setForm({
+    const initial = {
       title: job?.title ?? '',
       company: job?.company ?? '',
       jdUrl: job?.jdUrl ?? '',
       jdText: job?.jdText ?? '',
       companyUrl: job?.companyUrl ?? '',
       notes: job?.notes ?? '',
-    });
-    setKind((job?.kind as ContextPackKind) ?? initialKind ?? DEFAULT_ACTIVITY);
+      resumeText: job?.resumeText ?? '',
+      resumeSource: (job?.resumeText?.trim() ? 'space' : 'profile') as 'profile' | 'space',
+    };
+    const initialKindValue = (job?.kind as ContextPackKind) ?? initialKind ?? DEFAULT_ACTIVITY;
+    setForm(initial);
+    setKind(initialKindValue);
     setCompanion(job?.companionPrefs ?? {});
+    setBaseline(snapshot(initial, initialKindValue, job?.companionPrefs ?? {}));
     setTailored(job?.tailoredResume ?? null);
     setTailorWanted(false); // an offer, re-asked per visit — never a sticky default
     setTailorNotice(null);
     setJdNotice(null);
     setNotice(null);
-  }, [open, job?.id]);
+  }, [open, job?.id, profileId]);
 
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
+  const dirty = !!baseline && (snapshot(form, kind, companion) !== baseline || tailorWanted);
+  const busy = saving
+    ? 'Saving'
+    : tailoring
+      ? 'Tailoring your résumé'
+      : uploadingResume
+        ? 'Reading the résumé'
+      : fetching
+        ? 'Fetching the page'
+        : false;
 
   const uploadJd = async () => {
     const { filePath } = await api.dialog.openFile();
     if (!filePath) return;
     const { text } = await api.documents.extractFile(filePath);
     set({ jdText: text });
+  };
+
+  const changeResume = (patch: Pick<Partial<typeof form>, 'resumeText' | 'resumeSource'>) => {
+    ++resumeGeneration.current;
+    setUploadingResume(false);
+    setTailored(null);
+    set(patch);
+  };
+
+  const uploadResume = async () => {
+    const generation = ++resumeGeneration.current;
+    setUploadingResume(true);
+    setNotice(null);
+    try {
+      const { filePath } = await api.dialog.openFile();
+      if (!filePath || generation !== resumeGeneration.current) return;
+      const { text } = await api.documents.extractFile(filePath);
+      if (generation !== resumeGeneration.current) return;
+      if (!text.trim()) throw new Error('No résumé text was found. Paste the text below.');
+      set({ resumeText: text, resumeSource: 'space' });
+      setTailored(null);
+    } catch (e) {
+      if (generation === resumeGeneration.current) setNotice({ tone: 'err', text: (e as Error).message });
+    } finally {
+      if (generation === resumeGeneration.current) setUploadingResume(false);
+    }
   };
 
   const fetchJd = async () => {
@@ -107,6 +160,10 @@ export function JobFormModal({
   };
 
   const save = async () => {
+    if (isInterviewSpace(kind) && form.resumeSource === 'space' && !form.resumeText.trim()) {
+      setNotice({ tone: 'err', text: 'Upload or paste the résumé for this role, or choose Default résumé.' });
+      return;
+    }
     if (!form.title.trim() && !form.jdText.trim()) {
       setNotice({ tone: 'err', text: `Add at least a name or ${copy.docLabel.toLowerCase()}.` });
       return;
@@ -124,6 +181,8 @@ export function JobFormModal({
         jdText: form.jdText.trim() || null,
         companyUrl: form.companyUrl.trim() || null,
         notes: form.notes.trim() || null,
+        resumeText: form.resumeSource === 'space' ? form.resumeText.trim() : null,
+        ...(!tailored ? { tailoredResume: null } : {}),
       });
       // Companion overrides ride separately (setCompanionPrefs — no re-parse).
       // All-inherit → null so the row reads "no overrides", not "{}".
@@ -136,6 +195,12 @@ export function JobFormModal({
         onSaved(saved as Job);
       } else {
         onSaved(res.job as Job);
+      }
+      // Saved: what is on screen is no longer a draft.
+      setBaseline(snapshot(form, kind, companion));
+      if (res.processingError) {
+        setNotice({ tone: 'err', text: `Saved. ${res.processingError}` });
+        return;
       }
       if (res.companyError) {
         setNotice({ tone: 'err', text: `Saved, but reading the link failed: ${res.companyError}` });
@@ -187,7 +252,7 @@ export function JobFormModal({
     setTailoring(true);
     setTailorNotice(null);
     try {
-      if ((job.jdText ?? '') !== form.jdText.trim()) {
+      if ((job.jdText ?? '') !== form.jdText.trim() || (job.resumeText ?? '') !== (form.resumeSource === 'space' ? form.resumeText.trim() : '')) {
         const res = await api.jobs.save({
           id: job.id,
           profileId,
@@ -198,8 +263,11 @@ export function JobFormModal({
           jdText: form.jdText.trim() || null,
           companyUrl: form.companyUrl.trim() || null,
           notes: form.notes.trim() || null,
+          resumeText: form.resumeSource === 'space' ? form.resumeText.trim() : null,
+          ...(!tailored ? { tailoredResume: null } : {}),
         });
         onSaved(res.job as Job);
+        setBaseline(snapshot(form, kind, companion));
       }
       const { job: saved, indexError } = await api.jobs.tailorResume(job.id);
       setTailored(saved.tailoredResume);
@@ -222,7 +290,7 @@ export function JobFormModal({
       const { job: saved } = await api.jobs.clearTailoredResume(job.id);
       setTailored(null);
       onSaved(saved);
-      setTailorNotice({ tone: 'ok', text: 'Removed — interviews here use your base résumé again.' });
+      setTailorNotice({ tone: 'ok', text: 'Removed — interviews here use your selected résumé again.' });
     } catch (e) {
       setTailorNotice({ tone: 'err', text: (e as Error).message });
     }
@@ -236,8 +304,17 @@ export function JobFormModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title={editing ? 'Edit Space' : 'New Space'}>
+    <Modal
+      open={open}
+      onClose={onClose}
+      dirty={dirty}
+      busy={busy}
+      // An interview Space is, to the person using it, a role they are
+      // interviewing for — named that way rather than as storage.
+      title={isInterviewSpace(kind) ? (editing ? 'Edit role' : 'New role') : editing ? 'Edit Space' : 'New Space'}
+    >
       <div className="space-y-3">
+        {!lockKind && (
         <Field label="What is this Space for?" hint={copy.hint}>
           <Select
             value={kind}
@@ -251,7 +328,8 @@ export function JobFormModal({
             ))}
           </Select>
         </Field>
-        {editing && (
+        )}
+        {editing && !lockKind && (
           <p className="text-xs text-neutral-500">
             A Space&rsquo;s kind is fixed after it is created — its documents are already indexed
             under it. Create a new Space if this one is really something else.
@@ -274,6 +352,33 @@ export function JobFormModal({
             />
           </Field>
         </div>
+
+        {isInterviewSpace(kind) && (
+          <Field label="Résumé for this role" hint={form.resumeSource === 'profile' ? 'Uses your profile’s default résumé.' : 'Only this role uses this version.'}>
+            <Select
+              aria-label="Résumé for this role"
+              value={form.resumeSource}
+              onChange={(e) => changeResume({ resumeSource: e.target.value as 'profile' | 'space' })}
+            >
+              <option value="profile">Default résumé</option>
+              <option value="space">Different résumé</option>
+            </Select>
+            {form.resumeSource === 'space' && (
+              <div className="mt-2 space-y-2">
+                <Button variant="default" onClick={uploadResume} loading={uploadingResume} disabled={saving || tailoring}>
+                  <UploadIcon /> Upload résumé
+                </Button>
+                <TextArea
+                  aria-label="Résumé text for this role"
+                  rows={5}
+                  value={form.resumeText}
+                  onChange={(e) => changeResume({ resumeText: e.target.value })}
+                  placeholder="Paste the résumé you sent for this role…"
+                />
+              </div>
+            )}
+          </Field>
+        )}
 
         <Field
           label={`${copy.docLabel} — link (optional)`}
@@ -370,7 +475,7 @@ export function JobFormModal({
                     Tailor your résumé to this job description?
                   </p>
                   <p className="mt-0.5 text-xs text-neutral-500">
-                    BrainCue rewrites your résumé for this role and keeps it here, with this Space.
+                    BrainCue rewrites your selected résumé for this role and keeps it here, with this Space.
                     Only interviews in this Space use it. Nothing is invented — it re-frames what
                     your résumé already says.
                   </p>
@@ -510,9 +615,7 @@ export function JobFormModal({
             <span />
           )}
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
+            <ModalCancel />
             {/* The label states what pressing it will actually do. Tailoring is
                 a slow model call, so a button that just said "Create" would
                 look hung for the length of it. */}

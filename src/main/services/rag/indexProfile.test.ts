@@ -52,7 +52,10 @@ import { eq } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import { createTestDb } from '../../test/dbHarness';
 import { profilesRepo } from '../../db/repositories/profiles.repo';
+import { jobsRepo } from '../../db/repositories/jobs.repo';
 import { indexJob, reindexProfile } from './indexProfile';
+import { sqliteVectorStore } from './vectorStore';
+import { retrieve } from './retriever';
 import { EMPTY_PROFILE_ABOUT, PROFILE_ABOUT_FIELDS } from '@shared/types';
 
 let seq = 0;
@@ -187,6 +190,57 @@ describe('a Space carries its own tailored résumé', () => {
     const pid = seedProfile();
     await indexJob(seedSpace(pid));
     expect(chunksOf(pid, 'tailored')).toHaveLength(0);
+  });
+
+  it('uses the supplied résumé only in its own Space, leaving the default and another role unchanged', async () => {
+    const pid = seedProfile({ resumeText: 'Led the payments platform at Default Corp.' });
+    const custom = seedSpace(pid, { resumeText: 'Scaled payments to 42k rps at Custom Corp.' });
+    const other = seedSpace(pid);
+    await reindexProfile(pid);
+    await indexJob(custom);
+    await indexJob(other);
+    const own = await retrieve(pid, 'payments', 10, custom, { tailoredResume: true });
+    expect(own.some((c) => c.content.includes('42k rps'))).toBe(true);
+    expect(own.some((c) => c.content.includes('Default Corp'))).toBe(false);
+    const theirs = await retrieve(pid, 'payments', 10, other, { tailoredResume: true });
+    expect(theirs.some((c) => c.content.includes('Default Corp'))).toBe(true);
+    expect(theirs.some((c) => c.content.includes('Custom Corp'))).toBe(false);
+    expect(profilesRepo.get(pid)?.resumeText).toBe('Led the payments platform at Default Corp.');
+  });
+
+  it('never reintroduces the embedded default when the Space résumé has no compatible embedding', async () => {
+    const pid = seedProfile();
+    await reindexProfile(pid);
+    h.keyPresent = false;
+    const custom = seedSpace(pid, { resumeText: 'Led payments at Custom Corp, serving 42k rps.' });
+    await indexJob(custom);
+    const vectorHits = sqliteVectorStore.search({ profileId: pid, jobId: custom, allowTailored: true, query: fakeVec('payments'), k: 10, identity: h.identity });
+    expect(vectorHits.some((c) => c.sourceType === 'resume')).toBe(false);
+    const mixed = await retrieve(pid, 'payments', 10, custom, { tailoredResume: true });
+    expect(mixed.some((c) => c.sourceType === 'resume')).toBe(false);
+    expect(mixed.some((c) => c.content.includes('42k rps'))).toBe(true);
+  });
+
+  it('changing or clearing a role résumé invalidates its derived version and old early lookup', async () => {
+    const pid = seedProfile({ resumeText: 'Payments engineer at Default Corp.' });
+    await reindexProfile(pid);
+    const custom = seedSpace(pid, { resumeText: 'Payments engineer at First Corp.', tailoredResume: 'Payments lead at Tailored Corp.' });
+    await indexJob(custom);
+    const cached = await retrieve(pid, 'payments', 10, custom, { tailoredResume: true });
+    expect(cached.some((c) => c.content.includes('Tailored Corp'))).toBe(true);
+    jobsRepo.update(custom, { resumeText: 'Payments lead at Second Corp.' });
+    expect(jobsRepo.get(custom)?.tailoredResume).toBeNull();
+    const duringIndex = await retrieve(pid, 'payments', 10, custom, { tailoredResume: true, cached });
+    expect(duringIndex.some((c) => /First Corp|Tailored Corp|Default Corp/.test(c.content))).toBe(false);
+    await indexJob(custom);
+    const fresh = await retrieve(pid, 'payments', 10, custom, { tailoredResume: true, cached });
+    expect(fresh.some((c) => c.content.includes('Second Corp'))).toBe(true);
+    expect(fresh.some((c) => /First Corp|Tailored Corp|Default Corp/.test(c.content))).toBe(false);
+    jobsRepo.update(custom, { resumeText: null });
+    await indexJob(custom);
+    const reset = await retrieve(pid, 'payments', 10, custom, { tailoredResume: true, cached: fresh });
+    expect(reset.some((c) => c.content.includes('Default Corp'))).toBe(true);
+    expect(reset.some((c) => c.content.includes('Second Corp'))).toBe(false);
   });
 
   it('removing it clears the chunks on the next index', async () => {

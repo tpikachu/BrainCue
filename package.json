@@ -1,6 +1,6 @@
 {
   "name": "braincue",
-  "version": "2.2.2",
+  "version": "2.3.0-preview.1",
   "description": "BrainCue — a local-first desktop AI companion for live conversations (Electron + React + OpenAI). It listens with consent, remembers your calls, and answers into a capture-invisible overlay. BYO OpenAI key.",
   "author": "tpikachu",
   "license": "MIT",
@@ -23,6 +23,9 @@
     "test": "vitest run",
     "test:e2e": "npm run build && playwright test",
     "test:e2e:only": "playwright test",
+    "test:e2e:live": "npm run build && playwright test -c playwright.live.config.ts",
+    "bench:perf01": "vitest run src/main/services/engine/bench",
+    "perf01:report": "vitest run src/main/services/engine/bench/perf01.report.run.test.ts",
     "media": "node scripts/media.mjs",
     "db:generate": "drizzle-kit generate",
     "icon": "node scripts/generate-icon.mjs",

@@ -478,6 +478,8 @@ export interface ContextPack {
   companyUrl: string | null;
   companyResearch: string | null;
   parsedCompany: ParsedCompany | null;
+  /** Uploaded/pasted résumé for this Space; null uses the profile default. */
+  resumeText: string | null;
   /** This profile's résumé rewritten against THIS Space's JD — a document of
    *  the Space, like the JD beside it. Indexed pack-scoped, and it stands in
    *  for the base résumé only while grounding this Space's interviews. */
@@ -579,6 +581,9 @@ export interface DetectedQuestion {
   confidence: number;
   strategy: string;
   createdAt: number;
+  /** The (last) transcript turn that asked it — where the candidate's reply
+   *  starts. Null for a typed Ask. */
+  transcriptChunkId?: string | null;
 }
 
 export interface AiAnswer {
@@ -644,6 +649,82 @@ export interface SessionDetail extends Session {
   transcript: TranscriptChunk[];
   questions: (DetectedQuestion & { answer: AiAnswer | null })[];
   report: SessionReport | null;
+  /** The session's other persisted cards (meeting/companion: action items,
+   *  decisions, memories surfaced…), oldest first. Answers to detected
+   *  questions are in `questions`, not here. */
+  cards: Contribution[];
+  /** The Space it is filed in, if it still exists. */
+  spaceTitle: string | null;
+  spaceCompany: string | null;
+}
+
+/** One page of a profile's session history (server-side LIMIT/OFFSET). */
+export interface SessionPage {
+  items: SessionListItem[];
+  total: number;
+}
+
+/**
+ * What "Keep it" actually did, per half (docs/16-CONTINUITY.md §9). The
+ * transcript is kept locally whatever these say; each half reports its own
+ * outcome so the save prompt never infers a reason from a zero count.
+ *  - `done`: written (`count` summary pieces / memory suggestions).
+ *  - `nothing-new` (memory): ran, but everything was already known or below
+ *    the confidence floor — nothing to review.
+ *  - `off`: switched off in Settings (summary) / not consented (memory).
+ *  - `space-off`: the chosen Space opted out of remembering.
+ *  - `no-space`: kept without a Space — nowhere to file it.
+ *  - `practice`: a rehearsal; never summarised (summary only).
+ *  - `too-short`: too little was said.
+ *  - `withheld` (summary): the summary repeated something sensitive, so it
+ *    was not stored.
+ *  - `failed`: the provider call (or its result) failed; `error` says why.
+ */
+export type KeepStepStatus =
+  | 'done'
+  | 'nothing-new'
+  | 'off'
+  | 'space-off'
+  | 'no-space'
+  | 'practice'
+  | 'too-short'
+  | 'withheld'
+  | 'failed'
+  /** Not run this time: a retry re-ran only the half that failed, so this
+   *  half's earlier outcome still stands. */
+  | 'not-run';
+
+/** The two halves of Keep, for a retry that re-runs only what failed. */
+export type KeepHalf = 'summary' | 'memory';
+
+export interface KeepStep {
+  status: KeepStepStatus;
+  count: number;
+  error?: string;
+}
+
+export interface RememberResult {
+  /** The transcript and session stay on this machine — always true here. */
+  kept: true;
+  /** Where it was filed (null = no Space). */
+  packId: string | null;
+  summary: KeepStep;
+  memory: KeepStep;
+  /** Which provider was asked to summarise / suggest memories, by id — only
+   *  when at least one half reached it. */
+  provider: string | null;
+  /** Legacy counts (v1 callers). */
+  archived: number;
+  memories: number;
+}
+
+/** Result of rolling back a failed start (or retrying that rollback). */
+export interface RollbackResult {
+  sessionId: string;
+  stopped: boolean;
+  /** A new session is also removed; a resumed one is kept (undefined). */
+  removed?: boolean;
+  error?: string;
 }
 
 export type OverlayMode = 'compact' | 'expanded';
@@ -684,7 +765,23 @@ export interface AppSettings {
   /** First-run setup (name → transcription → AI) finished or skipped. */
   onboardingDone: boolean;
   models: Record<string, string>; // user overrides only
-  modelPreset: string; // active cost/quality preset: 'balanced' | 'low_cost' | 'best'
+  modelPreset: string; // legacy preset name: 'balanced' | 'low_cost' | 'best' (mirrors modelPreference)
+  /** The provider chat tasks run on (null = never chosen → first with a key). */
+  chatProvider: CloudProviderId | null;
+  /** Fast / Balanced / Quality — picks a model per task on chatProvider. */
+  modelPreference: 'fast' | 'balanced' | 'quality';
+  /** Paid processing preference for normal OpenAI interview cues (default on).
+   * False leaves the provider project's processing default in charge. */
+  openaiInterviewFast?: boolean;
+  /** What each chat task resolves to right now (qualified ids) — the model
+   *  the NEXT request for that task is sent to. */
+  effectiveModels: Record<string, string>;
+  /** What each chat task resolves to with no per-task override (qualified
+   *  ids): the model the "Automatic" choice would use. */
+  autoModels?: Record<string, string>;
+  /** Why a task's effective model differs from what was asked (an override
+   *  that cannot run, a preferred model not served). User-safe. */
+  modelNotices?: Record<string, string>;
   modelDefaults: Record<string, string>; // effective per-task defaults (the active preset's table)
   reasoningEfforts: Record<string, string>; // user reasoning-effort overrides per task
   reasoningEffortDefaults: Record<string, string>; // built-in reasoning effort per task
@@ -719,6 +816,50 @@ export interface AppSettings {
   shortcutDefaults: Record<string, string>; // built-in default accelerator per action
 }
 
+/** Which audio streams a live session is actually receiving. A "live"
+ *  indicator must mean capture is working, so the Cue Card shows exactly
+ *  what is missing. */
+export interface CaptureStatus {
+  /** The call (system audio): where interviewer questions come from. */
+  system: boolean;
+  /** The user's microphone: what the candidate actually said. */
+  mic: boolean;
+  /** Whether the session wanted the call at all (solo activities do not). */
+  wantsSystem: boolean;
+}
+
+/** What a live session can rely on, per capability (services/readiness.ts).
+ *  Booleans, provider/model ids and user-safe text only — never a key. */
+export interface Readiness {
+  chat: {
+    ready: boolean;
+    provider: CloudProviderId;
+    model: string;
+    classifyModel: string;
+    /** One line: which model answers, and why. */
+    explanation: string;
+    /** An override or preferred model had to give way (and why). */
+    notice?: string;
+    problem?: string;
+    action?: string;
+    /** Which live task cannot run, and on which provider — so a surface names
+     *  the provider that is actually missing its key (a keyless classify
+     *  override is not "OpenAI has no key" when OpenAI answers fine). */
+    blocked?: { task: 'answer' | 'classify'; provider: CloudProviderId; override: boolean }[];
+  };
+  /** Where each kind of request goes, as routed now — for the start flow's
+   *  disclosure of what is sent to whom. `answer`: the answer and its
+   *  context; `classify`: question detection and follow-up prediction;
+   *  `parsing`: the summary and memory suggestions when a session is kept. */
+  routes: { answer: CloudProviderId; classify: CloudProviderId; parsing: CloudProviderId };
+  transcription: { ready: boolean; engine: 'cloud' | 'local'; problem?: string; action?: string };
+  /** Never blocks a session: lexical mode is a stated limitation. */
+  retrieval: { ready: true; mode: 'embeddings' | 'lexical'; note?: string };
+  /** Per-feature gates for the latency-tolerant features (services/readiness.ts
+   *  featureReadiness): each says whether it can run and, if not, why. */
+  features: Record<'parsing' | 'mock' | 'sparring' | 'tailoring', { ready: boolean; problem?: string }>;
+}
+
 // ---- main -> renderer push event payloads ----
 export interface TranscriptDeltaEvent {
   text: string;
@@ -738,9 +879,27 @@ export interface AnswerDeltaEvent {
   questionId: string;
   token: string;
 }
+/** Why a question became a visible missed card instead of an answer. */
+export type MissReason = 'queue-full' | 'paused' | 'late';
+
+/** Which provider and model a request went to. No keys, no text. */
+export interface AnswerRoute {
+  provider: string;
+  model: string;
+  /** Attempts that failed before this one (bounded same-provider failover),
+   *  oldest first. Absent when the first attempt answered. */
+  failed?: { provider: string; model: string; reason: 'model' | 'network' }[];
+}
+
 export interface AnswerMetaEvent {
   questionId: string;
   riskWarning: string | null;
+  /** The route that produced this answer — captured when the request was
+   *  sent, never re-read from settings, so a later change cannot relabel it. */
+  answeredBy?: AnswerRoute | null;
+  /** Set on a missed card: it was NOT answered, and why. Cleared when it is
+   *  answered (regenerate resets the card's meta). */
+  missed?: MissReason | null;
 }
 /** Post-stream follow-up prediction for a just-answered question (v1.5). */
 export interface AnswerFollowupEvent {
@@ -758,6 +917,8 @@ export interface ContextSentEvent {
   /** Memories that grounded this answer (cited as [M1]… — separate from
    *  documents). Present only when memory recall returned something. */
   memories?: RetrievedMemory[];
+  /** Where this context was sent (the attempt's captured route). */
+  sentTo?: { provider: string; model: string };
 }
 
 // --- Generic contribution events (EVENTS.contribution*) ---------------------
@@ -780,12 +941,18 @@ export interface ContributionDeltaEvent {
  *  carried, so cards render identically; only the fields present are patched. */
 export interface ContributionPatchEvent {
   contributionId: string;
+  /** A revised question (a split or corrected question re-answered on the
+   *  same card) — the card's title follows it. */
+  title?: string;
   /** The legacy answerMeta payload — ambient cards ride kind-specific
    *  annotations (e.g. a memory card's memoryId/why) on it as extra fields,
    *  with riskWarning null. */
   meta?: AnswerMetaEvent & Record<string, unknown>;
   context?: ContextSentEvent;
   followup?: string;
+  /** The latency take now streaming on this card — the Cue Card returns it
+   *  with its paint report (M7.2b). Not card content. */
+  latencyTake?: number;
 }
 /** The contribution's stream finished (completed OR aborted — mirrors answerDone). */
 export interface ContributionDoneEvent {

@@ -3,7 +3,11 @@ import { test, expect } from './fixtures';
 // Exercises the REAL main process + SQLite through the typed window.api facade —
 // no brittle UI selectors. This is where the FK-cascade path lives (the one unit
 // tests structurally can't cover, since better-sqlite3 won't load under vitest).
-// No OpenAI key required: jobs.save just skips parsing when no key is present.
+//
+// OFFLINE (the default tier's guard): no key of any kind, so jobs.save never
+// tries to parse the JD — and each DB test also proves it never even TRIED the
+// network, so it can never depend on a provider succeeding. Live parsing is the
+// live tier's job (live-openai.spec.ts).
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const newProfile = {
@@ -17,7 +21,7 @@ const newProfile = {
 };
 
 test.describe('data integrity (window.api → real DB)', () => {
-  test('deleting an interview cleans up without a FOREIGN KEY error', async ({ dashboard }) => {
+  test('deleting an interview cleans up without a FOREIGN KEY error', async ({ dashboard, guardLog }) => {
     const result = await dashboard.evaluate(async (profileInput) => {
       const api = (window as any).api;
       const profile = await api.profiles.create(profileInput);
@@ -39,9 +43,10 @@ test.describe('data integrity (window.api → real DB)', () => {
     }, newProfile);
 
     expect(result.remainingIds).not.toContain(result.jobId);
+    expect(guardLog().filter((e) => e.kind === 'net')).toEqual([]); // no provider was even tried
   });
 
-  test('deleting a profile cascades to its interviews', async ({ dashboard }) => {
+  test('deleting a profile cascades to its interviews', async ({ dashboard, guardLog }) => {
     const remaining = await dashboard.evaluate(async (profileInput) => {
       const api = (window as any).api;
       const profile = await api.profiles.create({ ...profileInput, name: 'E2E Cascade' });
@@ -59,25 +64,36 @@ test.describe('data integrity (window.api → real DB)', () => {
     }, newProfile);
 
     expect(remaining).toBe(0);
+    expect(guardLog().filter((e) => e.kind === 'net')).toEqual([]);
   });
 
   test('model preset + per-task override round-trip through settings', async ({ dashboard }) => {
+    // Model ids are policy data (the account's own model list decides), so this
+    // checks the round-trip — not a hard-coded id that a policy update retires.
     const out = await dashboard.evaluate(async () => {
       const api = (window as any).api;
       await api.settings.set({ modelPreset: 'best', models: {} });
-      const a = await api.settings.get();
-      await api.settings.set({ models: { answer: 'gpt-4o' } });
-      const b = await api.settings.get();
-      // reset
+      const best = await api.settings.get();
+      await api.settings.set({ modelPreset: 'low_cost', models: {} });
+      const fast = await api.settings.get();
+      await api.settings.set({ models: { answer: 'override-model' } });
+      const overridden = await api.settings.get();
       await api.settings.set({ modelPreset: 'balanced', models: {} });
-      return {
-        preset: a.modelPreset,
-        bestAnswerDefault: a.modelDefaults.answer, // preset table flows into modelDefaults
-        override: b.models.answer,
-      };
+      const reset = await api.settings.get();
+      return { best, fast, overridden, reset };
     });
-    expect(out.preset).toBe('best');
-    expect(out.bestAnswerDefault).toBe('gpt-4.1'); // Best uses the full model on the live path
-    expect(out.override).toBe('gpt-4o');
+    expect(out.best.modelPreset).toBe('best');
+    expect(out.fast.modelPreset).toBe('low_cost');
+    // The preset's table flows into the effective defaults, task by task.
+    for (const t of ['answer', 'classify', 'parsing']) {
+      expect(typeof out.best.modelDefaults[t]).toBe('string');
+      expect(out.best.modelDefaults[t].length).toBeGreaterThan(0);
+    }
+    expect(out.fast.modelDefaults).not.toEqual(out.best.modelDefaults);
+    // A per-task override is kept apart from the defaults, and cleared on reset.
+    expect(out.overridden.models.answer).toBe('override-model');
+    expect(out.overridden.modelDefaults.answer).toBe(out.fast.modelDefaults.answer);
+    expect(out.reset.modelPreset).toBe('balanced');
+    expect(out.reset.models.answer ?? null).toBeNull();
   });
 });

@@ -34,9 +34,21 @@ export const profilesRepo = {
       .map(toProfile);
   },
 
-  get(id: string): Profile | null {
+  /** An interview can use a different target for each saved job Space. The
+   * effective copy changes only that request's heading, never the profile row. */
+  get(id: string, context?: { interviewPackId: string | null }): Profile | null {
     const r = db().select().from(schema.profiles).where(eq(schema.profiles.id, id)).get();
-    return r ? toProfile(r) : null;
+    if (!r) return null;
+    const profile = toProfile(r);
+    if (context?.interviewPackId) {
+      const pack = db().select({
+        kind: schema.contextPacks.kind, profileId: schema.contextPacks.profileId,
+        title: schema.contextPacks.title, company: schema.contextPacks.company,
+      }).from(schema.contextPacks).where(eq(schema.contextPacks.id, context.interviewPackId)).get();
+      if (pack?.kind === 'job' && pack.profileId === id)
+        return { ...profile, targetRole: pack.title, targetCompany: pack.company };
+    }
+    return profile;
   },
 
   create(input: ProfileInput): Profile {

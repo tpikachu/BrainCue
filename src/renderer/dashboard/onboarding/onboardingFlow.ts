@@ -4,8 +4,8 @@
  *
  * Three questions in order, then a summary: who this is for (a profile — the
  * one thing nothing works without), how BrainCue hears the room (cloud or an
- * on-device model), and which AI it thinks with (the OpenAI key, optional
- * extras). Only the name is required; the other two can be answered "Later"
+ * on-device model), and which AI it thinks with (any one provider's key).
+ * Only the name is required; the other two can be answered "Later"
  * and the Home checklist keeps asking until they are.
  *
  * The guided tour used to auto-start on first launch at the same moment the
@@ -60,7 +60,11 @@ export interface OnboardingInputs {
   profilesLoaded: boolean;
   profileCount: number;
   /** null until settings have loaded. */
-  settings: { onboardingDone: boolean; sttReady: boolean; apiKeyPresent: boolean } | null;
+  settings: { onboardingDone: boolean } | null;
+  /** Main's readiness — can an interview's AI and transcription both run?
+   *  (services/readiness.ts: any provider with a key; on-device transcription
+   *  needs none.) null until it has been read. */
+  ready: boolean | null;
 }
 
 export type OnboardingEntry =
@@ -81,7 +85,7 @@ export type OnboardingEntry =
  *    app with nobody in it must ask again whatever the flag says.
  *  - Profiles exist and onboarding was finished or skipped → nothing.
  *  - Profiles exist, onboarding never ran (an upgrade): if transcription and
- *    the OpenAI key are both ready, mark it done without a word; otherwise
+ *    an AI provider are both ready, mark it done without a word; otherwise
  *    open at the transcription step — they have a name, they do not have the
  *    two new questions.
  */
@@ -89,7 +93,8 @@ export function onboardingEntry(i: OnboardingInputs): OnboardingEntry {
   if (!i.profilesLoaded || !i.settings) return { kind: 'wait' };
   if (i.profileCount === 0) return { kind: 'open', step: 'name' };
   if (i.settings.onboardingDone) return { kind: 'none' };
-  if (i.settings.sttReady && i.settings.apiKeyPresent) return { kind: 'mark-done' };
+  if (i.ready === null) return { kind: 'wait' };
+  if (i.ready) return { kind: 'mark-done' };
   return { kind: 'open', step: 'transcription' };
 }
 

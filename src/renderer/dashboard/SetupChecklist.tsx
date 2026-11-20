@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useOnboardingStore } from '../store/useOnboardingStore';
+import { useReadiness } from '../store/useReadiness';
 import { Card } from '../components/ui';
 import { useSttModels } from './pages/settings/LocalModelList';
 import { StatusDot } from './onboarding/Onboarding';
@@ -8,29 +9,26 @@ import { setupComplete, setupRows } from './setupChecklistState';
 
 /**
  * Home's "Finish setup" card — the reminder behind every "Later" in the
- * onboarding flow. Shown while a live session could not start (no way to
- * hear, or no OpenAI key); gone the moment both are ready. Each row says what
+ * onboarding flow. Shown while main's readiness says an interview could not
+ * run (no way to hear, or no AI provider with a key); gone the moment both
+ * are ready — whichever provider and engine that is. Hidden while readiness
+ * is still being read, so it never flashes on a configured install. Each row says what
  * is configured and links to the Settings section that fixes it; "Resume
  * setup" reopens the flow at Transcription, the first optional step.
  */
 export function SetupChecklist() {
   const settings = useSettingsStore((s) => s.settings);
-  if (!settings || setupComplete(settings)) return null;
+  const readiness = useReadiness();
+  if (!settings || !readiness || setupComplete(readiness)) return null;
   return <SetupChecklistCard />;
 }
 
 function SetupChecklistCard() {
   const settings = useSettingsStore((s) => s.settings)!;
   const openAt = useOnboardingStore((s) => s.openAt);
+  const readiness = useReadiness();
   const models = useSttModels();
-  const rows = setupRows({
-    stt: settings.stt,
-    sttReady: settings.sttReady,
-    apiKeyPresent: settings.apiKeyPresent,
-    providerKeys: settings.providerKeys,
-    models: models.statuses,
-    live: models.live,
-  });
+  const rows = setupRows({ stt: settings.stt, readiness, models: models.statuses, live: models.live });
 
   return (
     <Card className="mb-4 border-amber-500/20 bg-amber-500/5" data-tour="setup-checklist">

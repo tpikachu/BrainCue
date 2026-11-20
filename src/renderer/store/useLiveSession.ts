@@ -2,10 +2,26 @@ import { create } from 'zustand';
 import { api } from '../lib/api';
 import { floatTo16BitPCM, rms } from '../lib/pcm';
 import { resolveCapture, type Attempt } from '../lib/captureStreams';
-import type { AudioSource, Presence, Session } from '@shared/types';
+import type { AudioSource, Presence, RollbackResult, Session } from '@shared/types';
 import type { SavePrompt } from '@shared/ipc';
+import { rollbackMessage } from '../lib/rollbackCopy';
 
 export type { AudioSource };
+
+/** What a start/resume actually achieved. It succeeds only once the session
+ *  exists AND its audio pipeline is attached; anything less is a failure the
+ *  caller must show (the start modal stays open), never a normal return that
+ *  looks like success. `stage` says where it failed. */
+export type StartResult =
+  | { ok: true; sessionId: string }
+  | {
+      ok: false;
+      stage: 'capture' | 'start' | 'audio';
+      error: string;
+      /** `audio` stage only: the rollback could not be confirmed — the session
+       *  may still be live in main and stays in the store, so Stop retries it. */
+      cleanup?: 'failed';
+    };
 
 export interface Line {
   id: number;
@@ -63,13 +79,13 @@ interface LiveSessionState {
     companionPresence?: string;
     /** Hard session budget in cents — companion cost governance. */
     budgetCents?: number | null;
-  }) => Promise<void>;
+  }) => Promise<StartResult>;
   resumeExisting: (a: {
     sessionId: string;
     listensTo?: 'system' | 'mic';
     micDeviceId?: string | null;
     prior: Line[];
-  }) => Promise<void>;
+  }) => Promise<StartResult>;
   stop: () => Promise<void>;
   togglePause: () => void;
   ask: (question: string) => Promise<void>;
@@ -87,6 +103,12 @@ interface Pump {
 let ctx: AudioContext | null = null;
 let pumps: Pump[] = [];
 let lineId = 0;
+/** A failed start whose rollback could not be confirmed. The session stays
+ *  in the store (visibly live), and Stop retries the SAME rollback — stop,
+ *  then delete when it was new — instead of a plain stop. Main holds the same
+ *  rollback (engine.rollback), so the Cue Card's Stop follows it too; this is
+ *  the dashboard's view of it, settled by main's broadcast. */
+let pendingRollback: { sessionId: string; discard: boolean } | null = null;
 /** Latest RMS per stream — `speaking` follows whichever is louder. */
 const levels: Record<AudioSource, number> = { system: 0, mic: 0 };
 const SPEAKING_RMS = 0.012;
@@ -181,7 +203,28 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
       ].slice(-MAX_TRANSCRIPT),
     }));
   });
-  api.events.onSavePrompt((p) => set({ pendingSave: p }));
+  // A failed start is never offered for saving — main does not prompt for a
+  // rollback it holds. Should a prompt still arrive for a session this store
+  // is rolling back (main never received the rollback, and something else
+  // stopped it), it is not shown: the same rollback is completed instead.
+  api.events.onSavePrompt((p) => {
+    const sp = p as SavePrompt;
+    if (pendingRollback?.sessionId === sp.sessionId) {
+      const discard = pendingRollback.discard;
+      void api.session
+        .rollback(sp.sessionId, discard)
+        .then((r) => settleRollback(r))
+        .catch(() => {});
+      return;
+    }
+    set({ pendingSave: sp });
+  });
+  // Whichever window pressed Stop on a failed start (the dashboard, or the
+  // Cue Card via stopActive), main settles the SAME rollback and says so here.
+  api.events.onSessionRollback?.((r) => {
+    if (pendingRollback?.sessionId !== r.sessionId) return;
+    settleRollback(r);
+  });
   // Surface backend session failures (transcription socket dropped, OpenAI auth,
   // etc.) — otherwise the UI shows a happy "listening" state forever.
   api.events.onSessionError((p) =>
@@ -208,35 +251,152 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
   async function attachCapture(
     sessionId: string,
     capture: ReturnType<typeof resolveCapture<MediaStream>>,
+    wantsSystem: boolean,
   ): Promise<void> {
-    try {
-      const primary = capture.streams[capture.order[0]] ?? null;
-      set({ stream: primary, micError: capture.notice });
-      levels.system = 0;
-      levels.mic = 0;
+    // THROWS on failure — begin() then releases the streams and stops the
+    // session. (It used to swallow the error into a notice, leaving a session
+    // marked live with no audio pipeline.) Capture status is reported only
+    // once the pipeline is attached: a status sent before that claimed audio
+    // that never flowed.
+    const primary = capture.streams[capture.order[0]] ?? null;
+    set({ stream: primary, micError: capture.notice });
+    levels.system = 0;
+    levels.mic = 0;
 
-      ctx = new AudioContext({ sampleRate: 24000 });
-      await ctx.resume();
-      const mute = ctx.createGain();
-      mute.gain.value = 0;
-      mute.connect(ctx.destination);
-      for (const source of capture.order) {
-        const stream = capture.streams[source]!;
-        const src = ctx.createMediaStreamSource(stream);
-        const node = ctx.createScriptProcessor(4096, 1, 1);
-        node.onaudioprocess = (e) => {
-          const input = e.inputBuffer.getChannelData(0);
-          levels[source] = rms(input);
-          set({ speaking: Math.max(levels.system, levels.mic) > SPEAKING_RMS });
-          api.session.sendRealtimeAudio(sessionId, floatTo16BitPCM(input).buffer as ArrayBuffer, source);
-        };
-        src.connect(node);
-        node.connect(mute);
-        pumps.push({ source, stream, node });
-      }
-    } catch (e) {
-      set({ micError: (e as Error).message });
+    ctx = new AudioContext({ sampleRate: 24000 });
+    await ctx.resume();
+    const mute = ctx.createGain();
+    mute.gain.value = 0;
+    mute.connect(ctx.destination);
+    for (const source of capture.order) {
+      const stream = capture.streams[source]!;
+      const src = ctx.createMediaStreamSource(stream);
+      const node = ctx.createScriptProcessor(4096, 1, 1);
+      node.onaudioprocess = (e) => {
+        const input = e.inputBuffer.getChannelData(0);
+        levels[source] = rms(input);
+        set({ speaking: Math.max(levels.system, levels.mic) > SPEAKING_RMS });
+        api.session.sendRealtimeAudio(sessionId, floatTo16BitPCM(input).buffer as ArrayBuffer, source);
+      };
+      src.connect(node);
+      node.connect(mute);
+      pumps.push({ source, stream, node });
     }
+
+    // Tell the Cue Card what is ACTUALLY flowing — and again if a track ends
+    // mid-session (screen share stopped, mic unplugged). A track that already
+    // ended during setup is not flowing.
+    const flowing = (source: AudioSource) =>
+      !!capture.streams[source]?.getAudioTracks().some((t) => t.readyState !== 'ended');
+    const live = { system: flowing('system'), mic: flowing('mic') };
+    if (!live.system && !live.mic) throw new Error('the audio stopped before the session could start');
+    const report = () => void api.session.reportCapture({ ...live, wantsSystem }).catch(() => {});
+    report();
+    for (const source of capture.order) {
+      for (const track of capture.streams[source]!.getAudioTracks()) {
+        track.addEventListener('ended', () => {
+          if (!pumps.length) return; // stopped on purpose
+          live[source] = false;
+          set({
+            micError:
+              source === 'system'
+                ? 'The call audio stopped (screen share ended?) — questions can no longer be heard. Stop and start again to recapture.'
+                : 'Your microphone stopped — your own answers are no longer transcribed.',
+          });
+          report();
+        });
+      }
+    }
+  }
+
+  /** Release every acquired stream — also ones no pump was created for. */
+  function releaseStreams(capture: ReturnType<typeof resolveCapture<MediaStream>>): void {
+    for (const s of Object.values(capture.streams)) s?.getTracks().forEach((t) => t.stop());
+  }
+
+  /**
+   * Open the session, then attach its audio — and undo BOTH on failure, so a
+   * start never leaves a session marked live with nothing flowing, nor the
+   * screen share / microphone held open. A brand-new session that never
+   * heard anything is deleted (`discardOnFailure`); a resumed one keeps its
+   * earlier content.
+   */
+  async function begin(
+    capture: ReturnType<typeof resolveCapture<MediaStream>>,
+    open: () => Promise<Session>,
+    prior: Line[],
+    wantsSystem: boolean,
+    discardOnFailure: boolean,
+  ): Promise<StartResult> {
+    let s: Session;
+    try {
+      s = await open();
+    } catch (e) {
+      releaseStreams(capture);
+      const error = (e as Error).message || String(e);
+      // The pages that start sessions inline (Interview, Tailor) show this.
+      set({ micError: null, sessionError: error });
+      return { ok: false, stage: 'start', error };
+    }
+    lineId = prior.length;
+    set({ session: s, transcript: prior, interim: '', interims: {}, paused: false, micError: null, sessionError: null });
+    try {
+      await attachCapture(s.id, capture, wantsSystem);
+      if (pendingRollback?.sessionId === s.id) pendingRollback = null;
+      return { ok: true, sessionId: s.id };
+    } catch (e) {
+      stopCapture();
+      releaseStreams(capture);
+      const reason = `Audio capture couldn't start (${(e as Error).message || String(e)}).`;
+      const r = await rollback(s.id, discardOnFailure);
+      const error = `${reason} ${r.message}`;
+      if (!r.stopped) {
+        // NOT confirmed: say so, keep the session in the store (it may still
+        // be live in main), and let Stop retry this same rollback.
+        set({ micError: error });
+        return { ok: false, stage: 'audio', error, cleanup: 'failed' };
+      }
+      set({ session: null, transcript: [], micError: error });
+      return { ok: false, stage: 'audio', error, ...(r.removed === false ? { cleanup: 'failed' as const } : {}) };
+    }
+  }
+
+  /** Apply a settled rollback (this store's own call, or main's broadcast
+   *  after the Cue Card's Stop): once stopped is confirmed nothing is pending,
+   *  the live state clears, and the notice says exactly what was confirmed. */
+  function settleRollback(r: RollbackResult): { stopped: boolean; removed?: boolean; message: string } {
+    const message = rollbackMessage(r);
+    if (r.stopped) {
+      if (pendingRollback?.sessionId === r.sessionId) pendingRollback = null;
+      if (get().session?.id === r.sessionId) {
+        stopCapture();
+        set({ session: null, transcript: [], interim: '', interims: {} });
+      }
+      set({ micError: message });
+    }
+    return { stopped: r.stopped, removed: r.removed, message };
+  }
+
+  /**
+   * Undo a session created by a start whose audio never attached: stop it,
+   * then (a new one) delete it — in main (engine.rollback), which holds the
+   * rollback until it is confirmed, so the Cue Card's Stop follows the same
+   * policy. Claims only what was CONFIRMED: a failed stop or delete is
+   * reported, and the rollback stays pending so Stop can retry it.
+   */
+  async function rollback(
+    sessionId: string,
+    discard: boolean,
+  ): Promise<{ stopped: boolean; removed?: boolean; message: string }> {
+    pendingRollback = { sessionId, discard };
+    let r: RollbackResult;
+    try {
+      r = await api.session.rollback(sessionId, discard);
+    } catch (e) {
+      r = { sessionId, stopped: false, error: (e as Error).message || String(e) };
+    }
+    if (!r.stopped) return { stopped: false, message: rollbackMessage(r) };
+    return settleRollback(r);
   }
 
   function stopCapture(): void {
@@ -284,22 +444,27 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
       try {
         capture = await acquire(listensTo, micDeviceId);
       } catch (e) {
-        set({ micError: (e as Error).message, sessionError: null });
-        return;
+        const error = (e as Error).message || String(e);
+        set({ micError: error, sessionError: null });
+        return { ok: false, stage: 'capture', error };
       }
-      const s = (await api.session.start(
-        profileId,
-        interviewType,
-        jobId,
-        answerFormat,
-        activity,
-        presence as Presence | undefined,
-        budgetCents,
-        companionPresence,
-      )) as Session;
-      lineId = 0;
-      set({ session: s, transcript: [], interim: '', interims: {}, paused: false, micError: null, sessionError: null });
-      await attachCapture(s.id, capture);
+      return begin(
+        capture,
+        async () =>
+          (await api.session.start(
+            profileId,
+            interviewType,
+            jobId,
+            answerFormat,
+            activity,
+            presence as Presence | undefined,
+            budgetCents,
+            companionPresence,
+          )) as Session,
+        [],
+        listensTo === 'system',
+        true,
+      );
     },
 
     resumeExisting: async ({ sessionId, listensTo = 'system', micDeviceId, prior }) => {
@@ -307,19 +472,29 @@ export const useLiveSession = create<LiveSessionState>((set, get) => {
       try {
         capture = await acquire(listensTo, micDeviceId);
       } catch (e) {
-        set({ micError: (e as Error).message, sessionError: null });
-        return;
+        const error = (e as Error).message || String(e);
+        set({ micError: error, sessionError: null });
+        return { ok: false, stage: 'capture', error };
       }
-      const s = (await api.session.resume(sessionId)) as Session;
-      lineId = prior.length;
-      set({ session: s, transcript: prior, interim: '', interims: {}, paused: false, micError: null, sessionError: null });
-      await attachCapture(s.id, capture);
+      return begin(capture, async () => (await api.session.resume(sessionId)) as Session, prior, listensTo === 'system', false);
     },
 
     stop: async () => {
       const s = get().session;
       if (!s) return;
       stopCapture();
+      // A failed start whose rollback was not confirmed: Stop retries THAT
+      // rollback (no save prompt for the failed attempt; a new session is
+      // also removed), and says what it confirmed.
+      if (pendingRollback?.sessionId === s.id) {
+        const r = await rollback(s.id, pendingRollback.discard);
+        if (!r.stopped) {
+          set({ micError: r.message });
+          throw new Error(r.message);
+        }
+        set({ session: null, transcript: [], interim: '', interims: {}, micError: r.removed === false ? r.message : null });
+        return;
+      }
       await api.session.stop(s.id);
       set({ session: null, interim: '', interims: {} });
     },

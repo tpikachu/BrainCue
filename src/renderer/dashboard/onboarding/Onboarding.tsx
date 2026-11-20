@@ -5,6 +5,7 @@ import { useSettingsStore } from '../../store/useSettingsStore';
 import { useProfileStore } from '../../store/useProfileStore';
 import { useOnboardingStore } from '../../store/useOnboardingStore';
 import { useTourStore } from '../../store/useTourStore';
+import { useReadiness } from '../../store/useReadiness';
 import type { CloudProviderId } from '@shared/providers';
 import type { SttEngine } from '@shared/stt';
 import { Badge, Button, Card } from '../../components/ui';
@@ -199,8 +200,8 @@ function NameStep({ profileCount, onCreated }: { profileCount: number; onCreated
   return (
     <>
       <StepHeading title="Welcome to BrainCue">
-        An AI that sits in on the conversation you are actually in — and contributes through a Cue Card
-        nobody else can see. Three short questions and it is ready.
+        It hears the interviewer and shows answers from your résumé in a Cue Card only you can see.
+        Three short questions and it is ready.
       </StepHeading>
       <Card>
         <NewProfileForm firstRun onCreated={onCreated} />
@@ -225,9 +226,8 @@ function TranscriptionStep({ models }: { models: ReturnType<typeof useSttModels>
 
   return (
     <>
-      <StepHeading title="How should BrainCue hear the room?">
-        Live transcription is what everything else reacts to. Both engines can be changed at any time
-        under Settings → Speech-to-Text.
+      <StepHeading title="How should BrainCue hear the call?">
+        Live transcription is what everything else reacts to. You can change it later in Settings.
       </StepHeading>
       <div className="mb-4 grid gap-3 sm:grid-cols-2">
         <EngineRow
@@ -290,11 +290,8 @@ function AiStep() {
   return (
     <>
       <StepHeading title="Which AI should it think with?">
-        BrainCue has no account of its own — every call is billed to your key. The{' '}
-        <span className="text-neutral-200">OpenAI key is required</span>: retrieval (embeddings) and the
-        default models run there. Anthropic, Google Gemini, Groq and OpenRouter are optional extras you can
-        pick per task later, in Settings → Language Models. Keys are encrypted by your OS and never leave
-        the background process.
+        Add a key for any one provider — it detects the questions and writes the answers, billed to your
+        key. Keys are encrypted by your OS and stay in the background process.
       </StepHeading>
       <Card className="mb-4">
         <ProviderTiles settings={settings} selected={provider} onSelect={setProvider} />
@@ -302,29 +299,23 @@ function AiStep() {
           <ProviderKeyBlock key={provider} provider={provider} settings={settings} onSaved={load} />
         </div>
       </Card>
-      <Card>
-        <h3 className="mb-1 font-medium">Cost / quality preset</h3>
-        <p className="mb-3 text-sm text-neutral-400">
-          Sets which model each task uses. Balanced is right for most people; any single task can be
-          overridden later.
-        </p>
-        <PresetPicker value={settings.modelPreset ?? 'balanced'} onSelect={(p) => void selectPreset(p)} />
-      </Card>
+      {/* Optional: Balanced is right for most people. (What each provider's
+          key covers is said on its own key block above.) */}
+      <details className="rounded-xl border border-white/5 bg-neutral-900/40 px-4 py-3">
+        <summary className="cursor-pointer select-none text-sm text-neutral-300">Cost and quality (optional)</summary>
+        <div className="mt-3">
+          <PresetPicker value={settings.modelPreset ?? 'balanced'} onSelect={(p) => void selectPreset(p)} />
+        </div>
+      </details>
     </>
   );
 }
 
 function DoneStep({ models }: { models: ReturnType<typeof useSttModels> }) {
   const settings = useSettingsStore((s) => s.settings);
+  const readiness = useReadiness();
   if (!settings) return null;
-  const rows = setupRows({
-    stt: settings.stt,
-    sttReady: settings.sttReady,
-    apiKeyPresent: settings.apiKeyPresent,
-    providerKeys: settings.providerKeys,
-    models: models.statuses,
-    live: models.live,
-  });
+  const rows = setupRows({ stt: settings.stt, readiness, models: models.statuses, live: models.live });
   const allReady = rows.every((r) => r.status === 'ready');
   return (
     <>

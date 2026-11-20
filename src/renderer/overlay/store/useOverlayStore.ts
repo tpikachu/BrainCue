@@ -60,6 +60,7 @@ export const useOverlayStore = create<OverlayCardsState>((set) => ({
   patch: (ev) =>
     set((s) => ({
       cards: patchById(s.cards, ev.contributionId, {
+        ...(ev.title !== undefined ? { title: ev.title } : {}),
         ...(ev.meta !== undefined ? { meta: ev.meta } : {}),
         ...(ev.context !== undefined ? { context: ev.context } : {}),
         ...(ev.followup !== undefined ? { followup: ev.followup } : {}),

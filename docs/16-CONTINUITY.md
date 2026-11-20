@@ -3,6 +3,13 @@
 > Status: design of record, 2026-07-28. Vision: [00-VISION.md](./00-VISION.md) ·
 > Memory: [14-MEMORY.md](./14-MEMORY.md) · Delegate: [15-DELEGATE.md](./15-DELEGATE.md).
 
+> **Within one session** (2026-11-17): the 10-item history buffer that carried
+> question N-1 into question N is replaced by a bounded conversation context —
+> recent turns verbatim, a traceable record of earlier exchanges, recalled older
+> turns, and BrainCue's suggestions kept apart from what was said; resumed
+> sessions restore it. See [23-INTERVIEW-COPILOT.md](./23-INTERVIEW-COPILOT.md)
+> §3. This document is about continuity ACROSS sessions.
+
 ## 1. The gap this closes
 
 BrainCue could hold a conversation. It could not hold *a relationship*.
@@ -233,7 +240,32 @@ Two consequences:
 - **`session:remember` files the session first.** Passing `packId` moves the
   row before archiving or extracting, because doing it afterwards would leave
   both attached to the old Space. `null` files it out of every Space; omitting
-  it leaves the session where it ran.
+  it leaves the session where it ran. The destination is validated in main
+  first (it must exist and be this profile's) — a Space deleted after it was
+  chosen is refused, never filed into.
+- **Keep says what it did (M6).** Each half returns a typed outcome
+  (`services/session/remember.ts`): saved, nothing new, switched off, the
+  Space opted out, no Space, a rehearsal, too short, withheld as sensitive, or
+  failed with its reason. The prompt reports each as itself — a zero count
+  never stands in for a reason — keeps the transcript whatever happened, and
+  offers Retry on a failure. A Retry re-runs only the half that failed, at
+  the same destination (`only`); the other half's confirmed outcome stands
+  and its transcript is not sent again. Before Keep it says where the transcript goes: it stays on
+  this machine; the summary and suggestions are made by sending it to the
+  parsing provider (named), or nothing is sent (no Space, opted out, both
+  off). It no longer says "everything stays on this machine". Discard asks
+  first; Decide later keeps the transcript and sends nothing.
+- **An unknown destination is not "no Space" (M6 review).** The prompt reads
+  the Space the session ran in by id. If that read FAILS, the destination is
+  unknown — the Space may still exist — so Keep waits: the prompt says the
+  read failed, offers Try again, and accepts an explicit choice (a Space, or
+  No Space). Only a confirmed absence falls back to No Space, and says so. A
+  Space confirmed gone at Keep or at Retry (re-read in the renderer, or
+  refused by main) makes the user choose again before anything runs; on the
+  result view the picker appears there, with the error, and a Retry to a new
+  destination runs both halves there. What a result says it saved, and where,
+  is fixed when that result is confirmed: picking a destination for the next
+  Retry never relabels it — only a new result names the new Space.
 
 Saved memory is grouped by Space in the Memory section for the same reason. A
 flat list said nothing about scope, and reading them interleaved you cannot

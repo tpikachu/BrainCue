@@ -5,7 +5,7 @@ import { storiesRepo } from '../db/repositories/stories.repo';
 import { profilesRepo } from '../db/repositories/profiles.repo';
 import { generateStories } from '../services/openai/stories';
 import { indexStories, replaceStories } from '../services/rag/indexProfile';
-import { apiKeyStore } from '../services/security/apiKey';
+import { chatTaskProblem, chatTaskReady } from '../services/readiness';
 
 const zProfileId = z.object({ profileId: z.string().min(1) });
 
@@ -26,8 +26,8 @@ export function registerStoriesIpc(): void {
   handle(IPC.stories.generate, zProfileId, async ({ profileId }) => {
     const profile = profilesRepo.get(profileId);
     if (!profile) throw new Error('Profile not found.');
-    if (!apiKeyStore.isPresent())
-      throw new Error('Add your OpenAI API key in Settings to generate stories.');
+    // Runs on the parsing task's provider (any chat key), not only OpenAI.
+    if (!chatTaskReady('parsing')) throw new Error(chatTaskProblem('parsing', 'generate stories'));
     if (!profile.parsedResume)
       throw new Error('This profile needs a parsed résumé first — add & parse one on the profile.');
 

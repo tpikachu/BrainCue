@@ -76,6 +76,9 @@ export const contextPacks = sqliteTable(
     companyUrl: text('company_url'), // optional company website to research
     companyResearch: text('company_research'), // raw text scraped from the site
     parsedCompany: text('parsed_company'), // json — structured interview-relevant research
+    // The résumé supplied for this role. Null inherits the profile default;
+    // it never changes the résumé of the profile or another Space.
+    resumeText: text('resume_text'),
     // The profile's résumé rewritten against THIS Space's job description.
     // A Space-level document like the JD beside it: it belongs to the role you
     // are interviewing for, is indexed pack-scoped, and substitutes for the
@@ -235,6 +238,10 @@ export const transcriptChunks = sqliteTable(
     tStart: integer('t_start'),
     tEnd: integer('t_end'),
     createdAt: integer('created_at').notNull().default(now),
+    /** The engine's capture order within the session (M4): breaks ties in
+     *  spoken time, so a turn held by the echo guard keeps its place. Null on
+     *  rows written before it (and by writers without one): insertion order. */
+    captureSeq: integer('capture_seq'),
   },
   (t) => ({ bySession: index('transcript_session_idx').on(t.sessionId) }),
 );

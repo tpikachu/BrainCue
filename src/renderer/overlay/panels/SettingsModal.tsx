@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
+import { createSettingsFeed } from '../../lib/settingsFeed';
 import { api } from '../../lib/api';
 import type { AppSettings, VoicePrefs } from '@shared/types';
 import { Dropdown, Modal, Switch } from '../../components/ui';
 import { noDrag } from '../lib/style';
+import { addKeyProvider, currentModel, modelLabel, overrideFor, taskPickerRows } from '../../lib/modelChoice';
 
 /** Cue Card settings: audio device, voice output, coding-solver
  *  model/effort/language, and appearance. Owns its own persisted state —
- *  loaded fresh each time it opens, so overrides changed meanwhile from the
- *  dashboard Settings page are never silently reverted. Appearance
+ *  read fresh each time it opens and kept current by main's push, so changes
+ *  made meanwhile elsewhere are shown and never silently reverted. Appearance
  *  (opacity/text size) is window-level state and comes in via props; voice
  *  prefs live with the Overlay's voice runtime (the player must react to an
  *  output-device change immediately) and come in via props too. */
@@ -24,30 +26,39 @@ export function SettingsModal(props: {
 }) {
   const [micDeviceId, setMicDeviceId] = useState<string | null>(null);
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
-  // Coding-solver model + reasoning effort (persisted overrides; '' = use default).
-  // Switchable live so a hard problem can be bumped to a stronger model on the spot.
+  // Coding-solver model + reasoning effort (persisted overrides; '' =
+  // Automatic). Switchable live so a hard problem can be bumped to a stronger
+  // model on the spot. The model list is the shared per-task picker (the same
+  // rows as the dashboard and the Cue Card's chip) over these settings.
+  const [snap, setSnap] = useState<AppSettings | null>(null);
   const [codingModel, setCodingModel] = useState('');
   const [codingEffort, setCodingEffort] = useState('');
   const [codingLanguage, setCodingLanguage] = useState('javascript');
-  const [codingDefaults, setCodingDefaults] = useState({ model: 'gpt-5-mini', effort: 'low' });
   // Voice output devices + quick-ask Spaces (loaded on open, voice section only).
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
   const [spaces, setSpaces] = useState<{ id: string; label: string }[]>([]);
 
+  // Settings reach this panel from its own reads (each open), its own write
+  // replies and main's push. A reply older than what is shown — a read held
+  // past a newer push, one from before a close/reopen, or one asked for
+  // before the user's latest edit — is dropped (settingsFeed.ts): it used to
+  // put back the previous solver model, which the next save then persisted.
+  // One feed for the Cue Card's lifetime, so close/reopen is covered too.
+  const [feed] = useState(() =>
+    createSettingsFeed<AppSettings>((ss) => {
+      if (ss.audio) setMicDeviceId(ss.audio.micDeviceId);
+      setSnap(ss);
+      setCodingModel(overrideFor(ss, 'coding'));
+      setCodingEffort(ss.reasoningEfforts?.coding ?? '');
+      setCodingLanguage(ss.codingLanguage ?? 'javascript');
+    }),
+  );
+  useEffect(() => api.events.onSettingsChanged((s) => feed.push(s as AppSettings)), [feed]);
+
   useEffect(() => {
     if (!props.open) return;
     // Seed from persisted settings on every open (fresh, not a boot snapshot).
-    void api.settings.get().then((s) => {
-      const ss = s as AppSettings;
-      if (ss.audio) setMicDeviceId(ss.audio.micDeviceId);
-      setCodingModel(ss.models?.coding ?? '');
-      setCodingEffort(ss.reasoningEfforts?.coding ?? '');
-      setCodingLanguage(ss.codingLanguage ?? 'javascript');
-      setCodingDefaults({
-        model: ss.modelDefaults?.coding ?? 'gpt-5-mini',
-        effort: ss.reasoningEffortDefaults?.coding ?? 'low',
-      });
-    });
+    void feed.request(api.settings.get() as Promise<AppSettings>).catch(() => {});
     // Device labels only populate after a mic-permission grant — briefly probe
     // the mic to unlock them, then release it (main auto-allows 'media').
     void (async () => {
@@ -84,34 +95,34 @@ export function SettingsModal(props: {
     }
   }, [props.open, props.voicePrefs !== null]);
 
+  /** Persist one edited field; the reply (or main's push) brings the rest. */
+  const save = (patch: Record<string, unknown>) => {
+    feed.edited();
+    // Persistence failed — the control still shows the choice; the next push
+    // or open reconciles.
+    void feed.request(api.settings.set(patch) as Promise<AppSettings>).catch(() => {});
+  };
+
   // A session hears the call AND the microphone (there is no source to pick);
   // the one audio preference left is WHICH microphone.
   const saveAudio = (device: string | null) => {
     setMicDeviceId(device);
-    void api.settings.set({ audio: { micDeviceId: device } });
+    save({ audio: { micDeviceId: device } });
   };
 
-  // Persist the coding-solver model/effort. Read-modify-write against FRESH
-  // settings (not a snapshot): the overlay window lives for the whole app
-  // session, so merging into stale maps would silently revert overrides changed
-  // later from the dashboard Settings page. '' clears the key → default.
-  const saveCoding = async (next: { model?: string; effort?: string }) => {
-    const m = next.model !== undefined ? next.model : codingModel;
-    const e = next.effort !== undefined ? next.effort : codingEffort;
-    setCodingModel(m);
-    setCodingEffort(e);
-    try {
-      const fresh = (await api.settings.get()) as AppSettings;
-      const models = { ...(fresh.models ?? {}) };
-      if (m) models.coding = m;
-      else delete models.coding;
-      const efforts = { ...(fresh.reasoningEfforts ?? {}) };
-      if (e) efforts.coding = e;
-      else delete efforts.coding;
-      await api.settings.set({ models, reasoningEfforts: efforts });
-    } catch {
-      // Persistence failed — the pickers still show the chosen value; the next
-      // successful save (or app restart) reconciles.
+  // Persist the solver's model OR its effort — only the field edited. Main
+  // merges it into the stored map, so the other field (and every other
+  // task's override) is never written from this panel's copy: changing the
+  // effort keeps the current model, changing the model keeps the effort.
+  // '' clears it (Automatic / the default). Main's reply carries the
+  // re-resolved route for the next solve.
+  const saveCoding = (edit: { model: string } | { effort: string }) => {
+    if ('model' in edit) {
+      setCodingModel(edit.model);
+      save({ modelOverrides: { coding: edit.model || null } });
+    } else {
+      setCodingEffort(edit.effort);
+      save({ effortOverrides: { coding: edit.effort || null } });
     }
   };
 
@@ -229,7 +240,7 @@ export function SettingsModal(props: {
                 ].map((l) => ({ value: l, label: l }))}
                 onChange={(v) => {
                   setCodingLanguage(v);
-                  void api.settings.set({ codingLanguage: v });
+                  save({ codingLanguage: v });
                 }}
               />
             </div>
@@ -237,12 +248,25 @@ export function SettingsModal(props: {
               <span className="mb-1 block text-xs font-medium text-neutral-400">Model</span>
               <Dropdown
                 value={codingModel}
-                options={[
-                  { value: '', label: `Default (${codingDefaults.model})` },
-                  ...['gpt-5-mini', 'gpt-5', 'gpt-4.1', 'o4-mini'].map((m) => ({ value: m, label: m })),
-                ]}
-                onChange={(v) => void saveCoding({ model: v })}
+                ariaLabel="Coding solver model"
+                disabled={!snap}
+                options={taskPickerRows('coding', snap, {
+                  addKeyDisabled: false,
+                  addKeyTitle: 'Opens Settings → Language Models',
+                })}
+                onChange={(v) => {
+                  if (addKeyProvider(v)) {
+                    void api.window.openDashboard('/settings/models');
+                    return;
+                  }
+                  saveCoding({ model: v });
+                }}
               />
+              {snap?.modelNotices?.coding && (
+                <p className="mt-1 text-xs text-amber-300" data-model-notice="coding">
+                  ⚠ Next solve: {modelLabel(currentModel(snap, 'coding'))}. {snap.modelNotices.coding}
+                </p>
+              )}
             </div>
             <div>
               <span className="mb-1 block text-xs font-medium text-neutral-400">
@@ -251,17 +275,17 @@ export function SettingsModal(props: {
               <Dropdown
                 value={codingEffort}
                 options={[
-                  { value: '', label: `Default (${codingDefaults.effort})` },
+                  { value: '', label: `Default (${snap?.reasoningEffortDefaults?.coding ?? 'low'})` },
                   { value: 'low', label: 'Low — fastest, cheapest' },
                   { value: 'medium', label: 'Medium — balanced' },
                   { value: 'high', label: 'High — hardest problems' },
                 ]}
-                onChange={(v) => void saveCoding({ effort: v })}
+                onChange={(v) => saveCoding({ effort: v })}
               />
             </div>
             <p className="text-xs text-neutral-500">
-              Used by both “Solve from clipboard” and “Solve a region.” Bump a hard problem up
-              to a stronger model or higher effort — it applies to your next solve.
+              Used by “Solve clipboard” and “Capture”, not by interview answers (those have
+              their own model, under ⋯). Applies to your next solve.
             </p>
           </div>
 

@@ -7,6 +7,7 @@ import {
   type ModelKey,
 } from '../../services/openai/models';
 import { STRICT_JSON_INSTRUCTION, parseJsonText } from '../jsonText';
+import { LIVE_TASKS as POLICY_LIVE_TASKS } from '@shared/modelPolicy';
 import type { ChatJsonRequest, ChatProvider, ChatStreamEvent, VisionProvider } from '../types';
 import { anthropicClient } from './client';
 
@@ -67,6 +68,13 @@ export function anthropicEffort(task: ModelKey, modelId: string): Effort | null 
   return 'high';
 }
 
+/** Live tasks on a model whose thinking can be switched off (catalog
+ *  `disableThinking` — Haiku 5.5) run without it: first-token latency is
+ *  the product, and a classifier or a read-aloud cue gains little from it. */
+export function thinkingOff(task: ModelKey, modelId: string): boolean {
+  return POLICY_LIVE_TASKS.has(task) && modelOption('anthropic', modelId)?.disableThinking === true;
+}
+
 function buildParams(
   task: ModelKey,
   modelId: string,
@@ -75,14 +83,16 @@ function buildParams(
   maxOutputTokens: number | undefined,
 ): Anthropic.MessageCreateParamsNonStreaming {
   const effort = anthropicEffort(task, modelId);
+  const off = thinkingOff(task, modelId);
   return {
     model: modelId,
     max_tokens:
       (maxOutputTokens ?? DEFAULT_MAX_TOKENS) +
-      (isReasoningClaude(modelId) ? REASONING_HEADROOM : 0),
+      (isReasoningClaude(modelId) && !off ? REASONING_HEADROOM : 0),
     system,
     messages: [{ role: 'user', content }],
     ...(effort ? { output_config: { effort } } : {}),
+    ...(off ? { thinking: { type: 'disabled' as const } } : {}),
   };
 }
 
@@ -97,9 +107,10 @@ async function* run(
   content: string | Anthropic.ContentBlockParam[],
   maxOutputTokens: number | undefined,
   signal: AbortSignal | undefined,
+  pinnedModel?: string,
 ): AsyncGenerator<ChatStreamEvent> {
   const client = await anthropicClient();
-  const { model: modelId } = resolveModel(task);
+  const modelId = pinnedModel ?? resolveModel(task).model;
   const params = buildParams(task, modelId, system, content, maxOutputTokens);
   const stream = isFable(modelId)
     ? client.beta.messages.stream(withFallbacks(params), { signal })
@@ -128,12 +139,12 @@ export const anthropicChat: ChatProvider = {
     }
   },
   stream(req) {
-    return run(req.task, req.system, req.user, req.maxOutputTokens, req.signal);
+    return run(req.task, req.system, req.user, req.maxOutputTokens, req.signal, req.route?.model);
   },
 
   async json<T>(req: ChatJsonRequest): Promise<T> {
     const client = await anthropicClient();
-    const { model: modelId } = resolveModel(req.task);
+    const modelId = req.route?.model ?? resolveModel(req.task).model;
     const params = buildParams(
       req.task,
       modelId,
@@ -141,9 +152,10 @@ export const anthropicChat: ChatProvider = {
       req.user,
       req.maxOutputTokens,
     );
+    const opts = req.signal ? { signal: req.signal } : undefined;
     const res = isFable(modelId)
-      ? await client.beta.messages.create(withFallbacks(params))
-      : await client.messages.create(params);
+      ? await client.beta.messages.create(withFallbacks(params), opts)
+      : await client.messages.create(params, opts);
     if (res.stop_reason === 'refusal') throw new Error(REFUSED_MESSAGE);
     const text = res.content.find((b) => b.type === 'text');
     return parseJsonText<T>(text && 'text' in text ? text.text : '', 'Anthropic');
@@ -172,7 +184,7 @@ export const anthropicVision: VisionProvider = {
       ...input.imageDataUrls.map(imageBlockFromDataUrl),
       { type: 'text', text: intro },
     ];
-    yield* run('coding', system, content, undefined, input.signal);
+    yield* run('coding', system, content, undefined, input.signal, input.route?.model);
     yield { type: 'meta', riskWarning: null };
   },
 };
