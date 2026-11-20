@@ -704,7 +704,8 @@ export class EngineSession {
   ): Promise<{ questionId: string }> {
     const session = persist.sessionRow(this.sessionId);
     if (!session) throw new Error('Session not found');
-    const profile = profilesRepo.get(session.profileId);
+    const interview = ['interview', 'practice', 'interviewer_assist'].includes(this.mode.id);
+    const profile = profilesRepo.get(session.profileId, interview ? { interviewPackId: session.packId } : undefined);
     if (!profile) throw new Error('Profile not found');
 
     let answer = '';
@@ -737,7 +738,6 @@ export class EngineSession {
       const work = pending
         ? pending.then((gathered) => ({ gathered, early: true })).catch(async () => ({ gathered: await this.gather(profile.id, questionText, session.packId), early: false }))
         : this.gather(profile.id, questionText, session.packId).then((gathered) => ({ gathered, early: false }));
-      const interview = ['interview', 'practice', 'interviewer_assist'].includes(this.mode.id);
       const budget = questionType === 'coding' ? CODING_CONTEXT_WAIT_MS : INTERVIEW_CONTEXT_WAIT_MS;
       const ready = interview ? await withinContextBudget(work, budget, abort.signal) : await work;
       if (abort.signal.aborted) throw new Error('aborted before dispatch');
@@ -838,6 +838,11 @@ export class EngineSession {
           emitContributionDelta(questionId, ev.token);
         } else if (ev.type === 'usage') {
           tokens = { prompt: ev.prompt, completion: ev.completion };
+          mark({
+            ...(ev.requestedServiceTier ? { requestedServiceTier: ev.requestedServiceTier } : {}),
+            ...(ev.serviceTier ? { serviceTier: ev.serviceTier } : {}),
+            ...(ev.cachedPromptTokens !== undefined ? { cachedPromptTokens: ev.cachedPromptTokens } : {}),
+          });
         } else if (ev.type === 'meta') {
           meta = ev;
           emitContributionMeta(questionId, { questionId, ...ev, answeredBy: answeredBy() });

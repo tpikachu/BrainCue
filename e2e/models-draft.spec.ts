@@ -50,6 +50,29 @@ async function choose(page: Page, task: string, option: RegExp) {
   await page.getByRole('option', { name: option }).first().click();
 }
 
+test('Fast processing discloses its cost, writes only its setting, and preserves a model draft', async ({ models: page }) => {
+  await openAdvanced(page);
+  await choose(page, 'Interview answers', /Claude Haiku 5\.5/);
+  const fast = page.getByRole('checkbox', { name: 'OpenAI Fast processing for interview answers' });
+  await expect(fast).toBeChecked();
+  await expect(page.getByText('Higher token rates', { exact: false })).toContainText('2× Standard');
+  const disabled = { ...snapshot({}), openaiInterviewFast: false };
+  await reply(page, 'settings.set', disabled);
+  await reply(page, 'settings.get', disabled);
+  await fast.uncheck();
+  await expect(fast).not.toBeChecked();
+  expect(await setArgs(page)).toEqual([{ openaiInterviewFast: false }]);
+  await expect(picker(page, 'Interview answers')).toHaveText(/Claude Haiku 5\.5/);
+  await expect(page.getByText('Your current answer model does not use this option.')).toBeVisible();
+  const enabled = { ...snapshot({}), openaiInterviewFast: true };
+  await reply(page, 'settings.set', enabled);
+  await reply(page, 'settings.get', enabled);
+  await fast.check();
+  await expect(fast).toBeChecked();
+  expect(await setArgs(page)).toEqual([{ openaiInterviewFast: false }, { openaiInterviewFast: true }]);
+  await expect(picker(page, 'Interview answers')).toHaveText(/Claude Haiku 5\.5/);
+});
+
 test('an unrelated settings push before Save keeps the unsaved choice — and Save writes it', async ({ models: page }) => {
   await openAdvanced(page);
   await choose(page, 'Interview answers', /Claude Haiku 5\.5/);

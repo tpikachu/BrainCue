@@ -53,6 +53,8 @@ export interface Perf01Report {
   verdicts: Record<'general' | 'technical', { usefulP50: Verdict; usefulP95: Verdict; samples: Verdict; cold: Verdict }>;
   decision: Verdict;
   routes: Record<string, number>;
+  processing: Record<string, number>;
+  cachedPromptTokens: StageSummary;
   context: { chunks: StageSummary; memories: StageSummary; promptTokens: StageSummary; completionTokens: StageSummary; lexical: number };
   /** Every question that did not paint an answer, by id — never dropped. */
   unanswered: { id: string; category: LatencyCategory; outcome: string; reason?: string }[];
@@ -103,9 +105,12 @@ export function buildReport(
     };
   }
   const routes: Record<string, number> = {};
+  const processing: Record<string, number> = {};
   for (const r of latest) {
     const key = r.provider ? `${r.provider}/${r.model ?? '?'} · effort ${r.effort ?? '?'}` : 'no route (never dispatched)';
     routes[key] = (routes[key] ?? 0) + 1;
+    const tier = `requested ${r.requestedServiceTier ?? 'unrecorded'} → used ${r.serviceTier ?? 'unrecorded'}`;
+    processing[tier] = (processing[tier] ?? 0) + 1;
   }
   const nums = (f: (r: Row) => number | undefined) => latest.map(f).filter((v): v is number => v !== undefined);
   return {
@@ -124,6 +129,8 @@ export function buildReport(
     // without that evidence there is no decision verdict.
     decision: decisionVerdict(opts.simulated, invalid, opts.decisionsAllTurns, decisionsQuestions, judge),
     routes,
+    processing,
+    cachedPromptTokens: stat(nums((r) => r.cachedPromptTokens)),
     context: {
       chunks: stat(nums((r) => r.chunks)),
       memories: stat(nums((r) => r.memories)),
@@ -225,6 +232,8 @@ export function renderMarkdown(r: Perf01Report): string {
   }
   out.push('', `Superseded earlier takes (not samples): ${r.superseded}.`, '');
   out.push('## Routes', '', ...Object.entries(r.routes).map(([k, n]) => `- ${k}: ${n}`), '');
+  out.push('## Processing tiers', '', ...Object.entries(r.processing).map(([k, n]) => `- ${k}: ${n}`),
+    `- cached input tokens (reported n=${r.cachedPromptTokens.n}): p50 ${r.cachedPromptTokens.p50 ?? '—'} / p95 ${r.cachedPromptTokens.p95 ?? '—'}`, '');
   const c = r.context;
   out.push(
     '## Context sizes (p50 / p95)',

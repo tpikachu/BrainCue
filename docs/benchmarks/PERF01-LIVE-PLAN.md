@@ -1,6 +1,37 @@
 # PERF-01 live benchmark: run plan
 
-**Status: prepared and offline-checked, not run.** This run makes paid calls to OpenAI with synthetic data under the user's own key. It needs explicit approval of this plan before it starts. Nothing in this repository runs it automatically.
+**2026-11-19 status:** the original 72-question run was explicitly approved
+and completed. It did not satisfy the stable-release gate; see
+[the diagnostic result](PERF01-2026-11-19.md). That approval is consumed.
+Nothing in this repository starts a paid run automatically.
+
+The next proposed run, after approval, uses the same synthetic fixtures,
+models, effort, samples and hard volume caps below, plus the corrected memory
+fallback and explicit OpenAI Fast processing for normal interview answers.
+The user chose Fast as the default for normal OpenAI interview answers on
+2026-11-19, with a cost notice and opt-out. No installed app or user data has
+been changed; this is still a source candidate. That preference did not
+authorize another paid test.
+
+For this proposed run only, set `PERF01_PROCESSING=fast` for both the offline
+dry run and the subsequent approved live run. The driver records this in the
+manifest, pins the setting on isolated test data and checks it before sending
+audio. Each answered sample must record requested and actual processing tiers;
+a downgrade remains visible and is measured at its actual speed. An unknown
+tier invalidates Fast-run evidence. Ordinary requests and coding are unaffected.
+
+OpenAI's published short-context Luna Fast rates on 2026-11-19 are
+$0.20/M input and $1.00/M output (twice Standard); see
+[pricing](https://developers.openai.com/api/docs/pricing.md) and
+[Fast processing](https://developers.openai.com/api/docs/guides/fast-mode.md).
+Allocating all 673,000 reserved tokens at the higher output rate, plus
+900 seconds of STT at the published $0.006/min estimate, gives about $0.77.
+That is a conservative estimate, not a billing cap. Hard caps remain volume
+limits: **72 questions, 673,000 reserved tokens, 678 requests, 900 STT seconds**.
+No microphone or native capture is opened. Expected duration is 30–45 minutes.
+
+No second live run is authorized or started. Stable 2.3.0 remains blocked
+until corrected grounding and measured General/Technical speed meet the gate.
 
 ## 1. What it measures and decides
 

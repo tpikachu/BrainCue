@@ -2,6 +2,7 @@ import { streamAnswer } from '../../openai/answer';
 import { predictFollowup } from '../../openai/followup';
 import { reactiveQuestionPolicy } from '../trigger/reactiveQuestionPolicy';
 import type { ModeDefinition } from '../modeDefinition';
+import { SETTINGS_KEYS, settingsRepo } from '../../../db/repositories/settings.repo';
 
 /**
  * Interview Copilot as a ModeDefinition — the v1 pipeline's interview-specific
@@ -41,6 +42,9 @@ export const interviewMode: ModeDefinition = {
       questionType: input.questionType,
       signal: input.signal,
       route: input.route,
+      ...(input.route?.provider === 'openai' && input.questionType !== 'coding' && settingsRepo.get(SETTINGS_KEYS.openaiInterviewFast) !== '0'
+        ? { processing: 'fast' as const }
+        : {}),
     });
   },
 

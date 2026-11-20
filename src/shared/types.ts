@@ -770,6 +770,9 @@ export interface AppSettings {
   chatProvider: CloudProviderId | null;
   /** Fast / Balanced / Quality — picks a model per task on chatProvider. */
   modelPreference: 'fast' | 'balanced' | 'quality';
+  /** Paid processing preference for normal OpenAI interview cues (default on).
+   * False leaves the provider project's processing default in charge. */
+  openaiInterviewFast?: boolean;
   /** What each chat task resolves to right now (qualified ids) — the model
    *  the NEXT request for that task is sent to. */
   effectiveModels: Record<string, string>;

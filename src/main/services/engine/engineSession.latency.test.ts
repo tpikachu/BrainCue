@@ -137,6 +137,7 @@ const mode: ModeDefinition = {
     if (h.generate === 'auth-error') throw Object.assign(new Error('bad key'), { status: 401 });
     yield { type: 'delta', token: '**I scaled' };
     yield { type: 'delta', token: ' it by sharding.**' };
+    yield { type: 'usage', prompt: 2000, completion: 60, requestedServiceTier: 'priority', serviceTier: 'default', cachedPromptTokens: 1024 };
   },
 };
 
@@ -181,6 +182,16 @@ const settle = async (p: Promise<unknown>) => {
 };
 
 describe('the latency record of a detected question', () => {
+  it('persists requested and actual processing separately, including provider-reported cached tokens', async () => {
+    const s = session();
+    await settle(s.onTranscriptFinal('How did you scale the payments service at your last company?'));
+    expect(latency.all().at(-1)).toMatchObject({
+      requestedServiceTier: 'priority', serviceTier: 'default', cachedPromptTokens: 1024,
+      promptTokens: 2000, completionTokens: 60,
+    });
+    s.teardown();
+  });
+
   it.each(['general', 'technical'] as const)('a %s interview starts after 350 ms even when the semantic lookup is unfinished, keeping its document facts', async (format) => {
     const s = session(format);
     const p = s.onTranscriptFinal('How did you scale the payments service at your last company?');

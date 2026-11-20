@@ -19,7 +19,7 @@ export type Capability = 'chat' | 'embedding' | 'realtimeStt' | 'batchStt' | 'sp
  *  after the stream) — deliberately not part of the transport contract. */
 export type ChatStreamEvent =
   | { type: 'delta'; token: string }
-  | { type: 'usage'; prompt: number; completion: number };
+  | { type: 'usage'; prompt: number; completion: number; requestedServiceTier?: string; serviceTier?: string; cachedPromptTokens?: number };
 
 export interface ChatStreamRequest {
   /** Task key — the provider resolves the model through the app's preset +
@@ -36,6 +36,9 @@ export interface ChatStreamRequest {
    *  so a failure is attributed to the route that actually failed and a
    *  retry can be pinned to its provider. Absent: resolved at dispatch. */
   route?: TaskRoute;
+  /** Explicit opt-in for a latency-sensitive live cue. Only a supported
+   * OpenAI adapter applies this; other providers keep their own defaults. */
+  processing?: 'fast';
 }
 
 export interface ChatJsonRequest {

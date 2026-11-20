@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Row } from '../metrics/report';
 import { DEFAULT_CAPS } from './perf01.budget';
-import { bindRun, paths, runBlock, seedRun, type AppPort, type DriverConfig, type WatchState } from './perf01.driver';
+import { bindRun, configFromEnv, paths, pinReference, runBlock, seedRun, type AppPort, type DriverConfig, type WatchState } from './perf01.driver';
 import { fixtureText, REFERENCE, type BlockLog, type SampleLine } from './perf01.evidence';
 import { GENERAL } from './perf01.fixtures';
 
@@ -53,6 +53,7 @@ class FakeApp implements AppPort {
   state: WatchState = { questions: {}, contexts: {} };
   private events: { at: number; run: () => void }[] = [];
   effectiveAnswer: string = REFERENCE.answerModel;
+  fast = false;
   installedCaps = { tokens: DEFAULT_CAPS.tokens, requests: DEFAULT_CAPS.requests, sttSeconds: DEFAULT_CAPS.sttSeconds };
   private take = 0;
   constructor(private script: Script) {}
@@ -142,13 +143,14 @@ class FakeApp implements AppPort {
       effort: REFERENCE.effort,
       promptTokens: 2_000,
       completionTokens: 200,
+      ...(this.fast ? { requestedServiceTier: 'priority', serviceTier: 'fast' } : {}),
       ...over,
     };
     appendFileSync(file, JSON.stringify(row) + '\n');
   }
   // ---- AppPort ----
   setApiKey = async () => void this.calls.push('setApiKey');
-  settingsSet = async () => void this.calls.push('settingsSet');
+  settingsSet = async (patch: Record<string, unknown>) => { this.calls.push('settingsSet'); this.fast = patch.openaiInterviewFast === true; };
   setUp = async () => (this.calls.push('setUp'), { profileId: 'p1', packId: 'k1' });
   startSession = async () => (this.calls.push('startSession'), 's1');
   stopSession = async () => void this.calls.push('stopSession');
@@ -166,7 +168,7 @@ class FakeApp implements AppPort {
   }
   watch = async () => void this.calls.push('watch');
   watched = async () => JSON.parse(JSON.stringify(this.state)) as WatchState;
-  settings = async () => ({ effectiveModels: { answer: this.effectiveAnswer, classify: REFERENCE.classifyModel }, stt: { engine: 'cloud' }, sttReady: true, memoryEnabled: true, reasoningEfforts: {} });
+  settings = async () => ({ effectiveModels: { answer: this.effectiveAnswer, classify: REFERENCE.classifyModel }, stt: { engine: 'cloud' }, sttReady: true, memoryEnabled: true, reasoningEfforts: {}, openaiInterviewFast: this.fast });
   readiness = async () => ({ chat: { ready: true, provider: 'openai' }, routes: { answer: 'openai', classify: 'openai', parsing: 'openai' }, retrieval: { mode: 'embeddings' }, transcription: { engine: 'cloud' } });
   profiles = async () => [{ id: 'p1' }];
   overlayVisibility = async () => 'visible';
@@ -208,6 +210,34 @@ function app(script: Script, ids: string[]) {
 }
 
 describe('PERF-01 driver: a failed preflight fails, and ends the run (review of 492a6cc, finding 1)', () => {
+  it('Fast is explicit in configuration and pinning; an unbound mode cannot send audio', async () => {
+    expect(configFromEnv({ PERF01_PROCESSING: 'fast' }).processing).toBe('fast');
+    expect(configFromEnv({}).processing).toBe('fast');
+    expect(configFromEnv({ PERF01_PROCESSING: 'default' }).processing).toBeUndefined();
+    expect(() => configFromEnv({ PERF01_PROCESSING: 'typo' })).toThrow(/must be default or fast/);
+    const a = app(answers, ['G01']);
+    await pinReference(a, { processing: 'fast' });
+    expect((await a.settings()).openaiInterviewFast).toBe(true);
+    cfg.processing = 'fast'; // the previously bound manifest was provider-default
+    await expect(runBlock(a, cfg, 'cold-1', userData)).rejects.toThrow(/processing configuration matches the manifest/);
+    expect(a.streamed).toEqual([]);
+    await pinReference(a, {});
+    expect((await a.settings()).openaiInterviewFast).toBe(false);
+  });
+
+  it('pins Fast again in each fresh block instead of undoing the seed setting', async () => {
+    const seed = readFileSync(paths(cfg).seedIds);
+    cfg = { ...cfg, out: path.join(out, 'fast-run'), runId: 'fast-run', processing: 'fast' };
+    bindRun(cfg, { commit: 'abc', dirty: 0 });
+    mkdirSync(paths(cfg).audio, { recursive: true });
+    writeFileSync(path.join(paths(cfg).audio, 'G01.wav'), wav());
+    writeFileSync(paths(cfg).seedIds, seed);
+    const a = app(answers, ['G01']);
+    await expect(runBlock(a, cfg, 'cold-1', userData)).resolves.toMatchObject({ status: 'complete' });
+    expect(a.fast).toBe(true);
+    expect(rows()).toEqual([expect.objectContaining({ fixtureId: 'G01', requestedServiceTier: 'priority', serviceTier: 'fast' })]);
+  });
+
   it('a wrong effective answer model: evidence saved, session stopped, the block REJECTS, and no later block starts', async () => {
     const a = app(answers, ['G01']);
     a.effectiveAnswer = 'gpt-4.1-mini';

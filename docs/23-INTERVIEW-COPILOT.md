@@ -817,6 +817,11 @@ are unchanged. Existing AI-tailored versions remain supported: the derived
 `tailoredResume` takes precedence, and changing the submitted résumé clears
 the old derived version. Prep briefs and tailoring use this role's input.
 Setup and the Cue Card recognize a role résumé even without a parsed default.
+The live prompt also takes its role/company heading from that profile's
+selected job Space, including after Resume. This is a request-local copy;
+the stored profile target is unchanged. A missing/non-job Space or one owned
+by another profile never supplies this heading, and an unknown company stays
+unknown rather than borrowing the profile's old company.
 
 Saving a résumé invalidates its old scoped chunks synchronously. Reindexing
 writes the new text before embedding. A JD parsing or embedding failure
@@ -849,3 +854,28 @@ favor the fast answer candidate; availability fallbacks, explicit overrides
 and same-provider retries remain intact. No first-word target is claimed
 from the simulated benchmark. General and short Technical require separate
 live p50/p95 results before stable promotion.
+
+**Measured result and processing choice (2026-11-19).** The first approved
+synthetic live run did not pass: one lexical memory miss invalidates its
+evidence, and diagnostic warm p50/p95 are 2.387/3.755 s (General) and
+2.714/4.021 s (Technical). Provider first-token latency dominates; see
+`benchmarks/PERF01-2026-11-19.md`. The memory-ranking and report-envelope
+defects are fixed offline, without altering raw evidence.
+
+Language Models → Advanced offers **OpenAI Fast processing for interview
+answers**, on by default at the user's explicit request (2026-11-19), with a
+visible higher-rate notice and an opt-out. It requests the documented
+`service_tier: priority` alias for Fast on supported current GPT-6 models.
+The UI discloses their higher token rates (2× Standard). This changes neither
+the chosen provider/model nor effort; unknown/unsupported models and other
+providers keep their own processing. Only normal interview/practice answers
+use it: coding, meeting/companion answers, report/parsing/classifier calls and
+the coding solver do not. Disabling it leaves the provider project's default
+in charge; that project may itself be configured for Fast.
+
+Timing records separate `requestedServiceTier` from the provider's actual
+`serviceTier`, and retain `cachedPromptTokens` when reported. A downgrade to
+Standard is visible; missing data is not inferred. The benchmark can bind
+`PERF01_PROCESSING=fast` in its manifest and requires these tier records for
+answered samples. This option's real speed remains unmeasured. A second paid
+run requires new approval; stable promotion stays blocked.

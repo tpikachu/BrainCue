@@ -64,6 +64,19 @@ function completeRun(): Evidence {
 
 const codes = (e: Evidence) => validateEvidence(e).issues.map((i) => i.code);
 
+describe('Fast processing evidence', () => {
+  it('requires requested and actual tier evidence; a downgrade stays visible and is judged by its real time', () => {
+    const e = completeRun();
+    e.manifest!.processing = 'fast';
+    expect(codes(e)).toContain('processing-evidence-missing');
+    for (const r of e.lines) { r.requestedServiceTier = 'priority'; r.serviceTier = 'default'; }
+    expect(codes(e)).toEqual([]);
+    expect(liveReport(e).report.processing).toEqual({ 'requested priority → used default': 70 });
+    e.lines.find((r) => r.fixtureId === 'G01')!.requestedServiceTier = 'provider-default';
+    expect(codes(e)).toContain('processing-evidence-missing');
+  });
+});
+
 describe('PERF-01 live evidence check', () => {
   it('reads the real metrics IPC envelope, retaining its all-turn decision summary', () => {
     const e = completeRun();

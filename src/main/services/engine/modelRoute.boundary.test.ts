@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
   store: new Map<string, string>(),
   /** Every request an adapter received: "provider:kind:task → provider/model". */
   seen: [] as string[],
+  processing: [] as (string | undefined)[],
   /** Per provider, scripted behaviour for its next stream requests. */
   script: {} as Record<string, ((req: { route?: { model: string } }) => AsyncGenerator<{ type: 'delta'; token: string }>)[]>,
   metas: [] as Record<string, unknown>[],
@@ -29,6 +30,7 @@ vi.mock('../../db/repositories/settings.repo', () => ({
     apiKeyPresent: 'openai_api_key_present',
     models: 'models',
     modelPreset: 'model_preset',
+    openaiInterviewFast: 'openai_interview_fast',
     reasoningEfforts: 'reasoning_efforts',
     codingLanguage: 'coding_language',
     chatProvider: 'chat_provider',
@@ -111,6 +113,7 @@ function fakeChat(provider: string): ChatProvider {
   return {
     async *stream(req): AsyncGenerator<ChatStreamEvent> {
       h.seen.push(`${provider}:chat:${req.task} → ${routeOf(req)}`);
+      h.processing.push(req.processing);
       const next = h.script[provider]?.shift();
       if (next) {
         yield* next(req);
@@ -158,6 +161,7 @@ const streams = () => h.seen.filter((s) => s.includes(':chat:') || s.includes(':
 beforeEach(() => {
   h.store.clear();
   h.seen.length = 0;
+  h.processing.length = 0;
   h.metas.length = 0;
   h.contexts.length = 0;
   h.saved.length = 0;
@@ -172,6 +176,25 @@ beforeEach(() => {
 });
 
 describe('each task reaches the provider and model the policy chose', () => {
+  it('normal OpenAI interview Fast defaults on, excludes coding, respects an opt-out and never moves providers', async () => {
+    h.store.delete('openai_interview_fast');
+    h.store.set('chat_provider', 'openai');
+    const s = session();
+    await s.generateContribution('q1', 'Tell me about your last project.', 'behavioral');
+    expect(h.processing).toEqual(['fast']);
+    expect(streams()[0]).toContain('openai:chat:answer');
+    await s.generateContribution('q2', 'Implement binary search.', 'coding');
+    expect(h.processing).toEqual(['fast', undefined]);
+    h.store.set('openai_interview_fast', '0');
+    await s.generateContribution('q3', 'Explain a cache.', 'technical');
+    expect(h.processing).toEqual(['fast', undefined, undefined]);
+    h.store.set('openai_interview_fast', '1');
+    h.store.set('chat_provider', 'anthropic');
+    await s.generateContribution('q4', 'Explain a cache again.', 'technical');
+    expect(h.processing).toEqual(['fast', undefined, undefined, undefined]);
+    expect(streams().at(-1)).toContain('anthropic:chat:answer');
+  });
+
   it('a General answer and the coding solver go to different, separately chosen routes', async () => {
     await session().generateContribution('q1', 'Tell me about a project you led.');
     await runCodingSolve('Reverse a linked list.');

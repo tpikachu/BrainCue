@@ -6,6 +6,7 @@ import { transcribeChunk } from '../../services/openai/transcription';
 import { speak, type TtsVoice } from '../../services/openai/tts';
 import { solveFromImages } from '../../services/openai/vision';
 import { RealtimeTranscriber } from '../../services/openai/realtime';
+import { supportsOpenAiFast } from '@shared/openaiProcessing';
 import type {
   BatchSttProvider,
   ChatJsonRequest,
@@ -44,9 +45,13 @@ export const openaiChat: ChatProvider = {
     // live tasks get the model's lowest — "none" on GPT-6 Luna/Terra.
     const effort = effortFor(req.task, 'openai', m);
     const thinks = !!effort && effort !== 'none';
+    const fast = req.task === 'answer' && req.processing === 'fast' && supportsOpenAiFast(m);
     const stream = await openai().responses.stream(
       {
         model: m,
+        // `priority` is the documented alias for Fast. The pinned SDK predates
+        // that enum member; keep the compatibility escape at this wire boundary.
+        ...(fast ? ({ service_tier: 'priority' } as Record<string, unknown>) : {}),
         ...reasoningBody(effort),
         ...(req.maxOutputTokens !== undefined
           ? { max_output_tokens: req.maxOutputTokens + (thinks ? REASONING_HEADROOM : 0) }
@@ -70,6 +75,11 @@ export const openaiChat: ChatProvider = {
         type: 'usage',
         prompt: usage.input_tokens ?? 0,
         completion: usage.output_tokens ?? 0,
+        requestedServiceTier: fast ? 'priority' : 'provider-default',
+        ...(final.service_tier ? { serviceTier: final.service_tier } : {}),
+        ...(usage.input_tokens_details?.cached_tokens !== undefined
+          ? { cachedPromptTokens: usage.input_tokens_details.cached_tokens }
+          : {}),
       };
     }
   },

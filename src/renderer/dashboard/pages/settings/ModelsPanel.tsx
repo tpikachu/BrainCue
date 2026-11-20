@@ -10,6 +10,7 @@ import { addKeyProvider, pickerRows, type AccountModels } from '../../../lib/mod
 import { PanelBody, PanelHeader } from './SettingsLayout';
 import { settingsSection } from './sections';
 import { PRESET_OPTIONS, PresetPicker, ProviderKeyBlock, ProviderTiles } from './ProviderSetup';
+import { supportsOpenAiFast } from '@shared/openaiProcessing';
 
 /**
  * One row of the per-task table. `chat` tasks can run on any provider with a
@@ -147,6 +148,7 @@ function ModelsCard({
   const [account, setAccount] = useState<AccountModels>({});
   const [loadingList, setLoadingList] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [savingProcessing, setSavingProcessing] = useState(false);
   // Tasks whose picker is showing the free-text OpenRouter id field.
   const [customFor, setCustomFor] = useState<Record<string, boolean>>({});
   // Tasks edited in THIS card and not yet confirmed saved, each with its edit's
@@ -276,8 +278,23 @@ function ModelsCard({
     setCustomFor({});
     await api.settings.set({ models: {} });
     await onSaved();
-    setStatus('Reset to defaults.');
+    setStatus('Model overrides reset.');
   };
+
+  const setFastProcessing = async (enabled: boolean) => {
+    setSavingProcessing(true);
+    try {
+      await api.settings.set({ openaiInterviewFast: enabled });
+      await onSaved();
+      setStatus(enabled ? 'OpenAI Fast processing enabled for supported interview models.' : 'Provider-default processing restored.');
+    } catch (e) {
+      setStatus(`Could not save processing preference — ${(e as Error).message}`);
+    } finally {
+      setSavingProcessing(false);
+    }
+  };
+  const answerRoute = parseModelId(settings.effectiveModels?.answer ?? '');
+  const fastApplies = answerRoute.provider === 'openai' && supportsOpenAiFast(answerRoute.model);
 
   // Non-chat rows (embeddings, speech) stay on OpenAI and offer their known
   // ids as suggestions; the field is free text for anything newer.
@@ -368,11 +385,32 @@ function ModelsCard({
           </p>
         </div>
       )}
+      {fastApplies && settings.openaiInterviewFast !== false && (
+        <p className="mb-4 text-xs text-neutral-400">
+          Normal OpenAI interview answers request Fast processing at higher token rates (2× Standard).
+          You can turn it off in Advanced.
+        </p>
+      )}
 
       <details className="group" open={advancedOpen} onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}>
         <summary className="mb-3 cursor-pointer select-none text-sm font-medium text-neutral-300">
           Advanced — choose a model per task{customized ? ' (overrides active)' : ''}
         </summary>
+        {settings.providerKeys?.openai && (
+          <div className="mb-4 rounded-lg border border-white/10 p-3">
+            <label className="flex items-center gap-2 text-sm text-neutral-200">
+              <input type="checkbox" checked={settings.openaiInterviewFast ?? true}
+                disabled={savingProcessing} onChange={(e) => void setFastProcessing(e.target.checked)} />
+              OpenAI Fast processing for interview answers
+            </label>
+            <p className="mt-2 text-xs text-neutral-400">
+              Higher token rates (2× Standard on supported GPT-6 models). Requests faster processing
+              for normal interview answers; speed is not guaranteed. Coding keeps its own allowance.
+              Applies to the next answer and keeps your chosen provider and model.
+            </p>
+            {!fastApplies && <p className="mt-1 text-xs text-neutral-500">Your current answer model does not use this option.</p>}
+          </div>
+        )}
         <p className="mb-4 text-sm text-neutral-400">
           An override wins over the automatic pick while it can run; if its provider has no key or your
           account no longer lists it, the automatic pick is used and the reason is shown above. Every
@@ -443,7 +481,7 @@ function ModelsCard({
           Save models
         </Button>
         <Button variant="ghost" onClick={reset}>
-          Reset to defaults
+          Reset model overrides
         </Button>
       </div>
       </details>

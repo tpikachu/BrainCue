@@ -22,6 +22,7 @@ export const SETTINGS = {
   autoModels: { answer: 'anthropic/claude-sonnet-5-5', coding: 'anthropic/claude-opus-5-5', classify: 'anthropic/claude-haiku-5-5' },
   modelNotices: {},
   reasoningEfforts: {},
+  openaiInterviewFast: true,
   reasoningEffortDefaults: { coding: 'low' },
 };
 

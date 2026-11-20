@@ -1,5 +1,6 @@
 import { providerFor } from '../../providers/registry';
 import type { TaskRoute } from '../../providers/taskRoute';
+import type { ChatStreamEvent } from '../../providers/types';
 import { normalizeSpeaker } from '@shared/types';
 import type { ConversationSnapshot } from '../engine/interview/conversationContext';
 import type {
@@ -68,6 +69,8 @@ export interface AnswerInput {
   signal?: AbortSignal;
   /** The attempt's captured route (providers/types.ts). */
   route?: TaskRoute;
+  /** Explicit processing opt-in from the live interview mode. */
+  processing?: 'fast';
 }
 
 /** Human-readable instruction per answer STYLE, injected into the prompt.
@@ -115,7 +118,7 @@ const CLOSING_LINE: Record<AnswerFormat, string> = {
 export type AnswerEvent =
   | { type: 'delta'; token: string }
   | { type: 'meta'; riskWarning: string | null }
-  | { type: 'usage'; prompt: number; completion: number };
+  | Extract<ChatStreamEvent, { type: 'usage' }>;
 
 /** The role paragraph — the ONLY part of the prompt that knows what kind of
  *  conversation this is. Everything after it is shared, because "speakable,
@@ -411,6 +414,7 @@ export async function* streamAnswer(input: AnswerInput): AsyncGenerator<AnswerEv
     maxOutputTokens: FORMAT_MAX_TOKENS[input.format] + (input.pronunciation ? 160 : 0),
     signal: input.signal,
     ...(input.route ? { route: input.route } : {}),
+    ...(input.processing ? { processing: input.processing } : {}),
   })) {
     if (ev.type === 'delta') {
       emitted = true;

@@ -126,6 +126,11 @@ export interface QuestionTiming {
   /** The provider's reported token usage, when it gives one. */
   promptTokens?: number;
   completionTokens?: number;
+  /** Requested processing and the provider's actual tier, kept separate:
+   * a Fast request can be served at standard speed. Missing means unknown. */
+  requestedServiceTier?: string;
+  serviceTier?: string;
+  cachedPromptTokens?: number;
 }
 
 export interface StageSummary {

@@ -59,6 +59,8 @@ export interface Manifest {
   runId: string;
   fixtures: string;
   dry: boolean;
+  /** Explicit Fast request run; absent preserves the historical provider-default run. */
+  processing?: 'fast';
   createdAt: string;
   commit: string;
   /** Uncommitted files in the tree when the run started. */
@@ -71,11 +73,12 @@ export interface Manifest {
 const byId = new Map([...GENERAL, ...TECHNICAL].map((q) => [q.id, q]));
 export const fixtureText = (id: string): string => (id === WARMUP_ID ? WARMUP_TEXT : (byId.get(id)?.text ?? ''));
 
-export function planRun(p: { runId: string; commit: string; dirty: number; caps: Record<string, number>; dry: boolean; now?: Date }): Manifest {
+export function planRun(p: { runId: string; commit: string; dirty: number; caps: Record<string, number>; dry: boolean; processing?: 'fast'; now?: Date }): Manifest {
   return {
     runId: p.runId,
     fixtures: PERF01_VERSION,
     dry: p.dry,
+    ...(p.processing ? { processing: p.processing } : {}),
     createdAt: (p.now ?? new Date()).toISOString(),
     commit: p.commit,
     dirty: p.dirty,
@@ -208,6 +211,7 @@ export function validateEvidence(e: Evidence): Validated {
     return { valid: false, issues, samples: [], groundingMisses: [] };
   }
   if (m.dry) add('dry-run', 'the manifest is a dry run');
+  if (m.processing !== undefined && m.processing !== 'fast') add('processing-changed', 'unknown processing mode');
   if (m.fixtures !== PERF01_VERSION) add('fixture-version', `manifest ${m.fixtures}, fixtures ${PERF01_VERSION}`);
   const ref = m.reference;
   if (JSON.stringify(ref) !== JSON.stringify(REFERENCE)) add('reference-changed', `manifest reference ${JSON.stringify(ref)}`);
@@ -264,6 +268,7 @@ export function validateEvidence(e: Evidence): Validated {
   const category: string[] = [];
   const coldness: string[] = [];
   const route: string[] = [];
+  const processing: string[] = [];
   const grounding: string[] = [];
   const attributionWeak: string[] = [];
   const pidMismatch: string[] = [];
@@ -291,6 +296,9 @@ export function validateEvidence(e: Evidence): Validated {
         const want = `${ref.provider}/${ref.answerModel}/${ref.effort}`;
         const got = `${r.provider}/${r.model}/${r.effort}`;
         if (got !== want) route.push(`${key} ${got}`);
+        if (m.processing === 'fast' &&
+            (r.requestedServiceTier !== 'priority' || !['fast', 'priority', 'default'].includes(r.serviceTier ?? '')))
+          processing.push(`${key}: requested ${r.requestedServiceTier ?? 'unknown'}, used ${r.serviceTier ?? 'unknown'}`);
         if (r.grounded !== true) grounding.push(key);
       }
       if (line.attribution && line.attribution.how !== 'text' && line.attribution.how !== 'window') attributionWeak.push(`${key} (${line.attribution.how})`);
@@ -302,6 +310,7 @@ export function validateEvidence(e: Evidence): Validated {
   add('category-mismatch', category);
   add('cold-warm-mismatch', coldness);
   add('route-mismatch', route);
+  add('processing-evidence-missing', processing);
   add('grounding-miss', grounding);
   add('attribution-weak', attributionWeak);
   add('process-mismatch', pidMismatch);
@@ -411,6 +420,7 @@ export function liveReport(e: Evidence, now?: Date): { report: Perf01Report; mar
       commit: e.manifest?.commit,
       dirtyFiles: e.manifest?.dirty,
       reference: e.manifest?.reference,
+      processing: e.manifest?.processing ?? 'provider-default (actual tier unrecorded in older runs)',
       caps: e.manifest?.caps,
       budget: e.meter
         ? {

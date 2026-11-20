@@ -83,6 +83,7 @@ function readSettings(): AppSettings {
     modelPreset: modelPreset(),
     chatProvider: chatProviderSetting(),
     modelPreference: modelPreference(),
+    openaiInterviewFast: settingsRepo.get(SETTINGS_KEYS.openaiInterviewFast) !== '0',
     ...routeFields(),
     modelDefaults: { ...presetModels() }, // effective per-task defaults for the active preset
     reasoningEfforts: settingsRepo.getJson(SETTINGS_KEYS.reasoningEfforts, {}),
@@ -118,6 +119,7 @@ const settingsPatch = z.object({
   models: z.record(z.string()).optional(),
   modelPreset: z.enum(['balanced', 'low_cost', 'best']).optional(),
   modelPreference: z.enum(['fast', 'balanced', 'quality']).optional(),
+  openaiInterviewFast: z.boolean().optional(),
   chatProvider: z.enum(['openai', 'anthropic', 'google', 'groq', 'openrouter']).nullable().optional(),
   reasoningEfforts: z.record(z.string()).optional(),
   // One task's model / effort, merged HERE against the stored map (null or ''
@@ -215,6 +217,8 @@ export function registerSettingsIpc(): void {
     }
     if (patch.reasoningEfforts)
       settingsRepo.setJson(SETTINGS_KEYS.reasoningEfforts, patch.reasoningEfforts);
+    if (patch.openaiInterviewFast !== undefined)
+      settingsRepo.set(SETTINGS_KEYS.openaiInterviewFast, patch.openaiInterviewFast ? '1' : '0');
     if (patch.effortOverrides)
       settingsRepo.setJson(
         SETTINGS_KEYS.reasoningEfforts,

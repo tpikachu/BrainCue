@@ -37,6 +37,7 @@ export interface DriverConfig {
   out: string;
   runId: string;
   dry: boolean;
+  processing?: 'fast';
   caps: RunCaps;
   questionTimeoutMs: number;
   settleMs: number;
@@ -44,12 +45,15 @@ export interface DriverConfig {
 }
 
 export function configFromEnv(env: Record<string, string | undefined>, now = new Date()): DriverConfig {
+  if (env.PERF01_PROCESSING && !['default', 'fast'].includes(env.PERF01_PROCESSING))
+    throw new Error('PERF01_PROCESSING must be default or fast');
   const dry = env.PERF01_DRY === '1';
   const out = resolve(env.PERF01_OUT || join('bench-results', 'perf01', `${dry ? 'dry' : 'live'}-${now.toISOString().replace(/[:.]/g, '-')}`));
   return {
     out,
     runId: out.split(/[\\/]/).pop()!,
     dry,
+    ...(env.PERF01_PROCESSING !== 'default' ? { processing: 'fast' as const } : {}),
     caps: capsFromEnv(env),
     questionTimeoutMs: Number(env.PERF01_QUESTION_TIMEOUT_MS || 30_000),
     settleMs: Number(env.PERF01_SETTLE_MS || 30_000),
@@ -107,7 +111,7 @@ export function bindRun(cfg: DriverConfig, git: { commit: string; dirty: number 
   mkdirSync(cfg.out, { recursive: true });
   if (existsSync(paths(cfg).manifest))
     throw new Error(`${cfg.out} already holds a run (manifest.json). A run is bound to one configuration: use a new PERF01_OUT.`);
-  const m = planRun({ runId: cfg.runId, commit: git.commit, dirty: git.dirty, caps: manifestCaps(cfg), dry: cfg.dry });
+  const m = planRun({ runId: cfg.runId, commit: git.commit, dirty: git.dirty, caps: manifestCaps(cfg), dry: cfg.dry, processing: cfg.processing });
   writeFileSync(paths(cfg).manifest, JSON.stringify({ ...m, node: process.version, platform: process.platform }, null, 2));
   return m;
 }
@@ -190,16 +194,16 @@ export function latencyRows(userData: string): Row[] {
 }
 
 // ---- the seed --------------------------------------------------------------------
-export async function pinReference(app: AppPort) {
+export async function pinReference(app: AppPort, cfg: Pick<DriverConfig, 'processing'>) {
   await app.setApiKey();
-  await app.settingsSet({ modelOverrides: { answer: REFERENCE.answerModel, classify: REFERENCE.classifyModel, parsing: REFERENCE.parsingModel }, memoryEnabled: true });
+  await app.settingsSet({ modelOverrides: { answer: REFERENCE.answerModel, classify: REFERENCE.classifyModel, parsing: REFERENCE.parsingModel }, memoryEnabled: true, openaiInterviewFast: cfg.processing === 'fast' });
 }
 
 /** The synthetic profile, Space and memories, set up once for the run. */
 export async function seedRun(app: AppPort, cfg: DriverConfig, startedAt: number): Promise<{ profileId: string; packId: string; pid: number }> {
   const bound = meterBinding(cfg, startedAt);
   if (bound.pid === null || bound.failures.length) throw new Error(`seed: not bound to the manifest: ${[...bound.failures].join('; ')}`);
-  if (!cfg.dry) await pinReference(app);
+  if (!cfg.dry) await pinReference(app, cfg);
   const ids = await app.setUp(!cfg.dry); // dry: memories need the embedding provider
   const seed = { ...ids, pid: bound.pid, memoriesSkipped: cfg.dry };
   writeFileSync(paths(cfg).seedIds, JSON.stringify(seed, null, 2));
@@ -232,11 +236,13 @@ export async function preflight(app: AppPort, cfg: DriverConfig, userData: strin
   };
   need(latencyRows(userData).length === 0, 'the latency file starts empty (fresh user-data copy)');
   const settings = await app.settings();
+  need(manifest(cfg).processing === cfg.processing, 'processing configuration matches the manifest');
   const readiness = await app.readiness();
   need(settings.effectiveModels?.answer === REFERENCE.answerModel, `answers route to ${REFERENCE.answerModel} (effective: ${settings.effectiveModels?.answer})`);
   need(settings.effectiveModels?.classify === REFERENCE.classifyModel, `detection routes to ${REFERENCE.classifyModel} (effective: ${settings.effectiveModels?.classify})`);
   need(!settings.modelNotices?.answer && !settings.modelNotices?.classify, 'no model notice on answer/classify');
   need(!settings.reasoningEfforts?.answer, 'no reasoning-effort override on answers');
+  need((settings.openaiInterviewFast === true) === (cfg.processing === 'fast'), 'processing preference matches the planned run');
   need(settings.stt?.engine === 'cloud' && settings.sttReady === true, 'cloud speech-to-text is ready');
   need(settings.memoryEnabled === true, 'memory is on');
   need(readiness.chat?.ready === true && readiness.chat.provider === REFERENCE.provider, `chat is ready on ${REFERENCE.provider}`);
@@ -274,6 +280,7 @@ export async function preflight(app: AppPort, cfg: DriverConfig, userData: strin
     checks: {
       effectiveModels: { answer: settings.effectiveModels?.answer, classify: settings.effectiveModels?.classify, parsing: settings.effectiveModels?.parsing },
       reasoningEfforts: settings.reasoningEfforts,
+      processing: settings.openaiInterviewFast ? 'fast' : 'provider-default',
       stt,
       readiness: { chat: readiness.chat?.provider, model: readiness.chat?.model, classifyModel: readiness.chat?.classifyModel, routes: readiness.routes, retrieval: readiness.retrieval?.mode, transcription: readiness.transcription?.engine },
       windows: snap,
@@ -388,7 +395,7 @@ export async function runBlock(app: AppPort, cfg: DriverConfig, block: string, u
   let reason: string | undefined;
   try {
     const audio = audioFor(cfg, ids);
-    await pinReference(app);
+    await pinReference(app, cfg);
     await app.watch();
     sid = await app.startSession(seed.profileId, seed.packId, plan.format);
     if (!sid) throw new Error('the session did not start');

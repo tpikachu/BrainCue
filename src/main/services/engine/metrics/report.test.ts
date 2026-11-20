@@ -31,6 +31,20 @@ const many = (k: number, over: Partial<Row> = {}) => Array.from({ length: k }, (
 const OK = { evidence: { valid: true, issues: [] } };
 
 describe('PERF-01 report', () => {
+  it('never treats requested Fast processing as proof of the actual tier', () => {
+    const report = buildReport([
+      row({ requestedServiceTier: 'priority', serviceTier: 'default', cachedPromptTokens: 1024 }),
+      row({ requestedServiceTier: 'priority', serviceTier: 'fast', cachedPromptTokens: 0 }),
+      row(),
+    ], { simulated: true, title: 'tiers' });
+    expect(report.processing).toEqual({
+      'requested priority → used default': 1,
+      'requested priority → used fast': 1,
+      'requested unrecorded → used unrecorded': 1,
+    });
+    expect(report.cachedPromptTokens).toEqual({ n: 2, p50: 0, p95: 1024 });
+  });
+
   it('a simulated report never says "met", however fast', () => {
     const r = buildReport([...many(30), ...many(30, { category: 'technical' }), ...many(5, { cold: true })], { simulated: true, title: 'x' });
     expect(r.verdicts.general).toEqual({

@@ -400,17 +400,19 @@ describe('PERF-01 offline benchmark — SIMULATED (perf01-v1 fixtures)', () => {
   it('a role résumé reaches the real answer prompt and remains selected after Stop → Resume', async () => {
     const role = 'perf01-custom-resume';
     const fact = 'At Solaris I led the payments migration serving 42k requests per second.';
-    h.db.insert(schema.contextPacks).values({ id: role, profileId, kind: 'job', title: 'Solaris engineer', resumeText: fact, jdText: 'Own the payments platform.' }).run();
+    h.db.insert(schema.contextPacks).values({ id: role, profileId, kind: 'job', title: 'Solaris engineer', company: 'Solaris', resumeText: fact, jdText: 'Own the payments platform.' }).run();
     await indexJob(role);
     h.format = 'scenario';
     const sid = engine.start(profileId, 'general', role, 'general').id;
     const text = 'Can you tell me about the payments migration at Solaris?';
     await ask({ id: 'R01', text }, { interim: false, stall: false });
     expect(section(promptFor(text), 'resume')).toContain(fact);
+    expect(promptFor(text)).toContain('Candidate role target: Solaris engineer @ Solaris');
     engine.stop(sid);
     engine.resume(sid);
     await ask({ id: 'R02', text }, { interim: false, stall: false });
     expect(section(promptFor(text), 'resume')).toContain(fact);
+    expect(promptFor(text)).toContain('Candidate role target: Solaris engineer @ Solaris');
     engine.stop(sid);
     const other = engine.start(profileId, 'general', packId, 'general').id;
     await ask({ id: 'R03', text }, { interim: false, stall: false });

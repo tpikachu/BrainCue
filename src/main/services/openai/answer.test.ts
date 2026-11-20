@@ -8,6 +8,8 @@ const h = vi.hoisted(() => ({
   lastBody: null as Record<string, unknown> | null,
   reasoning: false, // pretend the resolved answer model is a reasoning model
   emitText: true, // pretend the stream produced visible text
+  tier: undefined as string | undefined,
+  cached: undefined as number | undefined,
 }));
 vi.mock('./client', () => ({
   openai: () => ({
@@ -21,7 +23,7 @@ vi.mock('./client', () => ({
             yield { type: 'response.output_text.delta', delta: ' world' };
             yield { type: 'response.ignored.event' }; // non-delta events are skipped
           },
-          finalResponse: async () => ({ usage: { input_tokens: 12, output_tokens: 7 } }),
+          finalResponse: async () => ({ service_tier: h.tier, usage: { input_tokens: 12, output_tokens: 7, input_tokens_details: { cached_tokens: h.cached } } }),
         };
       },
     },
@@ -71,9 +73,31 @@ beforeEach(() => {
   h.lastBody = null;
   h.reasoning = false;
   h.emitText = true;
+  h.tier = undefined;
+  h.cached = undefined;
 });
 
 describe('streamAnswer — request body', () => {
+  it('Fast is explicit: a normal request leaves the provider default untouched', async () => {
+    await collect(streamAnswer(baseInput({ route: { provider: 'openai', model: 'gpt-6-luna' } })));
+    expect(h.lastBody).not.toHaveProperty('service_tier');
+  });
+
+  it('a supported Fast request carries the alias, and records the actual downgraded tier and cached tokens', async () => {
+    h.tier = 'default'; // requesting Fast does not prove the provider used it
+    h.cached = 1024;
+    const events = await collect(streamAnswer(baseInput({ processing: 'fast', route: { provider: 'openai', model: 'gpt-6-luna' } })));
+    expect(h.lastBody).toMatchObject({ model: 'gpt-6-luna', service_tier: 'priority', reasoning: { effort: 'none' }, max_output_tokens: 360 });
+    expect(events).toContainEqual({ type: 'usage', prompt: 12, completion: 7, requestedServiceTier: 'priority', serviceTier: 'default', cachedPromptTokens: 1024 });
+  });
+
+  it('Fast is not guessed for an unsupported or unknown model', async () => {
+    for (const model of ['gpt-4.1-mini', 'some-future-model']) {
+      await collect(streamAnswer(baseInput({ processing: 'fast', route: { provider: 'openai', model } })));
+      expect(h.lastBody).not.toHaveProperty('service_tier');
+    }
+  });
+
   it('GENERAL: bold lead sentence + 3–4 bullets, capped at 360 output tokens', async () => {
     await collect(streamAnswer(baseInput({ format: 'general' })));
     expect(h.lastBody!.max_output_tokens).toBe(360);
@@ -214,7 +238,7 @@ describe('streamAnswer — streamed events', () => {
 
   it('yields a usage event from finalResponse', async () => {
     const evs = await collect(streamAnswer(baseInput()));
-    expect(evs).toContainEqual({ type: 'usage', prompt: 12, completion: 7 });
+    expect(evs).toContainEqual({ type: 'usage', prompt: 12, completion: 7, requestedServiceTier: 'provider-default' });
   });
 
   it('sets a riskWarning in meta only when context is empty', async () => {
