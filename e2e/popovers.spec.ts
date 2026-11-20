@@ -55,6 +55,8 @@ test('the full Answer that tooltip fits at the bottom-left of a compact Cue Card
   await page.getByRole('button', { name: 'Answer that', exact: true }).hover();
   await expect(page.getByRole('tooltip')).toContainText("when it wasn't picked up as a question");
   await expectInsideWindow(page, 'tooltip');
+  await page.evaluate(() => window.dispatchEvent(new Event('scroll')));
+  await expect(page.getByRole('tooltip')).toHaveCount(0); // pointer-only tips still dismiss
 });
 
 test('a tooltip at the right edge stays inside the window, including after resize', async ({ cue: page }) => {

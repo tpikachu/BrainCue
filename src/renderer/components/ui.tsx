@@ -772,6 +772,18 @@ export function TooltipShield() {
       curEl = null;
       setTip(null);
     };
+    const onScroll = (): void => {
+      // Tabbing to a control can scroll it into view AFTER focusin. Keep its
+      // detail anchored while it owns focus; pointer-only tips still dismiss.
+      if (curEl && curEl === titled(document.activeElement) && curEl.isConnected) {
+        const r = curEl.getBoundingClientRect();
+        if (r.bottom > 0 && r.top < window.innerHeight && r.right > 0 && r.left < window.innerWidth) {
+          show(curEl);
+          return;
+        }
+      }
+      hide();
+    };
     // Keyboard users get the same detail: focusing a titled control shows it.
     const onFocusIn = (e: FocusEvent): void => {
       const el = titled(e.target);
@@ -783,7 +795,7 @@ export function TooltipShield() {
     document.addEventListener('focusout', hide, true);
     document.addEventListener('mouseover', onOver, true);
     document.addEventListener('mousedown', hide, true);
-    window.addEventListener('scroll', hide, true);
+    window.addEventListener('scroll', onScroll, true);
     window.addEventListener('blur', hide);
     window.addEventListener('resize', hide);
     return () => {
@@ -791,7 +803,7 @@ export function TooltipShield() {
       document.removeEventListener('focusout', hide, true);
       document.removeEventListener('mouseover', onOver, true);
       document.removeEventListener('mousedown', hide, true);
-      window.removeEventListener('scroll', hide, true);
+      window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('blur', hide);
       window.removeEventListener('resize', hide);
     };

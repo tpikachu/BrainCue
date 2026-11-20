@@ -175,5 +175,10 @@ test("a readiness row's detail is reachable by keyboard, not only on hover", asy
     reached = await ai.evaluate((el) => el === document.activeElement);
   }
   expect(reached).toBe(true);
+  // Keyboard focus can scroll the row into view after focusin. Its detail
+  // must survive that scroll, rather than disappearing until the next Tab.
+  await page.evaluate(() => window.dispatchEvent(new Event('scroll')));
   await expect(page.getByRole('tooltip')).toContainText('answers your questions');
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('tooltip').filter({ hasText: 'answers your questions' })).toHaveCount(0);
 });

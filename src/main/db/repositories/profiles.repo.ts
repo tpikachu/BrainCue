@@ -41,7 +41,10 @@ export const profilesRepo = {
     if (!r) return null;
     const profile = toProfile(r);
     if (context?.interviewPackId) {
-      const pack = db().select().from(schema.contextPacks).where(eq(schema.contextPacks.id, context.interviewPackId)).get();
+      const pack = db().select({
+        kind: schema.contextPacks.kind, profileId: schema.contextPacks.profileId,
+        title: schema.contextPacks.title, company: schema.contextPacks.company,
+      }).from(schema.contextPacks).where(eq(schema.contextPacks.id, context.interviewPackId)).get();
       if (pack?.kind === 'job' && pack.profileId === id)
         return { ...profile, targetRole: pack.title, targetCompany: pack.company };
     }
