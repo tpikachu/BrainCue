@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ipcMain } from 'electron';
-import { IPC } from '@shared/ipc';
+import { EVENTS, IPC } from '@shared/ipc';
+import { broadcast } from './broadcast';
 import type { AudioSource } from '@shared/types';
 import { handle, zId, zSpaceKind } from './helpers';
 import { zAnswerFormat, zInterviewType, zPresence } from './schemas';
@@ -9,8 +10,8 @@ import { engine } from '../services/engine/engine';
 import { sessionsRepo } from '../db/repositories/sessions.repo';
 import { generateReport } from '../services/session/report';
 import { getOrGenerateMeetingReport } from '../services/engine/meetingReport';
-import { archiveSession } from '../services/engine/sessionArchive';
-import { extractMemoryCandidates } from '../services/memory/extractor';
+import { rememberSession } from '../services/session/remember';
+import { resolveTask } from '../services/openai/models';
 import { memoriesRepo } from '../db/repositories/memories.repo';
 import { voiceService } from '../services/voice/voiceService';
 
@@ -104,6 +105,17 @@ export function registerSessionIpc(): void {
     return sessionManager.stopActive();
   });
 
+  // A start whose audio never attached is undone here — in main, so that a
+  // later Stop from either window follows the same policy (engine.rollback).
+  handle(
+    IPC.session.rollback,
+    z.object({ sessionId: z.string().min(1), discard: z.boolean() }),
+    ({ sessionId, discard }) => {
+      voiceService.cancel();
+      return sessionManager.rollback(sessionId, discard);
+    },
+  );
+
   handle(
     IPC.session.audioChunk,
     z.object({
@@ -159,6 +171,20 @@ export function registerSessionIpc(): void {
     ({ questionText }) => sessionManager.askActive(questionText),
   );
 
+  handle(IPC.session.answerLast, z.void(), () => sessionManager.answerLastActive());
+
+  // The dashboard owns capture (getDisplayMedia / getUserMedia live in the
+  // renderer); it reports what it actually got — and again when a track ends
+  // — so the Cue Card never shows "listening" over a dead stream.
+  handle(
+    IPC.session.reportCapture,
+    z.object({ system: z.boolean(), mic: z.boolean(), wantsSystem: z.boolean() }),
+    (status) => {
+      broadcast(EVENTS.captureStatus, status, ['overlay']);
+      return { ok: true as const };
+    },
+  );
+
   handle(
     IPC.session.setInterviewType,
     z.object({ sessionId: z.string().min(1), interviewType }),
@@ -186,6 +212,18 @@ export function registerSessionIpc(): void {
     sessionsRepo.list(a?.profileId),
   );
 
+  // History, one page at a time (it only grows): newest first, searchable.
+  handle(
+    IPC.session.page,
+    z.object({
+      profileId: z.string().min(1),
+      query: z.string().default(''),
+      limit: z.number().int().min(1).max(200),
+      offset: z.number().int().min(0),
+    }),
+    (a) => sessionsRepo.page(a),
+  );
+
   handle(IPC.session.get, zId, ({ id }) => {
     const detail = sessionsRepo.detail(id);
     if (!detail) throw new Error('Session not found');
@@ -201,8 +239,9 @@ export function registerSessionIpc(): void {
    * the user's intent, not an override of their settings.
    *
    * Neither failure is fatal. A session the user chose to keep must stay kept
-   * even if summarising or extraction fails, so the counts come back as they
-   * are and the UI can say what actually happened.
+   * even if summarising or extraction fails; each half reports its own typed
+   * outcome (services/session/remember.ts) so the UI says what actually
+   * happened and can offer a retry. The destination is validated there.
    */
   handle(
     IPC.session.remember,
@@ -211,19 +250,22 @@ export function registerSessionIpc(): void {
       /** Where to remember it. A string files the session into that Space,
        *  `null` files it out of every Space, absent leaves it where it ran. */
       packId: z.string().min(1).nullable().optional(),
+      /** A retry: run only these halves (the ones that failed). */
+      only: z.array(z.enum(['summary', 'memory'])).min(1).optional(),
     }),
-    async ({ id, packId }) => {
-      if (!sessionsRepo.detail(id)) throw new Error('Session not found');
-      // Filing FIRST is what makes the choice mean anything: both the archive
-      // and the memory candidates read their scope off this column, so moving
-      // the session afterwards would leave them attached to the old Space.
-      if (packId !== undefined) sessionsRepo.setPack(id, packId);
-      const [archived, memories] = await Promise.all([
-        archiveSession(id).catch(() => 0),
-        extractMemoryCandidates(id).catch(() => 0),
-      ]);
-      return { archived, memories };
-    },
+    ({ id, packId, only }) =>
+      rememberSession(
+        id,
+        packId,
+        () => {
+          try {
+            return resolveTask('parsing').provider;
+          } catch {
+            return null;
+          }
+        },
+        only,
+      ),
   );
 
   handle(IPC.session.delete, zId, ({ id }) => {

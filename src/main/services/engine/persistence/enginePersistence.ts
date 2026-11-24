@@ -1,5 +1,6 @@
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { db, schema } from '../../../db';
+import { transcriptOrder } from '../../../db/transcriptOrder';
 import type { ContributionKind, Speaker } from '@shared/types';
 
 /**
@@ -17,11 +18,22 @@ export const enginePersistence = {
     return db().select().from(schema.sessions).where(eq(schema.sessions.id, sessionId)).get();
   },
 
-  finalTranscript(sessionId: string, speaker: Speaker, text: string): string {
+  /** `at`: when the turn was SPOKEN (ms) — the order it is read back in
+   *  (transcriptOrder). A candidate turn is committed late, after the echo
+   *  guard; without it the row would sort after the next question. */
+  finalTranscript(sessionId: string, speaker: Speaker, text: string, at?: number, captureSeq?: number): string {
     const id = crypto.randomUUID();
     db()
       .insert(schema.transcriptChunks)
-      .values({ id, sessionId, speaker, text, isFinal: 1 })
+      .values({
+        id,
+        sessionId,
+        speaker,
+        text,
+        isFinal: 1,
+        ...(at !== undefined ? { createdAt: Math.round(at) } : {}),
+        ...(captureSeq !== undefined ? { captureSeq } : {}),
+      })
       .run();
     return id;
   },
@@ -52,6 +64,15 @@ export const enginePersistence = {
       .where(eq(schema.detectedQuestions.id, questionId))
       .get();
     return row ? { text: row.text, type: row.type } : null;
+  },
+
+  /** A split or corrected question re-answered on the same row. */
+  updateQuestionText(questionId: string, text: string, transcriptChunkId?: string | null): void {
+    db()
+      .update(schema.detectedQuestions)
+      .set({ text, ...(transcriptChunkId ? { transcriptChunkId } : {}) })
+      .where(eq(schema.detectedQuestions.id, questionId))
+      .run();
   },
 
   /** Replace any prior answer for this question so a regenerate overwrites
@@ -94,6 +115,44 @@ export const enginePersistence = {
       .set({ followupQuestion: followup })
       .where(eq(schema.aiAnswers.questionId, questionId))
       .run();
+  },
+
+  /** A resumed session's OWN timeline (oldest first): its final transcript
+   *  turns and its answered questions. Scoped by session id — another
+   *  session's rows can never be restored into this one. Bounded to the
+   *  last `maxTurns` turns. */
+  /** This session's turns (ALL of them, whole — the conversation context
+   *  bounds memory itself and searches these past its bound) and answers. */
+  sessionTimeline(sessionId: string): {
+    turns: { speaker: Speaker; text: string; at: number; seq: number | null }[];
+    answers: { questionId: string; question: string; answer: string; at: number }[];
+  } {
+    const turns = db()
+      .select({
+        speaker: schema.transcriptChunks.speaker,
+        text: schema.transcriptChunks.text,
+        at: schema.transcriptChunks.createdAt,
+        seq: schema.transcriptChunks.captureSeq,
+      })
+      .from(schema.transcriptChunks)
+      .where(eq(schema.transcriptChunks.sessionId, sessionId))
+      .orderBy(...transcriptOrder())
+      .all()
+      .filter((t) => t.text.trim())
+      .map((t) => ({ speaker: t.speaker as Speaker, text: t.text, at: t.at, seq: t.seq ?? null }));
+    const answers = db()
+      .select({
+        questionId: schema.detectedQuestions.id,
+        question: schema.detectedQuestions.text,
+        answer: schema.aiAnswers.directAnswer,
+        at: schema.aiAnswers.createdAt,
+      })
+      .from(schema.detectedQuestions)
+      .innerJoin(schema.aiAnswers, eq(schema.aiAnswers.questionId, schema.detectedQuestions.id))
+      .where(eq(schema.detectedQuestions.sessionId, sessionId))
+      .orderBy(asc(schema.aiAnswers.createdAt))
+      .all();
+    return { turns, answers };
   },
 
   /** Dual-write: the generic contribution row for a completed generation. */

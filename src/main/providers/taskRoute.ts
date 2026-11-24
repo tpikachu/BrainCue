@@ -23,6 +23,43 @@ export function installTaskRouteResolver(fn: TaskRouteResolver): void {
   resolver = fn;
 }
 
+type UnavailableMarker = (route: TaskRoute) => void;
+let markUnavailable: UnavailableMarker | null = null;
+
+/** models.ts installs where "this model is not served" is remembered. */
+export function installUnavailableMarker(fn: UnavailableMarker): void {
+  markUnavailable = fn;
+}
+
+/** A request failed because its model is not served to the account:
+ *  remember THAT route — the one the request was sent on, captured before it
+ *  was sent. (Resolving "the task's route" when the error arrives blamed
+ *  whatever the task resolves to by then: a concurrent failure marked the
+ *  healthy fallback, and a key removed mid-request moved the retry to
+ *  another provider.) */
+export function markRouteUnavailable(route: TaskRoute): void {
+  markUnavailable?.(route);
+}
+
+/** After a model error on `failed` (the attempt's captured route): mark it,
+ *  then return the route to retry on — only a DIFFERENT model on the SAME
+ *  provider, else null (the error surfaces; nothing moves elsewhere). */
+export function retryRouteAfterModelError(task: ModelKey, failed: TaskRoute): TaskRoute | null {
+  markRouteUnavailable(failed);
+  const next = taskRoute(task);
+  return next && next.provider === failed.provider && next.model !== failed.model ? next : null;
+}
+
+/** The full route (provider + model) for a task, or null before a resolver
+ *  is installed — latency records name the model that answered. */
+export function taskRoute(task: ModelKey): TaskRoute | null {
+  try {
+    return resolver ? resolver(task) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The provider a task currently routes to (`openai` until a resolver exists). */
 export function taskProvider(task: ModelKey): CloudProviderId {
   return resolver ? resolver(task).provider : 'openai';

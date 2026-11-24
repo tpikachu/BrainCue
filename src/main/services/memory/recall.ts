@@ -2,6 +2,7 @@ import { contextPacksRepo } from '../../db/repositories/jobs.repo';
 import { memoriesRepo } from '../../db/repositories/memories.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
 import { providerFor } from '../../providers/registry';
+import { embedLiveQuery } from '../rag/liveEmbed';
 import { bufferToVector, cosineSimilarity } from '../rag/vectorMath';
 import { buildIndex, hasExactAnchor, lexicalScore, tokenize } from './lexical';
 import type { MemoryCategory, RetrievedMemory } from '@shared/types';
@@ -43,28 +44,45 @@ export async function recallMemories(
   query: string,
   packId: string | null,
   now = Date.now(),
+  opts: {
+    /** false: return the memories without marking them used — the caller
+     *  marks them (markRecalled) only if the answer actually uses them. The
+     *  live engine recalls while the question is still being spoken. */
+    markUsed?: boolean;
+    /** The query could not be embedded in time (or at all): memories were
+     *  matched lexically only — by what the question names. */
+    onLexical?: () => void;
+    /** A live answer exhausted its semantic-lookup wait budget. */
+    lexicalOnly?: boolean;
+  } = {},
 ): Promise<RetrievedMemory[]> {
   try {
-    if (settingsRepo.get(SETTINGS_KEYS.memoryEnabled) !== '1') return []; // consent off
-    if (packId) {
-      const pack = contextPacksRepo.get(packId);
-      if (pack && !pack.memoryEnabled) return []; // Space opted out
-    }
+    if (!memoryAllowed(packId)) return []; // consent off, or the Space opted out
     const rows = memoriesRepo.recallRows(profileId, packId, now);
     if (rows.length === 0) return [];
 
     // Only vectors from the CURRENT embedding space are comparable; rows from
     // an older provider/model wait for a re-embed rather than mis-ranking.
-    const identity = providerFor('embedding').identity();
-    const usable = rows.filter(
+    const identity = opts.lexicalOnly ? null : providerFor('embedding').identity();
+    const usable = identity ? rows.filter(
       (r) =>
         r.embedProvider === identity.provider &&
         r.embedModel === identity.model &&
         r.embedDim === identity.dim,
-    );
+    ) : rows;
     if (usable.length === 0) return [];
 
-    const queryVector = await providerFor('embedding').embedOne(query);
+    // Bounded and shared with document retrieval (rag/liveEmbed.ts). Past
+    // the deadline, or on a failed call, memories are still matched by what
+    // the question names (the lexical + exact-anchor rule below) instead of
+    // all being dropped.
+    let queryVector: Float32Array | null = null;
+    try {
+      if (opts.lexicalOnly) opts.onLexical?.();
+      else queryVector = await embedLiveQuery(query);
+    } catch {
+      opts.onLexical?.();
+    }
     const queryTokens = tokenize(query);
     // Indexed over THIS profile's memories: rarity is relative to what the user
     // actually stores, so a word common in their corpus stops being a signal.
@@ -72,7 +90,7 @@ export async function recallMemories(
 
     const scored = usable
       .map((r) => {
-        const semantic = cosineSimilarity(queryVector, bufferToVector(r.embedVector as Buffer));
+        const semantic = queryVector ? cosineSimilarity(queryVector, bufferToVector(r.embedVector as Buffer)) : 0;
         const lexical = lexicalScore(queryTokens, r.content, index);
         const recent =
           (r.lastUsedAt ?? r.updatedAt) >= now - RECENCY_WINDOW_MS ? RECENCY_WEIGHT : 0;
@@ -93,20 +111,71 @@ export async function recallMemories(
       .sort((a, b) => b.blended - a.blended)
       .slice(0, MEMORY_TOP_K);
 
-    memoriesRepo.markUsed(
-      scored.map((s) => s.row.id),
-      now,
-    );
+    if (opts.markUsed !== false)
+      memoriesRepo.markUsed(
+        scored.map((s) => s.row.id),
+        now,
+      );
     return scored.map((s) => ({
       id: s.row.id,
       category: s.row.category as MemoryCategory,
-      content:
-        s.row.content.length > MEMORY_MAX_CHARS
-          ? `${s.row.content.slice(0, MEMORY_MAX_CHARS - 1)}…`
-          : s.row.content,
+      content: clip(s.row.content),
       score: s.semantic,
     }));
   } catch {
     return []; // recall must never break an answer
+  }
+}
+
+const clip = (content: string) =>
+  content.length > MEMORY_MAX_CHARS ? `${content.slice(0, MEMORY_MAX_CHARS - 1)}…` : content;
+
+/** Is memory allowed for this profile/Space right now (global consent and
+ *  the Space's own switch)? */
+function memoryAllowed(packId: string | null): boolean {
+  if (settingsRepo.get(SETTINGS_KEYS.memoryEnabled) !== '1') return false;
+  if (packId) {
+    const pack = contextPacksRepo.get(packId);
+    if (pack && !pack.memoryEnabled) return false;
+  }
+  return true;
+}
+
+/**
+ * Memories recalled EARLIER (the live engine recalls while the question is
+ * still being spoken), checked again at the moment an answer is about to
+ * use them: memory must still be on — globally and for this Space — and each
+ * memory must still be eligible (approved, not superseded, deleted or
+ * expired). Ineligible ones are dropped; the rest carry their CURRENT text.
+ * Fails closed: on any error, no memory is sent. M7.2b review.
+ */
+export function revalidateRecalled(
+  profileId: string,
+  packId: string | null,
+  memories: RetrievedMemory[],
+  now = Date.now(),
+): RetrievedMemory[] {
+  if (memories.length === 0) return memories;
+  try {
+    if (!memoryAllowed(packId)) return [];
+    const current = new Map(memoriesRepo.recallRows(profileId, packId, now).map((r) => [r.id, r]));
+    return memories
+      .filter((m) => current.has(m.id))
+      .map((m) => ({ ...m, content: clip(current.get(m.id)!.content) }));
+  } catch {
+    return [];
+  }
+}
+
+/** Mark memories recalled with `markUsed: false` as used, once an answer
+ *  actually uses them. Never throws. */
+export function markRecalled(memories: RetrievedMemory[], now = Date.now()): void {
+  try {
+    memoriesRepo.markUsed(
+      memories.map((m) => m.id),
+      now,
+    );
+  } catch {
+    /* recency bookkeeping must never break an answer */
   }
 }

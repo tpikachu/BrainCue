@@ -1,70 +1,196 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useActiveProfile } from '../store/useProfileStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useLiveSession } from '../store/useLiveSession';
+import { useReadiness, useReadinessStore } from '../store/useReadiness';
 import { ACTIVITIES, DEFAULT_ACTIVITY, activityOf } from '@shared/activities';
-import type { CompanionPresence, ContextPackKind, Job, Presence } from '@shared/types';
+import { cloudProvider } from '@shared/providers';
+import type { CompanionPresence, ContextPackKind, Job, Presence, SessionDetail, SessionListItem } from '@shared/types';
 import { COMPANION_TO_ENGINE_PRESENCE } from '@shared/types';
-import { Button, Dropdown, Field, Modal, Select } from '../components/ui';
+import { Button, Dropdown, Field, Modal, Select, TextInput } from '../components/ui';
 import { JobFormModal } from './JobFormModal';
+import { EDIT_ROLE, ReadinessChecklist } from './ReadinessChecklist';
 import {
   BUDGET_OPTIONS,
   COMPANION_PRESENCE_OPTIONS,
   PRACTICE_LINKS,
   PRESENCE_OPTIONS,
   START_ACTIVITIES,
-  spacesFor,
+  captureSummary,
+  pickerOptions,
+  isResumableInterview,
+  resolveDefaultSpace,
+  spaceFits,
   startBlocker,
 } from './startFlow';
 
+/** How many Spaces the picker loads at once; older ones are found by search. */
+const PAGE = 100;
+
 /**
- * The universal start flow (docs/18-ACTIVITIES.md): one shared surface for
- * every conversation — say what the call is → who you are and what grounds it →
- * what it listens to, see exactly what will be captured and sent, and start
- * only on the explicit button.
+ * The ONE start flow (docs/18-ACTIVITIES.md, docs/23-INTERVIEW-COPILOT.md §7).
  *
- * There is no mode picker. Choosing a mode AND a Space kind was the same
- * question asked twice, and answering it twice let the two disagree. The
- * activity resolves the mode; what that means for behaviour is printed on the
- * choice rather than hidden behind a second one.
+ * For an interview — the primary feature — it is short: which role, one line
+ * each for résumé, role & JD, audio and AI (each gap names its fix), and an
+ * explicit Start. The role a returning user last interviewed for is already
+ * chosen, so Home → Start interview → Start is the whole path. The Interview
+ * page's per-role Start opens this same flow rather than starting on its own.
+ *
+ * The chosen role is held as its own validated record, apart from the picker's
+ * page of options: a role handed in, or remembered from last time, is read by
+ * id from main and checked against this profile and activity — never replaced
+ * because it is not on the first page. Older roles are found by search.
+ *
+ * Every lookup that can set the choice carries the CHOICE GENERATION it began
+ * in; closing, reopening, a profile or activity change and any newer choice
+ * start a new generation, so a late reply (success, failure or finalisation)
+ * from an earlier one is ignored — it can never put back a role the user has
+ * since moved away from.
+ *
+ * Every other conversation starts here too ("Other conversation" on Home, or a
+ * Space in the Library): then the activity is asked, because it is the
+ * question — the activity resolves the engine mode, never a mode picker.
+ *
+ * Nothing is captured before Start. What is captured and what is sent (to
+ * which provider) is one click away in the disclosure above the button.
+ *
+ * RESUME comes through here too (`resume`): the same setup rows, readiness
+ * and disclosure before anything is captured, with the role fixed to the
+ * interview's own and its transcript restored — the earlier content is never
+ * deleted, whatever happens to the new attempt.
  */
 export function StartSessionModal(props: {
   open: boolean;
   onClose: () => void;
   initialSpaceId?: string;
   initialActivity?: ContextPackKind;
+  /** Continue this saved interview instead of starting a new one. */
+  resume?: SessionListItem;
 }) {
+  const resume = props.resume ?? null;
   const navigate = useNavigate();
-  // Whose session this is was decided in the sidebar — the modal no longer asks.
+  // Whose session this is was decided in the sidebar — the modal never asks.
   const profile = useActiveProfile();
   const profileId = profile?.id ?? '';
   const { settings, load: loadSettings } = useSettingsStore();
   const live = useLiveSession();
+  const readiness = useReadiness();
+  const refreshReadiness = useReadinessStore((s) => s.refresh);
 
   const [activity, setActivity] = useState<ContextPackKind>(DEFAULT_ACTIVITY);
-  const [spaceId, setSpaceId] = useState(props.initialSpaceId ?? '');
-  const [spaces, setSpaces] = useState<Job[]>([]);
+  /** Ask "what's this call?" — not for an interview: that is already known. */
+  const [askActivity, setAskActivity] = useState(false);
+  /** The chosen Space, validated (this profile, this activity) — or none. */
+  const [selected, setSelected] = useState<Job | null>(null);
+  /** The user (or the caller) chose it; the default no longer applies. */
+  const [chosen, setChosen] = useState(false);
+  /** The default was resolved for this profile|activity — not again. */
+  const [defaultedFor, setDefaultedFor] = useState<string | null>(null);
+  /** A Space handed in is being read — hold the default until it is. */
+  const [resolving, setResolving] = useState(false);
+  /** One page of this activity's Spaces (server-filtered, server-paged). */
+  const [page, setPage] = useState<{ key: string; items: Job[]; total: number } | null>(null);
+  const [query, setQuery] = useState('');
+  const [debounced, setDebounced] = useState('');
+  const [reloads, setReloads] = useState(0);
+  const [sessions, setSessions] = useState<{ profileId: string; items: SessionListItem[] } | null>(null);
   const [presence, setPresence] = useState<Presence>('balanced'); // meetings: answer questions asked in the room
   const [companionPresence, setCompanionPresence] = useState<CompanionPresence>('assistive');
   const [budgetCents, setBudgetCents] = useState<number | null>(null);
-  const [creatingSpace, setCreatingSpace] = useState(false);
+  /** The role/Space form, replacing this modal while open: new, or editing one. */
+  const [form, setForm] = useState<null | 'new' | Job>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const config = ACTIVITIES[activity] ?? ACTIVITIES[DEFAULT_ACTIVITY];
   const mode = config.mode;
+  const interview = activity === 'job';
+  const scopeKey = `${profileId}|${activity}`;
+  const pageKey = `${scopeKey}|${debounced}`;
 
+  /** The current choice generation (see above). */
+  const choiceGen = useRef(0);
+  /** Start a new generation: every lookup begun before it is now stale, and
+   *  none of them may finish "resolving" for this one. */
+  const invalidate = () => {
+    choiceGen.current += 1;
+    setResolving(false);
+    return choiceGen.current;
+  };
+  const clearChoice = () => {
+    setSelected(null);
+    setChosen(false);
+    setDefaultedFor(null);
+  };
+  /** The user picked (or created) this Space: it supersedes any lookup. */
+  const choose = (s: Job | null) => {
+    invalidate();
+    setSelected(s);
+    setChosen(true);
+  };
+
+  // Reset on open. A Space handed in (Library, Interview page) is read by id
+  // and kept as the choice if it is this profile's — it answers the activity
+  // too, since lists are per activity.
   useEffect(() => {
-    if (!props.open) return;
+    // Closing ends the opening: whatever it was still looking up is stale.
+    if (!props.open) {
+      invalidate();
+      return;
+    }
+    const gen = invalidate();
+    const current = () => gen === choiceGen.current;
     void loadSettings();
-    setActivity(props.initialActivity ?? DEFAULT_ACTIVITY);
-    setSpaceId(props.initialSpaceId ?? '');
+    void refreshReadiness();
+    const initial = props.initialActivity ?? DEFAULT_ACTIVITY;
+    setActivity(initial);
+    setAskActivity(initial !== 'job');
+    clearChoice();
+    setQuery('');
+    setDebounced('');
     setPresence('balanced');
-    setCreatingSpace(false);
+    setForm(null);
     setError(null);
-  }, [props.open, props.initialSpaceId, props.initialActivity, loadSettings]);
+    // Resuming: the role is the interview's own, read by id like any other.
+    const handedIn = resume ? (resume.jobId ?? undefined) : props.initialSpaceId;
+    setResolving(!!handedIn);
+    if (handedIn) {
+      void api.jobs
+        .get(handedIn)
+        .then((raw) => {
+          if (!current()) return; // reopened, switched, or a newer choice since
+          const j = raw as Job | null;
+          if (!j) return;
+          const a = activityOf(j.kind);
+          setActivity(a);
+          setAskActivity(a !== 'job');
+          if (spaceFits(j, { profileId, activity: a })) {
+            setSelected(j);
+            setChosen(true);
+          }
+        })
+        .catch(() => {})
+        // Only this opening's own lookup ends its "resolving".
+        .finally(() => current() && setResolving(false));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.open, props.initialSpaceId, props.initialActivity, resume?.id, loadSettings, refreshReadiness]);
+
+  // A profile switch makes every choice stale — and every lookup in flight:
+  // start over from the new profile's default.
+  const lastProfile = useRef(profileId);
+  useEffect(() => {
+    // Only a real change (not mount — the opening's own reset covers that,
+    // and invalidating here would orphan that opening's lookup).
+    if (lastProfile.current === profileId) return;
+    lastProfile.current = profileId;
+    invalidate();
+    clearChoice();
+    setQuery('');
+    setDebounced('');
+  }, [profileId]);
 
   // Companion defaults (posture + budget) come from the global companion config.
   useEffect(() => {
@@ -74,47 +200,189 @@ export function StartSessionModal(props: {
     }
   }, [settings]);
 
-  // Spaces are per-profile (they ground the answers in that profile's world).
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(query.trim()), 250);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  // One page of THIS activity's Spaces, server-side — searched when asked.
   useEffect(() => {
     if (!props.open || !profileId) {
-      setSpaces([]);
+      setPage(null);
       return;
     }
+    let alive = true;
+    const key = pageKey;
     void api.jobs
-      .page(profileId, '', 100, 0)
-      .then(({ items }) => setSpaces(items as Job[]))
-      .catch(() => setSpaces([]));
-  }, [props.open, profileId]);
+      .page(profileId, debounced, PAGE, 0, activity)
+      .then(({ items, total }) => alive && setPage({ key, items: items as Job[], total }))
+      .catch(() => alive && setPage({ key, items: [], total: 0 }));
+    return () => {
+      alive = false;
+    };
+  }, [props.open, profileId, activity, debounced, pageKey, reloads]);
 
-  // A Space IS a saved activity, so picking one answers the question. This now
-  // only ever fires for a Space that arrived as `initialSpaceId` from the
-  // Library — one picked in the list below already matches, because the list
-  // below only offers Spaces of the chosen activity.
+  // This profile's sessions — what the user actually chose last time.
   useEffect(() => {
-    const picked = spaces.find((s) => s.id === spaceId);
-    if (picked) setActivity(activityOf(picked.kind));
-  }, [spaces, spaceId]);
+    if (!props.open || !profileId) {
+      setSessions(null);
+      return;
+    }
+    let alive = true;
+    void api.session
+      .list(profileId)
+      .then((all) => alive && setSessions({ profileId, items: all as SessionListItem[] }))
+      .catch(() => alive && setSessions({ profileId, items: [] }));
+    return () => {
+      alive = false;
+    };
+  }, [props.open, profileId, live.session]);
 
-  const options = useMemo(() => spacesFor(spaces, activity), [spaces, activity]);
+  const current = page?.key === pageKey ? page : null;
+  const history = sessions?.profileId === profileId ? sessions.items : null;
 
-  const space = spaces.find((s) => s.id === spaceId);
+  // The default, once per profile|activity: the Space last used (read by id,
+  // wherever it sits), else the only one an interview could use, else none.
+  useEffect(() => {
+    // A resume never falls back to a default: its role is the interview's own.
+    if (!props.open || resume || chosen || resolving || !history || !current || debounced) return;
+    if (defaultedFor === scopeKey) return;
+    let alive = true;
+    const forKey = scopeKey;
+    const gen = choiceGen.current;
+    void resolveDefaultSpace({
+      activity,
+      profileId,
+      sessions: history,
+      page: current,
+      get: async (id) => (await api.jobs.get(id)) as Job | null,
+    }).then((s) => {
+      if (!alive || gen !== choiceGen.current) return;
+      setSelected(s);
+      setDefaultedFor(forKey);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [props.open, resume, chosen, resolving, history, current, debounced, defaultedFor, scopeKey, activity, profileId]);
+
+  const options = pickerOptions(current?.items ?? [], selected);
+  // More roles than one page holds (or a search in progress): offer search.
+  const searchable = !!query || (!!current && current.total > current.items.length);
+  const space = selected ?? undefined;
   const spaceTitle = space ? space.company || space.title : null;
-  const blocker = startBlocker({
-    profile,
-    apiKeyPresent: !!settings?.apiKeyPresent,
-    sttReady: !!settings?.sttReady,
-    sessionLive: !!live.session,
+  /** Resume-only gates: the interview must be this profile's, and its role
+   *  must still exist (its JD is what grounds the answers). */
+  const resumeBlocker = !resume
+    ? null
+    : resume.profileId !== profileId
+      ? 'This interview belongs to another profile — switch to it in the sidebar to resume it.'
+      : !resolving && !space
+        ? 'This interview’s role no longer exists — start a new interview instead.'
+        : null;
+  const blocker = !readiness
+    ? null // still checking — Start stays disabled below, without a false alarm
+    : resumeBlocker ??
+      startBlocker({
+        profile,
+        chatReady: readiness.chat.ready,
+        chatProblem: readiness.chat.problem,
+        sttReady: readiness.transcription.ready,
+        sttProblem: readiness.transcription.problem,
+        sessionLive: !!live.session,
+        activity,
+        spaceId: space?.id ?? '',
+      });
+  const nameOf = (p: string) => cloudProvider(p)?.name ?? p;
+  const summary = captureSummary({
+    listensTo: config.listensTo,
+    spaceTitle,
     activity,
-    spaceId,
+    sttEngine: readiness?.transcription.engine,
+    retrieval: readiness?.retrieval.mode,
+    routes: readiness
+      ? {
+          answer: nameOf(readiness.routes.answer),
+          classify: nameOf(readiness.routes.classify),
+          parsing: nameOf(readiness.routes.parsing),
+        }
+      : undefined,
   });
+
   const start = async () => {
-    if (blocker) return;
+    if (blocker || !readiness) return;
     setStarting(true);
     setError(null);
     try {
-      await live.startNew({
+      if (resume) {
+        // Continue the SAME session: its transcript becomes the live context
+        // again. A failed resume never deletes it (resumeExisting keeps it).
+        //
+        // Validated again HERE, from the session as it is now — not the list
+        // row or the lookup made when the modal opened — before any capture
+        // starts: still this profile's, still a resumable interview, and its
+        // role still exists (its JD grounds the answers). Main checks the
+        // role again on resume.
+        const detail = (await api.session.get(resume.id)) as SessionDetail | null;
+        if (!detail) {
+          setError('This interview no longer exists — it may have been deleted.');
+          return;
+        }
+        if (detail.profileId !== profileId) {
+          setError('This interview belongs to another profile — switch to it in the sidebar to resume it.');
+          return;
+        }
+        // A deleted role leaves the session with no role (the column is
+        // set null) — that is the deleted-role case below, not this one.
+        if (!isResumableInterview({ ...detail, jobId: detail.jobId ?? resume.jobId })) {
+          setError('This session can’t be resumed as an interview. Start a new interview instead.');
+          return;
+        }
+        let role: Job | null = null;
+        try {
+          if (detail.jobId) role = (await api.jobs.get(detail.jobId)) as Job | null;
+        } catch (e) {
+          // Unknown is not gone: nothing starts, and the user can try again.
+          setError(`Couldn’t check this interview’s role (${(e as Error)?.message || 'unknown error'}). Nothing was started — try again.`);
+          return;
+        }
+        if (!spaceFits(role, { profileId, activity: 'job' })) {
+          // The advertised blocker: the role row is cleared, so it shows.
+          invalidate();
+          clearChoice();
+          setError(null);
+          return;
+        }
+        const prior = detail.transcript.map((c, i) => ({ id: i, speaker: c.speaker, text: c.text }));
+        const resumed = await live.resumeExisting({
+          sessionId: resume.id,
+          listensTo: config.listensTo,
+          micDeviceId: settings?.audio?.micDeviceId ?? null,
+          prior,
+        });
+        if (!resumed.ok) {
+          setError(resumed.error);
+          return;
+        }
+        props.onClose();
+        navigate('/interview');
+        return;
+      }
+      // Re-read the chosen Space: one deleted (or moved out of this profile)
+      // since it was chosen is never started against.
+      if (space) {
+        const fresh = (await api.jobs.get(space.id).catch(() => null)) as Job | null;
+        if (!spaceFits(fresh, { profileId, activity })) {
+          invalidate();
+          clearChoice();
+          setReloads((n) => n + 1);
+          setError(interview ? 'That role no longer exists — choose another.' : 'That Space no longer exists — choose another.');
+          return;
+        }
+      }
+      const started = await live.startNew({
         profileId,
-        jobId: spaceId || null,
+        jobId: space?.id ?? null,
         // No interviewType: it is chosen live in the Cue Card for interviews and
         // means nothing anywhere else. The session row keeps its 'general' default.
         // One answer style for every mode; the Cue Card's General | Technical
@@ -134,6 +402,12 @@ export function StartSessionModal(props: {
         companionPresence: mode === 'companion' ? companionPresence : undefined,
         budgetCents: mode === 'companion' ? budgetCents : undefined,
       });
+      // Nothing is flowing: stay open and say why (the streams are released
+      // and no session is left running).
+      if (!started.ok) {
+        setError(started.error);
+        return;
+      }
       props.onClose();
       // Interviews continue in their workspace; ambient sessions live in the Cue Card.
       navigate(mode === 'interview' ? '/interview' : '/home');
@@ -144,215 +418,258 @@ export function StartSessionModal(props: {
     }
   };
 
-  const goPractice = (path: '/mock' | '/sparring') => {
+  const go = (to: string) => {
+    if (to === EDIT_ROLE) {
+      if (space) setForm(space);
+      return;
+    }
     props.onClose();
-    navigate(path);
+    navigate(to);
   };
 
-  /** A Space created here is the one about to be used, so it is selected
-   *  immediately — and the activity follows it, in case the sub-form's own
-   *  picker was changed while it was open. */
-  const spaceCreated = (saved: Job) => {
-    setSpaces((prev) => [saved, ...prev.filter((s) => s.id !== saved.id)]);
-    setActivity(activityOf(saved.kind));
-    setSpaceId(saved.id);
-    // Closing is the sub-form's own call: it stays open to report a link it
-    // could not read, and that notice must not be taken off the screen here.
+  /** A Space created or edited here is the one about to be used. Closing the
+   *  form is its own call: it stays open to report a link it could not read. */
+  const spaceSaved = (saved: Job) => {
+    choose(saved);
+    setReloads((n) => n + 1);
   };
+  /** Deleted from its form here: it can no longer be the choice. */
+  const spaceDeleted = (id: string) => {
+    if (selected?.id === id) {
+      invalidate();
+      clearChoice();
+    }
+    setReloads((n) => n + 1);
+  };
+
+  const roleLabel = (s: Job) => `${s.title || 'Untitled'}${s.company ? ` · ${s.company}` : ''}`;
 
   return (
     <>
-      {/* Creating a Space REPLACES this modal rather than stacking on it: the
-          start form's state lives in this component, so it survives untouched
-          and comes back with the new Space already chosen. */}
+      {/* The role/Space form REPLACES this modal rather than stacking on it:
+          the start form's state lives here, so it survives untouched and comes
+          back with the new or edited role chosen. */}
       <JobFormModal
-        open={props.open && creatingSpace}
+        open={props.open && form !== null}
         profileId={profileId}
+        job={form && form !== 'new' ? form : null}
         initialKind={activity}
-        onClose={() => setCreatingSpace(false)}
-        onSaved={spaceCreated}
+        lockKind
+        onClose={() => setForm(null)}
+        onSaved={spaceSaved}
+        onDeleted={spaceDeleted}
       />
-    <Modal
-      open={props.open && !creatingSpace}
-      onClose={props.onClose}
-      title="Start a session"
-      width="max-w-lg"
-    >
-      <div className="space-y-5 text-sm">
-        {/* 1 · What is this? The only question about what BrainCue will be.
-            A dropdown, not a card grid: eight tiles pushed the Space and the
-            start button below the fold, and the choice is
-            one word — it does not need a card each. What the choice MEANS is
-            printed underneath, so nothing the cards said is lost. */}
-        <Field label="What’s this call?">
-          <Dropdown
-            value={activity}
-            options={START_ACTIVITIES.map((a) => ({ value: a.id, label: a.label }))}
-            onChange={(v) => {
-              const next = v as ContextPackKind;
-              setActivity(next);
-              // Drop a Space that no longer belongs to the chosen activity —
-              // it is about to disappear from the list, and a selection you
-              // cannot see is the one that surprises you afterwards.
-              setSpaceId((id) => (spacesFor(spaces, next).some((s) => s.id === id) ? id : ''));
-            }}
-          />
-          <p className="mt-1.5 text-xs leading-snug text-neutral-400">
-            {config.hint} <span className="text-neutral-500">{config.does}</span>
-          </p>
-        </Field>
-
-        {/* 1b · Practice is preparation FOR an interview, not a kind of call. */}
-        {activity === 'job' && (
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-white/5 bg-neutral-900/60 p-3">
-            <span className="text-xs text-neutral-400">Not the real thing yet?</span>
-            {PRACTICE_LINKS.map((p) => (
-              <Button key={p.to} variant="ghost" onClick={() => goPractice(p.to)}>
-                {p.label}
-              </Button>
-            ))}
-          </div>
-        )}
-
-        {/* 2 · Which Space this belongs to — what grounds the answers now AND
-            what keeps them afterwards. Only Spaces of the chosen activity are
-            offered, because a Space is a saved activity. */}
-        <Field
-          label={`${config.label} Space${config.needsSpace ? '' : ' (optional)'} · ${profile?.name ?? 'no profile'}`}
-        >
-          <div className="flex gap-2">
-            <Select
-              value={spaceId}
-              onChange={(e) => setSpaceId(e.target.value)}
-              disabled={!profileId}
-              className="flex-1"
-            >
-              <option value="">
-                {config.needsSpace ? 'Choose a Space…' : 'No Space — keep nothing afterwards'}
-              </option>
-              {options.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.title || 'Untitled'}
-                  {s.company ? ` · ${s.company}` : ''}
-                </option>
-              ))}
-            </Select>
-            <Button variant="default" disabled={!profileId} onClick={() => setCreatingSpace(true)}>
-              New Space
-            </Button>
-          </div>
-          <p className="mt-1.5 text-xs leading-snug text-neutral-400">
-            {spaceId ? (
-              <>
-                Grounded in what this Space knows, and everything you keep is filed back into it —
-                so the next one here starts where this one ends.
-              </>
-            ) : config.needsSpace ? (
-              <>
-                An interview is one round of several. Give it a Space — the role and who it is with,
-                like “Senior engineer · Acme” — so what they asked, what you claimed, and what they
-                pushed on is there for the next round.
-              </>
-            ) : options.length === 0 ? (
-              <>
-                No {config.label.toLowerCase()} Spaces yet. Starting without one is fine — it just
-                will not be summarised or remembered afterwards.
-              </>
-            ) : (
-              <>Without one, nothing is summarised or remembered when this ends.</>
-            )}
-          </p>
-        </Field>
-
-        {/* 3 · What it hears. Not a question any more: a call is heard on BOTH
-            sides — the call's audio and your microphone — and questions are
-            taken from the call, never from you. A solo session is just you.
-            Said plainly, so what happens on Start is never a surprise. */}
-        <p className="text-xs leading-snug text-neutral-400" data-testid="hears">
-          {config.listensTo === 'mic' ? (
-            <>
-              <span className="font-medium text-neutral-300">Hears your microphone.</span> No call —
-              questions come from what you say.
-            </>
-          ) : (
-            <>
-              <span className="font-medium text-neutral-300">
-                Hears the call (system audio) and your microphone.
-              </span>{' '}
-              Questions come from the call; your own words are kept in the transcript, never answered.
-            </>
+      <Modal
+        open={props.open && form === null}
+        onClose={props.onClose}
+        busy={starting ? (resume ? 'Resuming' : 'Starting') : false}
+        title={resume ? 'Resume the interview' : interview ? 'Start an interview' : 'Start a session'}
+        width="max-w-lg"
+      >
+        <div className="space-y-4 text-sm">
+          {/* What is this? Asked only when it is the question — "Other
+              conversation", or a Space of another kind. */}
+          {askActivity && (
+            <Field label="What’s this call?">
+              <Dropdown
+                value={activity}
+                options={START_ACTIVITIES.map((a) => ({ value: a.id, label: a.label }))}
+                onChange={(v) => {
+                  setActivity(v as ContextPackKind);
+                  // A Space of the previous activity is not offered for this
+                  // one; its own default applies instead.
+                  invalidate();
+                  clearChoice();
+                  setQuery('');
+                  setDebounced('');
+                }}
+              />
+              <p className="mt-1.5 text-xs leading-snug text-neutral-400">{config.hint}</p>
+            </Field>
           )}
-        </p>
 
-        {/* 3b · Presence — how present it should be. The one dial that genuinely
-            varies WITHIN an activity, so it stays a question. */}
-        {mode === 'meeting' && (
-          <Field label="Presence">
-            <Select value={presence} onChange={(e) => setPresence(e.target.value as Presence)}>
-              {PRESENCE_OPTIONS.map((p) => (
-                <option key={p.value} value={p.value}>
-                  {p.label} — {p.desc}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        )}
+          {/* Resuming: the role is fixed — it is this interview's. */}
+          {resume && (
+            <p className="rounded-lg border border-white/5 bg-neutral-950/50 px-3 py-2 text-xs text-neutral-300">
+              Continuing the round from{' '}
+              {new Date(resume.createdAt).toLocaleDateString([], { dateStyle: 'medium' })}
+              {space ? ` for ${roleLabel(space)}` : ''} — its transcript is restored and kept.
+            </p>
+          )}
 
-        {/* 3c · Companion posture + hard budget — the InterjectionPolicy's
-            explicit dials, chosen before anything starts. */}
-        {mode === 'companion' && (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Presence">
+          {/* Which role (an interview) or Space (anything else). */}
+          {!resume && (
+          <Field label={interview ? 'Role' : `${config.label} Space${config.needsSpace ? '' : ' (optional)'}`}>
+            <div className="flex gap-2">
               <Select
-                value={companionPresence}
-                onChange={(e) => setCompanionPresence(e.target.value as CompanionPresence)}
+                value={space?.id ?? ''}
+                onChange={(e) => choose(options.find((s) => s.id === e.target.value) ?? null)}
+                disabled={!profileId || (!current && !space)}
+                className="flex-1"
               >
-                {COMPANION_PRESENCE_OPTIONS.map((p) => (
+                <option value="">
+                  {!current && !space
+                    ? 'Loading…'
+                    : interview
+                      ? options.length === 0
+                        ? debounced
+                          ? 'No role matches'
+                          : 'No roles yet — add one'
+                        : 'Choose a role…'
+                      : config.needsSpace
+                        ? 'Choose a Space…'
+                        : 'None — keep nothing afterwards'}
+                </option>
+                {options.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {roleLabel(s)}
+                  </option>
+                ))}
+              </Select>
+              <Button variant="default" disabled={!profileId} onClick={() => setForm('new')}>
+                {interview ? 'New role' : 'New Space'}
+              </Button>
+            </div>
+            {/* Only when there are more than one page holds: find older ones. */}
+            {searchable && (
+              <TextInput
+                className="mt-2"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={interview ? 'Search older roles by title or company…' : 'Search Spaces…'}
+                aria-label={interview ? 'Search roles' : 'Search Spaces'}
+              />
+            )}
+            {/* Interviews: the rows below already say what is missing. */}
+            {!interview && (
+              <p className="mt-1.5 text-xs leading-snug text-neutral-400">
+                {space
+                  ? 'Grounded in this Space, and what you keep is filed back into it.'
+                  : 'Without one, nothing is summarised or remembered afterwards.'}
+              </p>
+            )}
+          </Field>
+          )}
+
+          {/* One line each: résumé, role & JD (interviews), audio, AI. */}
+          <ReadinessChecklist
+            profile={profile}
+            space={space}
+            interview={!!config.needsResume}
+            roleGone={!!resume && !resolving && !space}
+            listensTo={config.listensTo}
+            readiness={readiness}
+            onGo={go}
+          />
+
+          {/* Presence — the one dial that genuinely varies WITHIN an activity. */}
+          {mode === 'meeting' && (
+            <Field label="Presence">
+              <Select value={presence} onChange={(e) => setPresence(e.target.value as Presence)}>
+                {PRESENCE_OPTIONS.map((p) => (
                   <option key={p.value} value={p.value}>
                     {p.label} — {p.desc}
                   </option>
                 ))}
               </Select>
             </Field>
-            <Field label="Session budget">
-              <Select
-                value={budgetCents === null ? '' : String(budgetCents)}
-                onChange={(e) =>
-                  setBudgetCents(e.target.value === '' ? null : Number(e.target.value))
-                }
-              >
-                {BUDGET_OPTIONS.map((b) => (
-                  <option key={b.label} value={b.value === null ? '' : String(b.value)}>
-                    {b.label}
-                  </option>
+          )}
+
+          {/* Companion posture + hard budget, chosen before anything starts. */}
+          {mode === 'companion' && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Presence">
+                <Select
+                  value={companionPresence}
+                  onChange={(e) => setCompanionPresence(e.target.value as CompanionPresence)}
+                >
+                  {COMPANION_PRESENCE_OPTIONS.map((p) => (
+                    <option key={p.value} value={p.value}>
+                      {p.label} — {p.desc}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Session budget">
+                <Select
+                  value={budgetCents === null ? '' : String(budgetCents)}
+                  onChange={(e) => setBudgetCents(e.target.value === '' ? null : Number(e.target.value))}
+                >
+                  {BUDGET_OPTIONS.map((b) => (
+                    <option key={b.label} value={b.value === null ? '' : String(b.value)}>
+                      {b.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+          )}
+
+          {/* Consent: what is captured and what leaves the machine, for THIS
+              session — each kind of request with the provider it goes to. */}
+          <details className="rounded-xl border border-white/5 bg-neutral-900/40 px-3 py-2 text-xs text-neutral-400">
+            <summary className="cursor-pointer select-none text-neutral-300">
+              Nothing is recorded until you press Start · what is captured and sent
+            </summary>
+            <div className="mt-2 space-y-2 leading-snug">
+              <DisclosureList title="Captured on this machine" items={summary.captured} />
+              <DisclosureList title="Sent" items={summary.sent} />
+              <DisclosureList title="Never sent" items={summary.neverSent} />
+            </div>
+          </details>
+
+          {/* Résumé, role, transcription and AI gaps are already on their rows,
+              each with its fix — said once. Only what no row shows (a live
+              session, no profile) or a failed start is said here. */}
+          {(error || (blocker && (!profile || live.session || resumeBlocker))) && (
+            <p className="text-xs text-amber-400" role="alert">
+              ⚠ {error ?? blocker}
+            </p>
+          )}
+
+          {/* Explicit start — nothing is captured until this click. Practice
+              (preparation FOR an interview, not a kind of call) is one quiet link. */}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {interview && !resume && (
+              <span className="mr-auto text-xs text-neutral-500">
+                Practice first:{' '}
+                {PRACTICE_LINKS.map((p, i) => (
+                  <span key={p.to}>
+                    {i > 0 && ' · '}
+                    <button type="button" className="text-neutral-400 hover:text-neutral-200" onClick={() => go(p.to)}>
+                      {p.label}
+                    </button>
+                  </span>
                 ))}
-              </Select>
-            </Field>
+              </span>
+            )}
+            <Button variant="ghost" onClick={props.onClose}>
+              Cancel
+            </Button>
+            <Button
+              variant="success"
+              disabled={!!blocker || !readiness || resolving}
+              loading={starting}
+              onClick={() => void start()}
+            >
+              {resume ? 'Resume interview' : interview ? 'Start interview' : 'Start listening'}
+            </Button>
           </div>
-        )}
-
-        {(blocker || error) && (
-          <p className="text-xs text-amber-400" role="alert">
-            ⚠ {error ?? blocker}
-          </p>
-        )}
-
-        {/* 5 · Explicit start — nothing is captured until this click. */}
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={props.onClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="success"
-            disabled={!!blocker}
-            loading={starting}
-            onClick={() => void start()}
-          >
-            Start listening
-          </Button>
         </div>
-      </div>
-    </Modal>
+      </Modal>
     </>
+  );
+}
+
+function DisclosureList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div>
+      <div className="font-medium text-neutral-300">{title}</div>
+      <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+        {items.map((t) => (
+          <li key={t}>{t}</li>
+        ))}
+      </ul>
+    </div>
   );
 }

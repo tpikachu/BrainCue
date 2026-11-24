@@ -1,6 +1,7 @@
-import { and, desc, eq, inArray, like, notInArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, like, notInArray, or, sql } from 'drizzle-orm';
 import { db, schema } from '../index';
 import type { ContextPack, ContextPackKind } from '@shared/types';
+import { ACTIVITY_ORDER } from '@shared/activities';
 
 type Row = typeof schema.contextPacks.$inferSelect;
 
@@ -12,6 +13,14 @@ const notApplicationOwned = () =>
     schema.contextPacks.id,
     db().select({ id: schema.applications.packId }).from(schema.applications),
   );
+
+/** Rows whose kind reads as this activity. An unknown or absent kind reads as
+ *  `custom` (shared/activities.ts `activityOf`), so `custom` matches those too. */
+function activityIs(a: ContextPackKind) {
+  if (a !== 'custom') return eq(schema.contextPacks.kind, a);
+  const known = ACTIVITY_ORDER.filter((k) => k !== 'custom');
+  return or(isNull(schema.contextPacks.kind), notInArray(schema.contextPacks.kind, known));
+}
 
 function toPack(r: Row): ContextPack {
   return {
@@ -26,6 +35,7 @@ function toPack(r: Row): ContextPack {
     companyUrl: r.companyUrl,
     companyResearch: r.companyResearch,
     parsedCompany: r.parsedCompany ? JSON.parse(r.parsedCompany) : null,
+    resumeText: r.resumeText,
     tailoredResume: r.tailoredResume,
     notes: r.notes,
     memoryEnabled: r.memoryEnabled === 1,
@@ -86,13 +96,19 @@ export const contextPacksRepo = {
   },
 
   /** A page of packs for a profile, newest first, optionally filtered by a search
-   *  over title + company. Server-side LIMIT/OFFSET so the UI never loads them all. */
-  page(opts: { profileId: string; query?: string; limit: number; offset: number }): {
+   *  over title + company and by ACTIVITY (a Space is a saved activity — the
+   *  Interview page lists interviews only, never a standup or a study Space).
+   *  Server-side LIMIT/OFFSET so the UI never loads them all. */
+  page(opts: { profileId: string; query?: string; limit: number; offset: number; activity?: ContextPackKind }): {
     items: ContextPack[];
     total: number;
   } {
     const q = (opts.query ?? '').trim();
-    const base = and(eq(schema.contextPacks.profileId, opts.profileId), notApplicationOwned());
+    const base = and(
+      eq(schema.contextPacks.profileId, opts.profileId),
+      notApplicationOwned(),
+      opts.activity ? activityIs(opts.activity) : undefined,
+    );
     const where = q
       ? and(
           base,
@@ -123,6 +139,7 @@ export const contextPacksRepo = {
     jdText: string | null;
     companyUrl: string | null;
     notes: string | null;
+    resumeText?: string | null;
   }): ContextPack {
     const id = crypto.randomUUID();
     db()
@@ -137,12 +154,14 @@ export const contextPacksRepo = {
         jdText: input.jdText,
         companyUrl: input.companyUrl,
         notes: input.notes,
+        resumeText: input.resumeText?.trim() || null,
       })
       .run();
     return this.get(id)!;
   },
 
   update(id: string, patch: Partial<ContextPack>): ContextPack {
+    const previous = this.get(id);
     const set: Record<string, unknown> = { updatedAt: Date.now() };
     if (patch.kind !== undefined) set.kind = patch.kind;
     if (patch.title !== undefined) set.title = patch.title;
@@ -157,7 +176,23 @@ export const contextPacksRepo = {
     if (patch.parsedCompany !== undefined)
       set.parsedCompany = patch.parsedCompany ? JSON.stringify(patch.parsedCompany) : null;
     if (patch.tailoredResume !== undefined) set.tailoredResume = patch.tailoredResume;
-    db().update(schema.contextPacks).set(set).where(eq(schema.contextPacks.id, id)).run();
+    if (patch.resumeText !== undefined) {
+      set.resumeText = patch.resumeText?.trim() || null;
+      // A tailored version belongs to its previous input. Changing the
+      // supplied résumé must never leave that old version active.
+      if (set.resumeText !== previous?.resumeText) set.tailoredResume = null;
+    }
+    const resumeChanged =
+      (set.resumeText !== undefined && set.resumeText !== previous?.resumeText) ||
+      (set.tailoredResume !== undefined && set.tailoredResume !== previous?.tailoredResume);
+    db().transaction((tx) => {
+      tx.update(schema.contextPacks).set(set).where(eq(schema.contextPacks.id, id)).run();
+      if (resumeChanged) {
+        // Invalidate the old résumé synchronously, before any slow parsing
+        // or embedding. A live/prefetched answer cannot keep using it.
+        tx.delete(schema.chunks).where(and(eq(schema.chunks.packId, id), eq(schema.chunks.sourceType, 'tailored'))).run();
+      }
+    });
     return this.get(id)!;
   },
 

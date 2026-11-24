@@ -1,3 +1,4 @@
+import type { TaskRoute } from '../../providers/taskRoute';
 import type {
   AnswerFormat,
   ContributionKind,
@@ -10,6 +11,7 @@ import type {
   Speaker,
 } from '@shared/types';
 import type { AnswerEvent, SessionHistory } from '../openai/answer';
+import type { ConversationSnapshot } from './interview/conversationContext';
 import type { TriggerPolicy } from './trigger/triggerPolicy';
 import type { AmbientDecision } from './trigger/ambientPolicy';
 
@@ -36,10 +38,17 @@ export interface GenerateInput {
   /** What this session already heard and answered, oldest first — so a
    *  follow-up question is answered as a follow-up. Undefined on question 1. */
   history?: SessionHistory;
+  /** The live conversation snapshot, taken at generation start (coherent
+   *  even when new turns arrive mid-stream). Replaces `history` for the
+   *  engine's own sessions. */
+  conversation?: ConversationSnapshot;
   /** The classifier's type for this question (e.g. 'behavioral'). Interview
    *  uses it to give behavioral answers the story shape automatically. */
   questionType?: string;
   signal: AbortSignal;
+  /** The provider + model this attempt is sent on (captured by the engine;
+   *  see providers/types.ts ChatStreamRequest.route). */
+  route?: TaskRoute;
 }
 
 /** One ambient card, ready to persist + broadcast. Built by the mode from an

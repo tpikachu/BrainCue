@@ -144,8 +144,10 @@ describe('a call opens two transcribers, each tagged with a speaker', () => {
       { speaker: 'candidate', text: 'Sure — the Postgres one.' },
     ]);
     expect(deltas().filter((d) => d.isFinal).map((d) => d.speaker)).toEqual(['interviewer', 'candidate']);
-    // Only the call's turn was put to the question classifier.
-    expect(h.classifyCalls).toEqual(['Tell me about a migration you led?']);
+    // The candidate's turn never reaches the classifier — and the call's turn
+    // did not need it: an interview request is decided by rule
+    // (engine/interview/questionHeuristics.ts), with no model round trip.
+    expect(h.classifyCalls).toEqual([]);
   });
 
   it('meeting: the call is `them`, the microphone is `you`', () => {

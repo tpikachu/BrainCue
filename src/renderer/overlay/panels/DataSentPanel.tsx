@@ -2,11 +2,14 @@ import type { ContextSentEvent } from '@shared/types';
 import { ChevronRightIcon } from '../../components/icons';
 import { noDrag } from '../lib/style';
 
-/** Transparency: exactly what was sent to the provider for the focused card.
+/** Transparency: exactly what was sent — and to WHICH provider (main's answer
+ *  route, not an assumed OpenAI) — for the current card.
  *  `show` is lifted to the shell so the expanded state survives the panel
  *  unmounting between questions (context is empty until retrieval runs). */
 export function DataSentPanel(props: {
   context: ContextSentEvent;
+  /** The answer provider's display name (null until known). */
+  provider: string | null;
   show: boolean;
   onToggle: () => void;
 }) {
@@ -18,7 +21,7 @@ export function DataSentPanel(props: {
         className="inline-flex items-center gap-1 text-neutral-500 hover:text-neutral-300"
       >
         <ChevronRightIcon className={`h-3 w-3 transition-transform ${show ? 'rotate-90' : ''}`} />
-        Data sent to OpenAI ({context.chunks.length} chunks)
+        Sources sent{props.provider ? ` to ${props.provider}` : ''} ({context.chunks.length + (context.memories?.length ?? 0)})
       </button>
       {show && (
         <div className="mt-1 max-h-28 space-y-1 overflow-auto rounded bg-neutral-950/60 p-2 text-neutral-400">

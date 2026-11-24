@@ -1,4 +1,6 @@
 import type { ContributionKind } from '@shared/types';
+import type { ClassifierTurn } from '../../openai/questions';
+import type { Detection } from '../interview/detector';
 
 /**
  * A trigger policy answers ONE question: should the engine contribute in
@@ -15,8 +17,17 @@ export interface TriggerDecision {
   question?: { type: string; confidence: number; strategy: string };
   /** Why (for logs/tests) — e.g. 'not-a-question', 'confidence-below-floor'. */
   reason: string;
+  /** The interview detector's full verdict (source, continuation) when the
+   *  policy used it — the scheduler reads it; other callers can ignore it. */
+  detection?: Detection;
+}
+
+/** What a policy may know beyond the utterance: the last few turns, so a
+ *  short follow-up is judged against what came before it. */
+export interface TriggerContext {
+  recent?: ClassifierTurn[];
 }
 
 export interface TriggerPolicy {
-  evaluate(text: string): Promise<TriggerDecision>;
+  evaluate(text: string, ctx?: TriggerContext): Promise<TriggerDecision>;
 }

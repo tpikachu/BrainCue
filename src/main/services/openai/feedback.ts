@@ -1,5 +1,4 @@
-import { openai } from './client';
-import { model } from './models';
+import { chatJson } from './chatTask';
 import { COMPETENCIES } from './stories';
 import type { InterviewType, Job, Profile, SparringFeedback, StoryCompetency } from '@shared/types';
 
@@ -62,16 +61,8 @@ export async function evaluateAnswer(input: FeedbackInput): Promise<SparringFeed
     'Evaluate the answer now.',
   ].join('\n');
 
-  const res = await openai().responses.create({
-    model: model('mock'),
-    input: [
-      { role: 'system', content: SYSTEM },
-      { role: 'user', content: user },
-    ],
-    text: { format: { type: 'json_object' } },
-  });
-
-  const raw = JSON.parse(res.output_text) as Partial<SparringFeedback>;
+  // Routed: runs on the provider the mock task resolves to (chatTask.ts).
+  const raw = await chatJson<Partial<SparringFeedback>>({ task: 'mock', system: SYSTEM, user });
   const strs = (v: unknown): string[] =>
     Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
   const ratingNum = Math.round(Number(raw.rating));

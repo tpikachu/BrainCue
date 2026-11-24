@@ -5,6 +5,7 @@ import type {
   ContextPackKind,
   InterviewType,
   Presence,
+  RollbackResult,
   Session,
   SessionMode,
   Speaker,
@@ -93,8 +94,12 @@ export const sessionManager = {
     return engine.togglePauseActive();
   },
 
-  stopActive(): { stopped: boolean } {
+  stopActive(): { stopped: boolean; rollback?: RollbackResult } {
     return engine.stopActive();
+  },
+
+  rollback(sessionId: string, discard: boolean): RollbackResult {
+    return engine.rollback(sessionId, discard);
   },
 
   async answerQuestion(
@@ -130,6 +135,10 @@ export const sessionManager = {
 
   async askActive(questionText: string): Promise<{ ok: boolean }> {
     return engine.askActive(questionText);
+  },
+
+  async answerLastActive(): Promise<{ ok: boolean }> {
+    return engine.answerLastActive();
   },
 
   setAnsweringActive(enabled: boolean): { enabled: boolean; answered: boolean } {

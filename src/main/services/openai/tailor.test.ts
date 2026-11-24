@@ -17,8 +17,9 @@ vi.mock('./client', () => ({
   }),
 }));
 vi.mock('./models', () => ({
-  model: (k: string) => `model:${k}`,
-  reasoningParam: () => ({}),
+  openaiOnlyModel: (k: string) => `model:${k}`,
+  hasOpenAIKey: () => true,
+  openaiOnlyReasoning: () => ({}),
 }));
 
 import { answerApplicationQuestions, tailorApplication } from './tailor';

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
-import type { AppSettings, Profile, ProfileAbout } from '@shared/types';
+import type { Profile, ProfileAbout } from '@shared/types';
 import { EMPTY_PROFILE_ABOUT, PROFILE_ABOUT_FIELDS } from '@shared/types';
 import { Badge, BusyOverlay, Button, Card, Field, Page, TextArea, TextInput } from '../../components/ui';
 import { ChevronLeftIcon, UploadIcon } from '../../components/icons';
@@ -34,7 +34,8 @@ export default function ProfileEditorPage() {
     setRole(p.targetRole);
     setResumeText(p.resumeText ?? '');
     setAbout({ ...EMPTY_PROFILE_ABOUT, ...(p.about ?? {}) });
-    setKeyPresent(((await api.settings.get()) as AppSettings).apiKeyPresent);
+    // Parsing runs on the parsing task's provider (any chat key), not only OpenAI.
+    setKeyPresent(await api.settings.readiness().then((r) => r.features.parsing.ready, () => false));
     await loadStoryCount();
   }, [id, loadStoryCount]);
 
@@ -76,7 +77,7 @@ export default function ProfileEditorPage() {
       setStatus({
         tone: 'ok',
         text: res.keyMissing
-          ? 'Saved ✓ — add an OpenAI key in Settings to parse the resume.'
+          ? 'Saved ✓ — add an AI provider key in Settings to read the résumé.'
           : `Saved & parsed ✓ — ${res.embedded} chunks indexed.`,
       });
     });
@@ -102,7 +103,7 @@ export default function ProfileEditorPage() {
 
       {!keyPresent && (
         <div className="mb-5 rounded-xl border border-amber-700/50 bg-amber-900/20 px-4 py-3 text-sm text-amber-200">
-          You can save now, but parsing & grounded answers need an OpenAI key.{' '}
+          You can save now; reading the résumé and grounded answers need an AI provider key (OpenAI, Anthropic, Google, Groq or OpenRouter).{' '}
           <Link to="/settings/models" className="font-medium underline">
             Add it in Settings
           </Link>

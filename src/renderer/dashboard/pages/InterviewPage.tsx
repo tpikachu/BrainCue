@@ -3,19 +3,22 @@ import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useActiveProfile } from '../../store/useProfileStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
-import { useLiveSession, type Line } from '../../store/useLiveSession';
-import type { Job, SessionDetail, SessionListItem } from '@shared/types';
-import { Badge, Button, Card, Field, Page, Select } from '../../components/ui';
+import { useLiveSession } from '../../store/useLiveSession';
+import { useReadiness } from '../../store/useReadiness';
+import type { Job, SessionListItem } from '@shared/types';
+import { Badge, Button, Card, Page } from '../../components/ui';
 import { DataTable, type Column } from '../../components/DataTable';
 import { JobFormModal } from '../JobFormModal';
 import { BriefModal } from '../BriefModal';
 import { SampleQuestions } from '../SampleQuestions';
+import { StartSessionModal } from '../StartSessionModal';
+import { isResumableInterview, startBlocker } from '../startFlow';
 import { PlayIcon, PlusIcon } from '../../components/icons';
 
 const JOBS_PER_PAGE = 5;
 
 export default function InterviewPage() {
-  const { settings, load: loadSettings } = useSettingsStore();
+  const { load: loadSettings } = useSettingsStore();
   // The live session lives in a global store so it survives navigating between
   // pages (and keeps the mic running). This page registers/selects interviews and
   // starts them; the live surface — transcript, answers, and all the round controls
@@ -40,7 +43,11 @@ export default function InterviewPage() {
 
   // Latest session per job, so each row offers Start (none yet) or Resume.
   const [sessionsByJob, setSessionsByJob] = useState<Map<string, SessionListItem>>(new Map());
-  const [busyJobId, setBusyJobId] = useState<string | null>(null);
+  // A new round starts — and a saved one resumes — through the ONE start
+  // flow (its setup rows and consent summary), with this role already chosen.
+  const [startFor, setStartFor] = useState<string | null>(null);
+  const [resumeFor, setResumeFor] = useState<SessionListItem | null>(null);
+  const readiness = useReadiness();
 
   // The save-or-discard prompt itself is GLOBAL (SavePromptModal in App) — here we
   // only watch it so the table's Start/Resume buttons refresh after save/discard.
@@ -60,11 +67,14 @@ export default function InterviewPage() {
     }
     setJobsLoading(true);
     try {
+      // Interviews only — a standup or a study Space is not a role, and
+      // filtering server-side keeps the paging and the count exact.
       const { items, total } = await api.jobs.page(
         profileId,
         jobQuery.trim(),
         JOBS_PER_PAGE,
         jobPage * JOBS_PER_PAGE,
+        'job',
       );
       setJobRows(items as Job[]);
       setJobTotal(total);
@@ -84,9 +94,9 @@ export default function InterviewPage() {
       const all = (await api.session.list(profileId)) as SessionListItem[];
       const map = new Map<string, SessionListItem>();
       for (const s of all) {
-        // Only real interview sessions drive Start/Resume — a Sparring practice
-        // drill (kind 'sparring') must never be offered for resumption here.
-        if (s.kind !== 'live' || !s.jobId) continue;
+        // Only real interviews drive Start/Resume — never a meeting, a
+        // companion session, a mock interview or a sparring drill.
+        if (!isResumableInterview(s) || !s.jobId) continue;
         if (!map.has(s.jobId)) map.set(s.jobId, s); // list is newest-first
       }
       setSessionsByJob(map);
@@ -107,19 +117,32 @@ export default function InterviewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileId, jobQuery, jobPage]);
 
-  // Can a round start at all (profile + key + a way to transcribe + parsed
-  // resume). Per-row Start also requires no other session to be live (single
-  // live session at a time). `startHint` is the disabled button's tooltip —
-  // it says WHICH piece is missing, in the same order as `startBlocker`.
-  const canStartBase =
-    !!profileId && !!settings?.apiKeyPresent && !!settings?.sttReady && !!selectedProfile?.parsedResume;
-  const startHint = !settings?.apiKeyPresent
-    ? 'OpenAI key missing — add it in Settings → Language Models'
-    : !settings?.sttReady
-      ? 'Transcription is not set up — choose an engine in Settings → Speech-to-Text'
-      : !selectedProfile?.parsedResume
-        ? 'Add and parse a résumé on this profile first'
-        : undefined;
+  // Can a round start or resume at all? The same gate as the start flow —
+  // main's readiness (any provider with a key; on-device transcription needs
+  // none) and a read résumé. The role is the row itself, so it is not asked.
+  // `blocker` is the one line above the table; Start and Resume both open the
+  // start flow, which shows each gap on its own row before anything starts.
+  const blocker = !readiness
+    ? 'Checking setup…'
+    : startBlocker({
+        profile: selectedProfile,
+        chatReady: readiness.chat.ready,
+        chatProblem: readiness.chat.problem,
+        sttReady: readiness.transcription.ready,
+        sttProblem: readiness.transcription.problem,
+        sessionLive: false,
+        activity: 'job',
+        spaceId: 'row',
+      });
+  const fixRoute = !readiness
+    ? null
+    : !readiness.chat.ready
+      ? '/settings/models'
+      : !readiness.transcription.ready
+        ? '/settings/speech'
+        : selectedProfile
+          ? `/profiles/${selectedProfile.id}`
+          : '/profiles';
 
   const selectJob = (job: Job) => setJobId(job.id);
   const openNew = () => {
@@ -139,50 +162,19 @@ export default function InterviewPage() {
     void loadJobs();
   };
 
-  const micDeviceId = () => settings?.audio?.micDeviceId ?? null;
-
-  // Start a brand-new session for an interview. Type/format/length use defaults
-  // and are adjusted live in the Cue Card; the audio device comes from settings.
-  const start = async (job: Job) => {
-    if (!canStartBase || session) return;
+  // A new round goes through the start flow — the same setup rows and consent
+  // summary as Home, with this role chosen — never a second, silent Start.
+  const start = (job: Job) => {
+    if (session) return;
     setJobId(job.id);
-    setBusyJobId(job.id);
-    try {
-      await live.startNew({
-        profileId,
-        jobId: job.id,
-        interviewType: 'general',
-        answerFormat: 'general',
-        // An interview is a call: heard on both sides, questions from the call.
-        activity: 'job',
-        listensTo: 'system',
-        micDeviceId: micDeviceId(),
-      });
-    } finally {
-      setBusyJobId(null);
-    }
+    setStartFor(job.id);
   };
 
-  // Continue the existing session for this interview (reloads its transcript).
-  const resume = async (sess: SessionListItem) => {
-    if (!canStartBase || session) return;
-    setBusyJobId(sess.jobId);
-    try {
-      const detail = (await api.session.get(sess.id)) as SessionDetail;
-      const prior: Line[] = detail.transcript.map((c, i) => ({
-        id: i,
-        speaker: c.speaker,
-        text: c.text,
-      }));
-      await live.resumeExisting({
-        sessionId: sess.id,
-        listensTo: 'system',
-        micDeviceId: micDeviceId(),
-        prior,
-      });
-    } finally {
-      setBusyJobId(null);
-    }
+  // Continue the existing session for this interview — through the start
+  // flow, which shows setup, readiness and what is sent before capturing.
+  const resume = (sess: SessionListItem) => {
+    if (session) return;
+    setResumeFor(sess);
   };
 
   const jobColumns: Column<Job>[] = [
@@ -229,21 +221,13 @@ export default function InterviewPage() {
             ) : prior ? (
               <Button
                 variant="success"
-                disabled={!canStartBase || !!session}
-                title={startHint}
-                loading={busyJobId === j.id}
+                disabled={!!session}
                 onClick={() => resume(prior)}
               >
                 <PlayIcon /> Resume
               </Button>
             ) : (
-              <Button
-                variant="success"
-                disabled={!canStartBase || !!session}
-                title={startHint}
-                loading={busyJobId === j.id}
-                onClick={() => start(j)}
-              >
+              <Button variant="success" disabled={!!session} onClick={() => start(j)}>
                 <PlayIcon /> Start
               </Button>
             )}
@@ -265,10 +249,7 @@ export default function InterviewPage() {
   ];
 
   return (
-    <Page
-      title="Interview"
-      subtitle="Pick a profile and an interview, then Start — your live cues appear in the Cue Card."
-    >
+    <Page title="Interviews" subtitle="Your roles. Start a round or resume one — cues appear in the Cue Card.">
       {(live.micError || live.sessionError) && (
         <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
           <span>
@@ -308,50 +289,22 @@ export default function InterviewPage() {
       )}
 
       <div className="space-y-5">
-        {/* Résumé readiness for whoever the sidebar has active — the profile
-            itself is no longer chosen here. */}
-        <Card>
-          {selectedProfile && !selectedProfile.parsedResume && (
-            <p className="mt-2 text-xs text-amber-400">
-              ⚠ This profile has no parsed resume —{' '}
-              <Link to={`/profiles/${selectedProfile.id}`} className="underline">
-                add & parse a resume
+        {/* What stops a round starting, once, with its fix. */}
+        {profileId && blocker && readiness && (
+          <p className="text-xs text-amber-400" role="status">
+            ⚠ {blocker}{' '}
+            {fixRoute && (
+              <Link to={fixRoute} className="underline">
+                Fix
               </Link>
-              .
-            </p>
-          )}
-          {!settings?.apiKeyPresent && (
-            <p className="mt-2 text-xs text-amber-400">
-              ⚠ No OpenAI key —{' '}
-              <Link to="/settings/models" className="underline">
-                add it in Settings
-              </Link>
-              .
-            </p>
-          )}
-          {settings?.apiKeyPresent && !settings.sttReady && (
-            <p className="mt-2 text-xs text-amber-400">
-              ⚠ Transcription is not set up —{' '}
-              <Link to="/settings/speech" className="underline">
-                choose an engine in Settings
-              </Link>
-              .
-            </p>
-          )}
-        </Card>
+            )}
+          </p>
+        )}
 
         {/* Interviews (jobs) — paginated, searchable. Start/Resume per row; the
             round's type/format/length are chosen live in the Cue Card. */}
         {profileId && (
           <Card>
-            <div className="mb-3">
-              <h3 className="font-medium">Interviews</h3>
-              <p className="mt-1 text-xs text-neutral-500">
-                Pick an interview and press <strong>Start</strong> — or <strong>Resume</strong> to
-                continue a previous one. Interview type, answer format &amp; length are set live in
-                the Cue Card.
-              </p>
-            </div>
 
             <DataTable<Job>
               columns={jobColumns}
@@ -370,10 +323,10 @@ export default function InterviewPage() {
               onRowClick={selectJob}
               isSelected={(j) => j.id === jobId}
               loading={jobsLoading}
-              empty="No interviews yet. Add one with a job description — it’s saved and reused for every round of that job."
+              empty="No roles yet. Add one with its job description — it is reused for every round."
               actions={
                 <Button variant="primary" onClick={openNew}>
-                  <PlusIcon /> New interview
+                  <PlusIcon /> New role
                 </Button>
               }
             />
@@ -389,10 +342,15 @@ export default function InterviewPage() {
         open={formOpen}
         profileId={profileId}
         job={editJob}
+        initialKind="job"
+        lockKind
         onClose={() => setFormOpen(false)}
         onSaved={onJobSaved}
         onDeleted={onJobDeleted}
       />
+
+      <StartSessionModal open={!!startFor} onClose={() => setStartFor(null)} initialSpaceId={startFor ?? undefined} />
+      <StartSessionModal open={!!resumeFor} onClose={() => setResumeFor(null)} resume={resumeFor ?? undefined} />
 
       {/* Pre-interview prep brief (résumé × JD × company), generated on open. */}
       <BriefModal open={!!briefJob} job={briefJob} onClose={() => setBriefJob(null)} />

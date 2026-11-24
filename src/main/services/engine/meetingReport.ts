@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import { asc, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db, schema } from '../../db';
+import { transcriptOrder } from '../../db/transcriptOrder';
 import { contributionsRepo } from '../../db/repositories/contributions.repo';
 import { providerFor } from '../../providers/registry';
 import type { MeetingReport } from '@shared/types';
@@ -86,7 +87,7 @@ function transcriptOf(sessionId: string): string {
     .select()
     .from(schema.transcriptChunks)
     .where(eq(schema.transcriptChunks.sessionId, sessionId))
-    .orderBy(asc(schema.transcriptChunks.createdAt))
+    .orderBy(...transcriptOrder())
     .all()
     .map((r) => `${r.speaker}: ${r.text}`)
     .join('\n');

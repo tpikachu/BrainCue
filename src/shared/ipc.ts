@@ -26,6 +26,8 @@ export const IPC = {
     clearProviderKey: 'settings:clear-provider-key', // { provider }
     testProviderKey: 'settings:test-provider-key', // { provider } → { ok, model?, error? }
     listModels: 'settings:list-models', // — → string[] (OpenAI account ids, unfiltered)
+    readiness: 'settings:readiness', // per-capability readiness (chat / transcription / retrieval)
+    refreshModels: 'settings:refresh-models', // re-run model discovery for every provider with a key
     listProviderModels: 'settings:list-provider-models', // { provider } → string[] chat-capable ids the key can see
     setShortcuts: 'settings:set-shortcuts',
     resetShortcuts: 'settings:reset-shortcuts',
@@ -100,9 +102,14 @@ export const IPC = {
     togglePause: 'session:toggle-pause',
     togglePauseActive: 'session:toggle-pause-active',
     stopActive: 'session:stop-active',
+    // Undo a start whose audio never attached: stop it (no save prompt) and,
+    // when new, remove it. Pending in main until confirmed, so any window's
+    // later Stop retries the same policy.
+    rollback: 'session:rollback',
     audioChunk: 'session:audio-chunk',
     realtimeAudio: 'session:realtime-audio',
     list: 'session:list',
+    page: 'session:page', // one server-side page of a profile's history
     get: 'session:get',
     delete: 'session:delete',
     generateReport: 'session:generate-report',
@@ -110,6 +117,8 @@ export const IPC = {
     practiceStats: 'session:practice-stats', // Practice Loop aggregates (Reports)
     ask: 'session:ask',
     askActive: 'session:ask-active',
+    answerLast: 'session:answer-last', // Cue Card "Answer that": answer the interviewer's latest words
+    reportCapture: 'session:report-capture', // dashboard → main: which streams were captured / ended
     // Keep a finished conversation: archive it for retrieval + extract memory
     // candidates. The user's answer to the save prompt, not an automatic step.
     remember: 'session:remember',
@@ -123,6 +132,11 @@ export const IPC = {
   },
   contributions: {
     update: 'contributions:update', // review/edit a persisted contribution (title/body/meta/status)
+  },
+  // Live latency instrumentation (engine/metrics/latency.ts). No text.
+  metrics: {
+    firstUseful: 'metrics:first-useful', // overlay → main: a card's first real answer words were painted
+    latency: 'metrics:latency', // p50/p95 per stage, cold vs warm
   },
   // Local memory (v2): candidates + items live in ONE lifecycle; only approved
   // memory is ever recalled. All review actions are explicit user actions.
@@ -227,6 +241,8 @@ export const EVENTS = {
   contributionDone: 'contribution:done',
   contributionReset: 'contribution:reset',
   sessionError: 'session:error',
+  /** Settings (or what a task resolves to) changed — payload: AppSettings. */
+  settingsChanged: 'settings:changed',
   overlayApplySettings: 'overlay:apply-settings',
   shortcutFired: 'shortcut:fired',
   privacyChanged: 'privacy:changed',
@@ -242,7 +258,9 @@ export const EVENTS = {
   answerPrefs: 'session:answer-prefs', // current format/length/pronunciation, for the Cue Card toggles
   audioLevel: 'session:audio-level', // throttled mic level (0-1) for the Cue Card meter
   transcriberStatus: 'session:transcriber-status', // STT socket lifecycle: reconnecting | connected
+  captureStatus: 'session:capture-status', // which audio streams are ACTUALLY flowing (Cue Card notice)
   savePrompt: 'session:save-prompt', // a session just stopped → ask the dashboard to save/discard it
+  sessionRollback: 'session:rollback-result', // a failed start's rollback settled (RollbackResult)
   captureBuffer: 'capture:buffer', // current multi-image problem captures, for the Cue Card strip
   confirmRequest: 'ui:confirm-request', // main asks a protected window to show a confirm modal (reply via IPC.ui.confirmResponse)
   voiceState: 'voice:state', // dialogue controller transitions (VoiceStateEvent)

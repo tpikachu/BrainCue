@@ -5,6 +5,7 @@ import { broadcast } from '../../ipc/broadcast';
 import { profilesRepo } from '../../db/repositories/profiles.repo';
 import { contextPacksRepo } from '../../db/repositories/jobs.repo';
 import { sessionsRepo } from '../../db/repositories/sessions.repo';
+import { memoriesRepo } from '../../db/repositories/memories.repo';
 import { providerFor } from '../../providers/registry';
 import { getOverlayWindow, showOverlay } from '../../windows/overlayWindow';
 import { getMainWindow } from '../../windows/mainWindow';
@@ -25,11 +26,13 @@ import type {
   ContextPackKind,
   InterviewType,
   Presence,
+  RollbackResult,
   Session,
   SessionMode,
   Speaker,
 } from '@shared/types';
 import type { ModeDefinition } from './modeDefinition';
+import type { TurnTiming } from './contextEvent';
 
 /** Mode registry: SessionMode → definition. Practice/mock rehearse through
  *  the interview pipeline; the flagged-off modes land with their prompts. */
@@ -95,6 +98,15 @@ function toSession(r: typeof schema.sessions.$inferSelect): Session {
  */
 class Engine {
   private current: EngineSession | null = null;
+  /**
+   * Failed starts being rolled back (a session opened, but its audio never
+   * attached). Set BEFORE the stop is attempted, so a stop that throws leaves
+   * it pending: a later stop of that session — from the dashboard, the Cue
+   * Card or anywhere else — follows the same policy instead of a plain stop:
+   * no save prompt for the attempt, and a brand-new session is removed. A
+   * resumed one (`discard: false`) keeps its earlier content.
+   */
+  private readonly rollbacks = new Map<string, { discard: boolean }>();
 
   /** Set up the live session + Realtime transcriber (shared by start and
    *  resume; mock/sparring rehearsals come through here too via the facade's
@@ -154,12 +166,19 @@ class Engine {
         // The turn so far, from incremental deltas; the session prefetches
         // grounding on it while the speaker is still finishing the question.
         let interim = '';
+        // Speech-end anchors for the latency record: the server VAD's
+        // speech-stopped when the engine has one, else the last interim
+        // delta (the last word recognized) — the local engine has no VAD
+        // event, and its endpoint wait is exactly what follows that delta.
+        let speechStopAt = 0;
+        let lastDeltaAt = 0;
         session.transcribers[source] = createRealtimeSource(
           {
             onDelta: (text) => {
               // Ambient policies gate on "someone is (still) speaking" — feed
               // them interim activity so a decision mid-classify can defer.
-              session.ambientPolicy?.noteInterim?.(Date.now());
+              lastDeltaAt = Date.now();
+              session.ambientPolicy?.noteInterim?.(lastDeltaAt);
               // Grounding is prefetched on the CALL's interim only (its turns
               // are the questions). Interim text itself goes out for both
               // streams, tagged, so the user sees their own words appear as
@@ -172,9 +191,17 @@ class Engine {
               }
               broadcast(EVENTS.transcriptDelta, { text, isFinal: false, speaker });
             },
+            onSpeechStop: () => {
+              speechStopAt = Date.now();
+            },
             onFinal: (text) => {
               interim = '';
-              void this.processFinalTranscript(opts.sessionId, text, speaker);
+              const finalAt = Date.now();
+              const speechEndAt = speechStopAt || lastDeltaAt || undefined;
+              const speechEndSource = speechStopAt ? ('vad' as const) : lastDeltaAt ? ('last-delta' as const) : undefined;
+              speechStopAt = 0;
+              lastDeltaAt = 0;
+              void this.processFinalTranscript(opts.sessionId, text, speaker, { speechEndAt, speechEndSource, finalAt });
             },
             onError: (message) => broadcast(EVENTS.sessionError, { message }),
             // Socket lifecycle → a subtle "reconnecting audio…" pill in the Cue Card
@@ -217,7 +244,7 @@ class Engine {
         title: pack?.title ?? (opts.activity ? activityConfig(opts.activity).label : 'Interview'),
         notes: pack?.notes ?? null,
         profileName: profile?.name ?? null,
-        hasResume: !!profile?.parsedResume,
+        hasResume: !!(pack?.tailoredResume?.trim() || pack?.resumeText?.trim() || profile?.parsedResume),
         hasJd: !!pack?.parsedJd,
         hasCompany: !!pack?.parsedCompany,
       },
@@ -283,6 +310,20 @@ class Engine {
     if (!row) throw new Error('Session not found');
     const profile = profilesRepo.get(row.profileId);
     if (!profile) throw new Error('Profile not found');
+    // The Space it continues in must still be there — and still this
+    // profile's. One the activity needs (an interview's role: its JD grounds
+    // every answer) is required; a deleted one leaves the column null.
+    // Checked here, before the row goes live, so no window can resume a
+    // session whose role went away after its own checks. (v1 rows carry no
+    // activity and are not held to a rule they were never started under.)
+    const needsSpace = row.activity ? activityConfig(row.activity as ContextPackKind).needsSpace : false;
+    const pack = row.packId ? contextPacksRepo.get(row.packId) : null;
+    if (row.packId && (!pack || pack.profileId !== row.profileId)) {
+      throw new Error('This session’s Space no longer exists — start a new session instead.');
+    }
+    if (needsSpace && !pack) {
+      throw new Error('This interview’s role no longer exists — start a new interview instead.');
+    }
     db()
       .update(schema.sessions)
       .set({ status: 'live', endedAt: null })
@@ -298,6 +339,15 @@ class Engine {
       activity: row.activity as ContextPackKind | null,
       mode: row.mode as SessionMode, // a meeting resumes as a meeting
     });
+    // Continue where it left off: the session's own turns and answers
+    // become the live context again (the next "what was your role there?"
+    // still knows the project). Best effort — a failure starts it fresh.
+    try {
+      const t = enginePersistence.sessionTimeline(sessionId);
+      this.current?.hydrate(t.turns, t.answers);
+    } catch (e) {
+      log.warn('resume: could not restore the conversation context', e);
+    }
     return toSession(
       db().select().from(schema.sessions).where(eq(schema.sessions.id, sessionId)).get()!,
     );
@@ -325,10 +375,15 @@ class Engine {
   /** Persist a finalized transcript turn and run it through the mode's trigger.
    *  `speaker` defaults to the mode's remote speaker (the trigger stream); the
    *  user's own mic turns pass the mode's local speaker and are only recorded. */
-  async processFinalTranscript(sessionId: string, text: string, speaker?: Speaker): Promise<void> {
+  async processFinalTranscript(
+    sessionId: string,
+    text: string,
+    speaker?: Speaker,
+    timing?: TurnTiming,
+  ): Promise<void> {
     const s = this.current;
     if (!text || !s || s.sessionId !== sessionId || s.paused) return;
-    await s.handleEvent({ kind: 'transcript_final', sessionId, text, speaker });
+    await s.handleEvent({ kind: 'transcript_final', sessionId, text, speaker, timing });
   }
 
   /** Chunked STT fallback (used only if Realtime is unavailable). */
@@ -377,6 +432,9 @@ class Engine {
       if (wasEphemeral) {
         // Mock rehearsals are never persisted — drop the session + its Q/A.
         sessionsRepo.delete(sessionId);
+      } else if (this.rollbacks.has(sessionId)) {
+        // A failed start being rolled back heard nothing worth keeping: no
+        // save prompt (rollback() removes a new one; a resumed one stays).
       } else {
         // Ask the dashboard to save (pick the type) or discard the just-ended session.
         broadcast(
@@ -430,7 +488,7 @@ class Engine {
   togglePause(sessionId: string): { paused: boolean } {
     const s = this.current;
     if (!s || s.sessionId !== sessionId) return { paused: true };
-    s.paused = !s.paused;
+    s.setPaused(!s.paused);
     broadcast(EVENTS.sessionState, { status: 'live', paused: s.paused });
     return { paused: s.paused };
   }
@@ -444,11 +502,48 @@ class Engine {
 
   /** Stop whichever session is currently live (for the Cue Card, which doesn't
    *  carry a session id). No-op when nothing is live. The 'stopped' sessionState
-   *  broadcast tears down the dashboard store + mic too. */
-  stopActive(): { stopped: boolean } {
+   *  broadcast tears down the dashboard store + mic too. A session whose failed
+   *  start is still being rolled back is rolled back instead — the same policy
+   *  and the same truthful result as the dashboard's Stop. */
+  stopActive(): { stopped: boolean; rollback?: RollbackResult } {
     if (!this.current) return { stopped: false };
-    this.stop(this.current.sessionId);
+    const id = this.current.sessionId;
+    const pending = this.rollbacks.get(id);
+    if (pending) {
+      const r = this.rollback(id, pending.discard);
+      return { stopped: r.stopped, rollback: r };
+    }
+    this.stop(id);
     return { stopped: true };
+  }
+
+  /**
+   * Undo a session whose start failed (its audio never attached): stop it,
+   * then remove it when it was new. Claims only what is CONFIRMED — a stop
+   * that throws stays pending (any later stop retries this), a failed removal
+   * is reported. The result is broadcast to every window, so the dashboard and
+   * the Cue Card say the same thing whichever one pressed Stop.
+   */
+  rollback(sessionId: string, discard: boolean): RollbackResult {
+    this.rollbacks.set(sessionId, { discard });
+    const settle = (r: RollbackResult): RollbackResult => {
+      broadcast(EVENTS.sessionRollback, r);
+      return r;
+    };
+    try {
+      this.stop(sessionId);
+    } catch (e) {
+      return settle({ sessionId, stopped: false, error: (e as Error)?.message || String(e) });
+    }
+    this.rollbacks.delete(sessionId); // stopped is confirmed; nothing is pending
+    if (!discard) return settle({ sessionId, stopped: true });
+    try {
+      memoriesRepo.deleteBySession(sessionId);
+      sessionsRepo.delete(sessionId);
+    } catch (e) {
+      return settle({ sessionId, stopped: true, removed: false, error: (e as Error)?.message || String(e) });
+    }
+    return settle({ sessionId, stopped: true, removed: true });
   }
 
   /** Manual or caller-classified question (mock rehearsals pass their own
@@ -542,6 +637,14 @@ class Engine {
   clearAnswerActive(): { cleared: boolean } {
     this.current?.answerAbort?.abort();
     return { cleared: true };
+  }
+
+  /** "Answer that" — the escape hatch when detection missed: answer the
+   *  interviewer's latest words on the live session. */
+  async answerLastActive(): Promise<{ ok: boolean }> {
+    const s = this.current;
+    if (!s || s.paused) return { ok: false };
+    return s.answerLastHeard();
   }
 
   /** Manually ask a question for the active session (Cue Card "Ask" box). */

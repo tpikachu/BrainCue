@@ -1,5 +1,5 @@
 import { openai } from './client';
-import { model, reasoningParam } from './models';
+import { hasOpenAIKey, openaiOnlyModel, openaiOnlyReasoning } from './models';
 import type { ApplicationAnswer } from '@shared/types';
 
 export interface TailorInput {
@@ -68,11 +68,20 @@ RULES:
  * was tailored — "answer the questions later"). Same grounding rules as tailor-time
  * answers. Throws when nothing usable comes back, so nothing gets persisted.
  */
+/** Tailoring only exists on OpenAI (its 5-minute, no-retry request is an
+ *  OpenAI SDK option), so it says so up front instead of sending another
+ *  provider's model id to OpenAI. */
+function requireOpenAI(): void {
+  if (!hasOpenAIKey())
+    throw new Error('Tailoring runs on OpenAI only for now, and no OpenAI key is set. Add one in Settings → Language Models.');
+}
+
 export async function answerApplicationQuestions(input: {
   baseResume: string;
   jdText: string;
   questions: string[];
 }): Promise<ApplicationAnswer[]> {
+  requireOpenAI();
   const user = [
     'RESUME (the only source of truth about the candidate):',
     input.baseResume.slice(0, 24_000),
@@ -87,8 +96,8 @@ export async function answerApplicationQuestions(input: {
 
   const res = await openai().responses.create(
     {
-      model: model('tailor'),
-      ...reasoningParam('tailor'),
+      model: openaiOnlyModel('tailor'),
+      ...openaiOnlyReasoning('tailor'),
       input: [
         { role: 'system', content: ANSWER_SYSTEM },
         { role: 'user', content: user },
@@ -119,6 +128,7 @@ export async function answerApplicationQuestions(input: {
  * can't crash the handler — and nothing is persisted unless this call succeeds.
  */
 export async function tailorApplication(input: TailorInput): Promise<TailorResult> {
+  requireOpenAI();
   const user = [
     'BASE RESUME (the only source of truth about the candidate):',
     input.baseResume.slice(0, 24_000),
@@ -135,8 +145,8 @@ export async function tailorApplication(input: TailorInput): Promise<TailorResul
 
   const res = await openai().responses.create(
     {
-      model: model('tailor'),
-      ...reasoningParam('tailor'),
+      model: openaiOnlyModel('tailor'),
+      ...openaiOnlyReasoning('tailor'),
       input: [
         { role: 'system', content: SYSTEM },
         { role: 'user', content: user },

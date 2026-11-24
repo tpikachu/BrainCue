@@ -2,17 +2,13 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Capture the request body + drive the model's JSON output; mock the model resolver.
 const h = vi.hoisted(() => ({ output: '{}', lastBody: null as Record<string, unknown> | null }));
-vi.mock('./client', () => ({
-  openai: () => ({
-    responses: {
-      create: async (body: Record<string, unknown>) => {
-        h.lastBody = body;
-        return { output_text: h.output };
-      },
-    },
-  }),
+// Capture the routed request (chatTask.ts) and feed back a fixed JSON reply.
+vi.mock('./chatTask', () => ({
+  chatJson: async (req: Record<string, unknown>) => {
+    h.lastBody = req;
+    return JSON.parse(h.output);
+  },
 }));
-vi.mock('./models', () => ({ model: () => 'gpt-4.1-mini' }));
 
 import { parseResume, parseJobDescription, parseCompany } from './parsing';
 
@@ -47,7 +43,7 @@ describe('parseResume', () => {
 
   it('caps the input text at 24k chars sent to the model', async () => {
     await parseResume('a'.repeat(30_000));
-    const userContent = String((h.lastBody!.input as { role: string; content: string }[])[1].content);
+    const userContent = String(h.lastBody!.user);
     expect(userContent.length).toBe(24_000);
   });
 });

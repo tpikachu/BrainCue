@@ -1,4 +1,5 @@
 import { providerFor } from '../../providers/registry';
+import type { TaskRoute } from '../../providers/taskRoute';
 import { buildMemoryBlock } from '../openai/answer';
 import type { AnswerEvent } from '../openai/answer';
 import type { RetrievedChunk, RetrievedMemory } from '@shared/types';
@@ -35,6 +36,8 @@ export async function* streamQuickAnswer(input: {
    *  the configured persona; absent leaves the prompt byte-identical. */
   personaPreamble?: string;
   signal?: AbortSignal;
+  /** The attempt's captured route (providers/types.ts). */
+  route?: TaskRoute;
 }): AsyncGenerator<AnswerEvent> {
   const user = [
     'CONTEXT:',
@@ -55,6 +58,7 @@ export async function* streamQuickAnswer(input: {
     user,
     maxOutputTokens: 400,
     signal: input.signal,
+    ...(input.route ? { route: input.route } : {}),
   })) {
     if (ev.type === 'delta' || ev.type === 'usage') yield ev;
   }

@@ -1,15 +1,12 @@
 import { openai } from '../../services/openai/client';
-import {
-  EMBEDDING_DIM,
-  isReasoningModel,
-  model,
-  reasoningEffort,
-} from '../../services/openai/models';
+import { EMBEDDING_DIM, model } from '../../services/openai/models';
+import { effortFor, reasoningBody } from '../effort';
 import { embed, embedOne } from '../../services/openai/embeddings';
 import { transcribeChunk } from '../../services/openai/transcription';
 import { speak, type TtsVoice } from '../../services/openai/tts';
 import { solveFromImages } from '../../services/openai/vision';
 import { RealtimeTranscriber } from '../../services/openai/realtime';
+import { supportsOpenAiFast } from '@shared/openaiProcessing';
 import type {
   BatchSttProvider,
   ChatJsonRequest,
@@ -43,14 +40,21 @@ export const openaiChat: ChatProvider = {
     }
   },
   async *stream(req): AsyncGenerator<ChatStreamEvent> {
-    const m = model(req.task);
-    const reasoning = isReasoningModel(m);
+    const m = req.route?.model ?? model(req.task);
+    // Effort from the catalog's capability metadata (models.ts effortFor):
+    // live tasks get the model's lowest — "none" on GPT-6 Luna/Terra.
+    const effort = effortFor(req.task, 'openai', m);
+    const thinks = !!effort && effort !== 'none';
+    const fast = req.task === 'answer' && req.processing === 'fast' && supportsOpenAiFast(m);
     const stream = await openai().responses.stream(
       {
         model: m,
-        ...(reasoning ? { reasoning: { effort: reasoningEffort(req.task) ?? 'low' } } : {}),
+        // `priority` is the documented alias for Fast. The pinned SDK predates
+        // that enum member; keep the compatibility escape at this wire boundary.
+        ...(fast ? ({ service_tier: 'priority' } as Record<string, unknown>) : {}),
+        ...reasoningBody(effort),
         ...(req.maxOutputTokens !== undefined
-          ? { max_output_tokens: req.maxOutputTokens + (reasoning ? REASONING_HEADROOM : 0) }
+          ? { max_output_tokens: req.maxOutputTokens + (thinks ? REASONING_HEADROOM : 0) }
           : {}),
         input: [
           { role: 'system', content: req.system },
@@ -71,27 +75,37 @@ export const openaiChat: ChatProvider = {
         type: 'usage',
         prompt: usage.input_tokens ?? 0,
         completion: usage.output_tokens ?? 0,
+        requestedServiceTier: fast ? 'priority' : 'provider-default',
+        ...(final.service_tier ? { serviceTier: final.service_tier } : {}),
+        ...(usage.input_tokens_details?.cached_tokens !== undefined
+          ? { cachedPromptTokens: usage.input_tokens_details.cached_tokens }
+          : {}),
       };
     }
   },
 
   async json<T>(req: ChatJsonRequest): Promise<T> {
+    const m = req.route?.model ?? model(req.task);
+    const effort = effortFor(req.task, 'openai', m);
     const res = await openai().responses.create({
-      model: model(req.task),
+      model: m,
+      ...reasoningBody(effort),
       input: [
         { role: 'system', content: req.system },
         { role: 'user', content: req.user },
       ],
       text: { format: { type: 'json_object' } },
-      ...(req.maxOutputTokens !== undefined ? { max_output_tokens: req.maxOutputTokens } : {}),
-    });
+      ...(req.maxOutputTokens !== undefined
+        ? { max_output_tokens: req.maxOutputTokens + (effort && effort !== 'none' ? REASONING_HEADROOM : 0) }
+        : {}),
+    }, req.signal ? { signal: req.signal } : undefined);
     return JSON.parse(res.output_text) as T;
   },
 };
 
 export const openaiEmbedding: EmbeddingProvider = {
   embed: (texts) => embed(texts),
-  embedOne: (text) => embedOne(text),
+  embedOne: (text, opts) => embedOne(text, opts),
   identity: () => ({ provider: 'openai', model: model('embedding'), dim: EMBEDDING_DIM }),
 };
 
@@ -101,6 +115,7 @@ export const openaiRealtimeStt: RealtimeSttProvider = {
       {
         onDelta: cb.onDelta,
         onFinal: cb.onFinal,
+        onSpeechStop: cb.onSpeechStop,
         onError: cb.onError,
         onStatus: cb.onStatus,
       },
@@ -121,5 +136,5 @@ export const openaiSpeech: SpeechProvider = {
 
 export const openaiVision: VisionProvider = {
   streamSolve: (input) =>
-    solveFromImages(input.imageDataUrls, input.language, input.format, input.signal),
+    solveFromImages(input.imageDataUrls, input.language, input.format, input.signal, input.route?.model),
 };

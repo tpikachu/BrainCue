@@ -3,6 +3,10 @@ import type { Page } from '@playwright/test';
 import { resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
+// Opt-in capture (E2E_CAPTURE=1): footage needs a real key and real network,
+// so it runs in the LIVE mode of the fixture, never the offline guard.
+test.use({ live: true });
+
 /**
  * The still images — one per feature — used by the README, the landing page
  * (docs/index.html) and the docs.

@@ -8,7 +8,16 @@
 > plan-shaped view of the same history, plus what comes next. The live
 > position of the current train is [BOARD.md](BOARD.md).
 
-## Where we are (2026-10-07 — v2.2.1 shipped, v2.2.2 in flight)
+## Where we are (2026-11-19 — v2.2.2 stable, v2.3.0-preview.1 Windows preview)
+
+The interview-first implementation is published as a limited Windows
+[`2.3.0-preview.1` prerelease](https://github.com/tpikachu/BrainCue/releases/tag/v2.3.0-preview.1),
+as authorized by the user. This does
+not close the live acceptance gates or the current release train. Real
+interview speed remains unmeasured, the short user-run interview is pending,
+and PERF-01, formal M7.2c/M7.3, CTX-01 and the coding budget remain open.
+The [board](BOARD.md) records implementation approvals and release evidence;
+v2.2.2 remains the stable release. macOS/Linux preview coverage is not claimed.
 
 A **phase** is a planned train of milestones, numbered continuously since the
 v2 program began: Phase 1 shipped as v2.0, Phases 2–4 were planned as v2.1

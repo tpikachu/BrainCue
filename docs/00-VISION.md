@@ -2,6 +2,14 @@
 
 > Status: direction set 2026-07-21. This is the v2 north star. The product spec
 > is [01-PRD.md](./01-PRD.md); the delivery plan is [10-ROADMAP.md](./10-ROADMAP.md).
+>
+> **Priority revised 2026-11-17: Interview Copilot is the primary feature.** The
+> companion direction below still describes the engine and every activity it
+> runs, and nothing it shipped is removed — but the default experience is now
+> optimised for interviews: Interview is the default activity and the first
+> action on Home, and the interview path (detection, continuity, grounding,
+> model selection, readiness) is what gets measured and improved first. Design
+> of record: [23-INTERVIEW-COPILOT.md](./23-INTERVIEW-COPILOT.md).
 
 ## 1. The shift in one paragraph
 

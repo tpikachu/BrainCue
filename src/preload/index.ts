@@ -21,12 +21,19 @@ import type {
   ContributionOpenEvent,
   ContributionPatchEvent,
   ContributionResetEvent,
+  ContextPackKind,
   InterviewBrief,
   Job,
   MeetingReport,
   MemoryConflict,
   MemoryItem,
+  CaptureStatus,
   Presence,
+  Readiness,
+  RememberResult,
+  KeepHalf,
+  RollbackResult,
+  SessionPage,
   SparringFeedback,
   Story,
   VoiceAudioEvent,
@@ -71,6 +78,10 @@ const api = {
       invoke<{ ok: boolean; model?: string; error?: string }>(IPC.settings.testProviderKey, { provider }),
     listModels: () => invoke<string[]>(IPC.settings.listModels),
     listProviderModels: (provider: string) => invoke<string[]>(IPC.settings.listProviderModels, { provider }),
+    /** Per-capability readiness: chat / transcription / retrieval. */
+    readiness: () => invoke<Readiness>(IPC.settings.readiness),
+    /** Re-run model discovery for every provider with a key. */
+    refreshModels: () => invoke<Readiness>(IPC.settings.refreshModels),
     setShortcuts: (shortcuts: Record<string, string>) =>
       invoke<{ shortcuts: Record<string, string> }>(IPC.settings.setShortcuts, { shortcuts }),
     resetShortcuts: () =>
@@ -121,12 +132,14 @@ const api = {
   },
   jobs: {
     list: (profileId: string) => invoke(IPC.jobs.list, { profileId }),
-    page: (profileId: string, query: string, limit: number, offset: number) =>
+    /** `activity` narrows to Spaces of that activity, server-side. */
+    page: (profileId: string, query: string, limit: number, offset: number, activity?: ContextPackKind) =>
       invoke<{ items: unknown[]; total: number }>(IPC.jobs.page, {
         profileId,
         query,
         limit,
         offset,
+        ...(activity ? { activity } : {}),
       }),
     get: (id: string) => invoke(IPC.jobs.get, { id }),
     save: (input: {
@@ -141,6 +154,8 @@ const api = {
       jdText: string | null;
       companyUrl: string | null;
       notes: string | null;
+      resumeText?: string | null;
+      tailoredResume?: null;
     }) =>
       invoke<{
         job: unknown;
@@ -148,6 +163,7 @@ const api = {
         embedded: number;
         companyResearched: boolean;
         companyError: string | null;
+        processingError: string | null;
       }>(IPC.jobs.save, input),
     setNotes: (id: string, notes: string | null) => invoke(IPC.jobs.setNotes, { id, notes }),
     setCompanionPrefs: (id: string, prefs: CompanionSpaceOverrides | null) =>
@@ -209,6 +225,22 @@ const api = {
     ) => invoke<Story>(IPC.stories.update, { id, patch }),
     delete: (id: string) => invoke<{ deleted: true }>(IPC.stories.delete, { id }),
   },
+  /** Live latency instrumentation — ids and timestamps only. */
+  metrics: {
+    /** The first painted text of a card that holds a real answer word. */
+    firstUseful: (contributionId: string, at: number, take?: number) =>
+      invoke<{ ok: true }>(IPC.metrics.firstUseful, { contributionId, at, ...(take !== undefined ? { take } : {}) }),
+    latency: () =>
+      invoke<{
+        /** See main/services/engine/metrics/latency.ts (LatencySummary). */
+        summary: {
+          decisions: { n: number; p50: number | null; p95: number | null };
+          byCategory: Record<string, Record<'cold' | 'warm' | 'all', unknown>>;
+        };
+        samples: number;
+        hardware: { cpu: string; cores: number; memoryGb: number; platform: string };
+      }>(IPC.metrics.latency),
+  },
   session: {
     start: (
       profileId: string,
@@ -246,14 +278,19 @@ const api = {
       ),
     askActive: (questionText: string) =>
       invoke<{ ok: boolean }>(IPC.session.askActive, { questionText }),
+    /** "Answer that": answer the interviewer's latest words (detection missed). */
+    answerLast: () => invoke<{ ok: boolean }>(IPC.session.answerLast),
+    /** Which audio streams are actually flowing (shown in the Cue Card). */
+    reportCapture: (status: CaptureStatus) => invoke<{ ok: true }>(IPC.session.reportCapture, status),
     /** Keep this conversation: archive it for retrieval and extract memory
      *  candidates. Both stay gated by the user's own settings, so the counts
      *  can legitimately come back as zero. */
     /** Keep a finished conversation. `packId` files it into a Space first (null
      *  = no Space, undefined = leave it where it ran) — the archive and the
      *  memory candidates are both scoped from there. */
-    remember: (id: string, packId?: string | null) =>
-      invoke<{ archived: number; memories: number }>(IPC.session.remember, { id, packId }),
+    /** `only`: a retry runs just the halves that failed. */
+    remember: (id: string, packId?: string | null, only?: KeepHalf[]) =>
+      invoke<RememberResult>(IPC.session.remember, { id, packId, ...(only ? { only } : {}) }),
     setInterviewType: (sessionId: string, interviewType: string) =>
       invoke<{ ok: true }>(IPC.session.setInterviewType, { sessionId, interviewType }),
     setAnswering: (enabled: boolean) =>
@@ -265,7 +302,10 @@ const api = {
     togglePause: (sessionId: string) => invoke(IPC.session.togglePause, { sessionId }),
     togglePauseActive: () =>
       invoke<{ paused: boolean; active: boolean }>(IPC.session.togglePauseActive),
-    stopActive: () => invoke<{ stopped: boolean }>(IPC.session.stopActive),
+    stopActive: () => invoke<{ stopped: boolean; rollback?: RollbackResult }>(IPC.session.stopActive),
+    /** Undo a failed start: stop (no save prompt) and, when `discard`, remove. */
+    rollback: (sessionId: string, discard: boolean) =>
+      invoke<RollbackResult>(IPC.session.rollback, { sessionId, discard }),
     audioChunk: (sessionId: string, audio: ArrayBuffer, mime: string) =>
       invoke(IPC.session.audioChunk, { sessionId, audio, mime }),
     // One-way streaming audio (no response) for low-latency Realtime STT.
@@ -278,6 +318,9 @@ const api = {
     /** Sessions for ONE profile — Sessions and Insights are views of the
      *  active profile. Omitting it means every profile (data stats only). */
     list: (profileId?: string) => invoke(IPC.session.list, { profileId }),
+    /** One page of a profile's history (newest first, searchable). */
+    page: (profileId: string, query: string, limit: number, offset: number) =>
+      invoke<SessionPage>(IPC.session.page, { profileId, query, limit, offset }),
     get: (id: string) => invoke(IPC.session.get, { id }),
     delete: (id: string) => invoke(IPC.session.delete, { id }),
     generateReport: (sessionId: string) => invoke(IPC.session.generateReport, { sessionId }),
@@ -475,6 +518,9 @@ const api = {
     onContributionReset: (cb: (p: ContributionResetEvent) => void) =>
       on(EVENTS.contributionReset, cb),
     onSessionError: (cb: (p: unknown) => void) => on(EVENTS.sessionError, cb),
+    /** Settings changed in any window, or a task's route moved (a model found
+     *  unavailable, new discovery). Payload: the fresh AppSettings. */
+    onSettingsChanged: (cb: (p: unknown) => void) => on(EVENTS.settingsChanged, cb),
     onOverlayApplySettings: (cb: (p: unknown) => void) => on(EVENTS.overlayApplySettings, cb),
     onShortcutFired: (cb: (p: unknown) => void) => on(EVENTS.shortcutFired, cb),
     onPrivacyChanged: (cb: (p: unknown) => void) => on(EVENTS.privacyChanged, cb),
@@ -493,7 +539,10 @@ const api = {
     onTranscriberStatus: (
       cb: (p: { status: 'reconnecting' | 'connected' | 'disconnected' }) => void,
     ) => on(EVENTS.transcriberStatus, cb),
+    onCaptureStatus: (cb: (p: CaptureStatus) => void) => on(EVENTS.captureStatus, cb),
     onSavePrompt: (cb: (p: SavePrompt) => void) => on(EVENTS.savePrompt, cb),
+    /** A failed start's rollback settled — whichever window pressed Stop. */
+    onSessionRollback: (cb: (p: RollbackResult) => void) => on(EVENTS.sessionRollback, cb),
     onCaptureBuffer: (cb: (p: { images: string[] }) => void) => on(EVENTS.captureBuffer, cb),
     onConfirmRequest: (cb: (p: ConfirmRequest) => void) => on(EVENTS.confirmRequest, cb),
     onVoiceState: (cb: (p: VoiceStateEvent) => void) => on(EVENTS.voiceState, cb),

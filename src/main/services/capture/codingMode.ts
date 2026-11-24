@@ -14,7 +14,9 @@ import type { AnswerEvent } from '../openai/answer';
 import { showOverlay } from '../../windows/overlayWindow';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
 import { sessionManager } from '../session/sessionManager';
-import type { AnswerFormat } from '@shared/types';
+import type { AnswerFormat, AnswerRoute } from '@shared/types';
+import { taskRoute, type TaskRoute } from '../../providers/taskRoute';
+import { log } from '../security/logger';
 
 /** The programming language the solver writes solutions in (Cue Card setting; JS default). */
 const codingLanguage = (): string =>
@@ -26,12 +28,13 @@ const codingFormat = (): AnswerFormat => sessionManager.activeAnswerFormat() ?? 
 
 /** The screenshot solver, through the vision seam — it follows the `coding`
  *  task's model, so the provider is whatever the user picked for the solver. */
-const solveFromImages = (images: string[], signal: AbortSignal): AsyncGenerator<AnswerEvent> =>
+const solveFromImages = (images: string[], signal: AbortSignal, route?: TaskRoute): AsyncGenerator<AnswerEvent> =>
   providerFor('vision').streamSolve({
     imageDataUrls: images,
     language: codingLanguage(),
     format: codingFormat(),
     signal,
+    ...(route ? { route } : {}),
   });
 
 // Accumulated problem screenshots for the current solve. A long problem scrolls
@@ -73,7 +76,7 @@ export function solveCaptures(): Promise<void> {
       ? `Coding problem (${images.length} screenshots)`
       : 'Coding problem (from screenshot)';
   return streamToOverlay(
-    (signal) => solveFromImages(images, signal),
+    (signal, route) => solveFromImages(images, signal, route),
     label,
   );
 }
@@ -83,12 +86,17 @@ export function solveCaptures(): Promise<void> {
 let activeSolve: AbortController | null = null;
 
 async function streamToOverlay(
-  makeGen: (signal: AbortSignal) => AsyncGenerator<AnswerEvent>,
+  makeGen: (signal: AbortSignal, route?: TaskRoute) => AsyncGenerator<AnswerEvent>,
   label: string,
 ): Promise<void> {
   activeSolve?.abort();
   const abort = new AbortController();
   activeSolve = abort;
+  // The solve's route, captured before it is sent: a model changed while it
+  // streams applies to the NEXT solve and never relabels this one.
+  const route = taskRoute('coding') ?? undefined;
+  const answeredBy: AnswerRoute | null = route ? { provider: route.provider, model: route.model } : null;
+  log.info(`coding solve → ${route ? `${route.provider}/${route.model}` : 'unrouted'}`);
 
   const questionId = crypto.randomUUID();
   showOverlay();
@@ -97,11 +105,11 @@ async function streamToOverlay(
     ['overlay'],
   );
   try {
-    for await (const ev of makeGen(abort.signal)) {
+    for await (const ev of makeGen(abort.signal, route)) {
       if (ev.type === 'delta') {
         emitContributionDelta(questionId, ev.token, ['overlay']);
       } else if (ev.type === 'meta') {
-        emitContributionMeta(questionId, { questionId, ...ev }, ['overlay']);
+        emitContributionMeta(questionId, { questionId, ...ev, answeredBy }, ['overlay']);
       }
     }
   } catch (e) {
@@ -119,7 +127,7 @@ async function streamToOverlay(
 export function runCodingSolve(text: string): Promise<void> {
   lastSolve = { text };
   return streamToOverlay(
-    (signal) => solveFromOcr(text, codingLanguage(), codingFormat(), signal),
+    (signal, route) => solveFromOcr(text, codingLanguage(), codingFormat(), signal, route),
     'Coding problem (from clipboard)',
   );
 }
@@ -128,7 +136,7 @@ export function runCodingSolve(text: string): Promise<void> {
 export function runCodingSolveFromImage(dataUrl: string): Promise<void> {
   lastSolve = { images: [dataUrl] };
   return streamToOverlay(
-    (signal) => solveFromImages([dataUrl], signal),
+    (signal, route) => solveFromImages([dataUrl], signal, route),
     'Coding problem (from screenshot)',
   );
 }
@@ -151,10 +159,10 @@ export function resolveLast(): Promise<void> {
   }
   const last = lastSolve;
   return streamToOverlay(
-    (signal) =>
+    (signal, route) =>
       'text' in last
-        ? solveFromOcr(last.text, codingLanguage(), codingFormat(), signal)
-        : solveFromImages(last.images, signal),
+        ? solveFromOcr(last.text, codingLanguage(), codingFormat(), signal, route)
+        : solveFromImages(last.images, signal, route),
     'Coding problem (re-solve)',
   );
 }

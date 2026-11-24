@@ -1,6 +1,7 @@
 import { ChevronRightIcon, CloseIcon, RefreshIcon } from '../../components/icons';
 import type { CardModel } from './model';
 import { cardDefinition, isKnownKind } from './registry';
+import { answeredByText } from '../../lib/modelChoice';
 
 /** The generic card frame: header (collapse toggle, title, capability-driven
  *  actions) + the kind's body view from the registry. Pure presentational —
@@ -21,31 +22,47 @@ export function ContributionCard(props: {
    *  underlying memory from the card. Wired by the shell. */
   onCorrectMemory?: () => void;
   onForgetMemory?: () => void;
+  /** The live view's ONE current card: the question large, the answer always
+   *  shown (never collapsed), its actions alongside. */
+  prominent?: boolean;
 }) {
   const { card, isCurrent } = props;
   const def = cardDefinition(card.kind);
   const memoryId = (card.meta as Record<string, unknown> | null)?.memoryId;
+  // The route captured when this answer was requested — a later settings
+  // change or failover never relabels it.
+  const route = card.meta?.answeredBy;
+  const answered = route && card.body ? answeredByText(route) : null;
   const memoryActions = !!def.capabilities.memory && typeof memoryId === 'string';
   const chip = def.chip ?? (isKnownKind(card.kind) ? null : card.kind);
   const View = def.View;
+  const collapsed = card.collapsed && !props.prominent;
   return (
     <div
       className={isCurrent ? '' : 'rounded-lg border border-neutral-800 bg-neutral-950/40 px-2 py-1'}
     >
       <div className="flex items-start gap-1">
         <button
-          onClick={props.onToggleCollapsed}
-          className="flex min-w-0 flex-1 items-start gap-1 text-left text-xs font-medium text-blue-300 hover:text-blue-200"
+          type="button"
+          onClick={props.prominent ? undefined : props.onToggleCollapsed}
+          aria-expanded={props.prominent ? undefined : !collapsed}
+          className={`flex min-w-0 flex-1 items-start gap-1 text-left font-medium ${
+            props.prominent
+              ? 'cursor-default text-[13px] font-semibold leading-snug text-white'
+              : 'text-xs text-blue-300 hover:text-blue-200'
+          }`}
         >
-          <ChevronRightIcon
-            className={`mt-0.5 h-3 w-3 shrink-0 transition-transform ${card.collapsed ? '' : 'rotate-90'}`}
-          />
+          {!props.prominent && (
+            <ChevronRightIcon
+              className={`mt-0.5 h-3 w-3 shrink-0 transition-transform ${collapsed ? '' : 'rotate-90'}`}
+            />
+          )}
           {chip != null && (
             <span className="mt-px shrink-0 rounded bg-neutral-800 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-neutral-400">
               {chip}
             </span>
           )}
-          <span className={card.collapsed ? 'truncate' : ''}>
+          <span className={collapsed ? 'truncate' : ''}>
             {chip == null && isKnownKind(card.kind) ? `Q: ${card.title}` : card.title}
           </span>
         </button>
@@ -95,7 +112,7 @@ export function ContributionCard(props: {
           <CloseIcon className="h-3 w-3" />
         </button>
       </div>
-      {!card.collapsed && (
+      {!collapsed && (
         <View
           card={card}
           isCurrent={isCurrent}
@@ -104,6 +121,11 @@ export function ContributionCard(props: {
           openCite={props.openCite}
           onToggleCite={props.onToggleCite}
         />
+      )}
+      {!collapsed && answered && (
+        <p className="mt-1 text-[10px] text-neutral-500" title={answered.detail} data-answered-by>
+          {answered.label}
+        </p>
       )}
     </div>
   );

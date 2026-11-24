@@ -1,6 +1,7 @@
-import type { AppSettings, InterviewType } from '@shared/types';
+import type { AnswerRoute, AppSettings } from '@shared/types';
 import {
   CLOUD_PROVIDERS,
+  cloudProvider,
   MODEL_CATALOG,
   modelLabel,
   modelOption,
@@ -19,22 +20,71 @@ import {
  * Settings table offers for the `coding` row.
  */
 
-/** The two tasks the Cue Card chip can control: the coding solver in a coding
- *  interview, the live cue everywhere else. */
+/** The two tasks the Cue Card's chips control: `answer` (every spoken
+ *  question, in every interview — coding included) and `coding` (the
+ *  clipboard/screenshot solver). Each chip names its task (TASK_NAME). */
 export type PickerTask = 'answer' | 'coding';
 
-/** Which task the Cue Card's picker controls for this session. */
-export function pickerTask(interviewType: InterviewType | null | undefined): PickerTask {
-  return interviewType === 'coding' ? 'coding' : 'answer';
-}
+/** What each task's control is called, everywhere it appears. A coding-solver
+ *  setting must never read as if it controlled the interview's answers. */
+export const TASK_NAME: Record<PickerTask, string> = {
+  answer: 'Interview answers',
+  coding: 'Coding solver',
+};
 
-/** The effective model for a task: the user's override, else the preset default. */
+/**
+ * The model the NEXT request for a task goes to: main's own resolution
+ * (`effectiveModels` — an override when it can run, else the policy's pick
+ * on the chosen provider, after any failover). The stored override and the
+ * OpenAI preset table are only a fallback for a main that does not send it:
+ * on their own they name a model that may not be the one that runs.
+ */
 export function currentModel(
-  settings: Pick<AppSettings, 'models' | 'modelDefaults'> | null | undefined,
+  settings: Partial<Pick<AppSettings, 'models' | 'modelDefaults' | 'effectiveModels'>> | null | undefined,
   task: string,
 ): string {
   if (!settings) return '';
-  return settings.models?.[task] ?? settings.modelDefaults?.[task] ?? '';
+  return settings.effectiveModels?.[task] ?? settings.models?.[task] ?? settings.modelDefaults?.[task] ?? '';
+}
+
+/** A picker's value for "no per-task override". */
+export const AUTOMATIC = '';
+
+/** The stored override for a task, or AUTOMATIC. */
+export function overrideFor(settings: Partial<Pick<AppSettings, 'models'>> | null | undefined, task: string): string {
+  return settings?.models?.[task] ?? AUTOMATIC;
+}
+
+/** One task's picker: "Automatic — <the model it would use>" first (clears
+ *  the override), then the grouped catalog. Shared by the Cue Card's chips
+ *  and its settings, so both offer exactly the same choices. */
+export function taskPickerRows(
+  task: string,
+  settings: Partial<Pick<AppSettings, 'models' | 'autoModels' | 'providerKeys'>> | null | undefined,
+  opts: { addKeyDisabled: boolean; addKeyTitle?: string },
+  account?: AccountModels,
+): PickerRow[] {
+  const auto = settings?.autoModels?.[task] ?? '';
+  return [
+    {
+      value: AUTOMATIC,
+      label: auto ? `Automatic — ${modelLabel(auto)}` : 'Automatic',
+      description: 'Picked for your provider and preference',
+    },
+    ...pickerRows(task, settings?.providerKeys, overrideFor(settings, task), opts, account),
+  ];
+}
+
+/** "Answered by Claude Sonnet 5.5", and the detail behind it: the provider,
+ *  and any attempt that failed over before it. From the answer's own
+ *  captured route — never from current settings. */
+export function answeredByText(r: AnswerRoute): { label: string; detail: string } {
+  const name = (p: string, m: string) => modelLabel(qualifyModel(p as CloudProviderId, m));
+  const provider = cloudProvider(r.provider)?.name ?? r.provider;
+  const failed = r.failed?.length
+    ? ` Tried first: ${r.failed.map((f) => `${name(f.provider, f.model)} (${f.reason === 'model' ? 'not available' : 'network error'})`).join(', ')}.`
+    : '';
+  return { label: `Answered by ${name(r.provider, r.model)}`, detail: `${provider} · ${name(r.provider, r.model)}.${failed}` };
 }
 
 /** A catalog entry as the picker presents it for one task. */

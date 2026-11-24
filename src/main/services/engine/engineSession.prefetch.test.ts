@@ -21,15 +21,17 @@ vi.mock('../../ipc/contributionBridge', () => ({
   emitContributionMeta: vi.fn(),
   emitContributionOpen: vi.fn(),
   emitContributionReset: vi.fn(),
+  emitContributionTake: () => {},
 }));
 vi.mock('../../providers/normalizeError', () => ({ normalizeProviderError: (e: unknown) => String(e) }));
 vi.mock('../../db/repositories/profiles.repo', () => ({
   profilesRepo: { get: () => ({ id: 'p1', name: 'Test User', language: 'en' }) },
 }));
 vi.mock('../security/logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
-vi.mock('../memory/recall', () => ({ recallMemories: async () => [] }));
+vi.mock('../memory/recall', () => ({ recallMemories: async () => [], markRecalled: () => {}, revalidateRecalled: (_p: string, _k: unknown, m: unknown) => m }));
 vi.mock('./grounding', () => ({
-  ground: async (_profileId: string, query: string) => {
+  ground: async (_profileId: string, query: string, _pack: unknown, _mode: unknown, opts?: { cached?: unknown[] }) => {
+    if (opts?.cached) return opts.cached; // local corpus check, not a second query embedding
     h.groundCalls.push(query);
     return [{ id: `chunk-for:${query}`, content: query, sourceType: 'notes', score: 1 }];
   },
@@ -146,6 +148,19 @@ describe('prefetchGrounding', () => {
     const s = session();
     s.prefetchGrounding('We shipped the new onboarding flow last Tuesday and it went fine');
     expect(h.groundCalls).toEqual([]);
+  });
+
+  // M7.2b: interview prompts phrased as instructions, without a "?", used
+  // to wait for the final — the meeting rule read them as ambiguous.
+  it('an interview prompt without a question mark ("Tell me about…", "Walk me through…") prefetches; a fragment does not', () => {
+    const s = session();
+    s.prefetchGrounding('Walk me through the'); // a fragment — wait for the rest
+    expect(h.groundCalls).toEqual([]);
+    s.prefetchGrounding('Tell me about a time you disagreed with your manager');
+    expect(h.groundCalls).toEqual(['Tell me about a time you disagreed with your manager']);
+    const t = session();
+    t.prefetchGrounding('Walk me through how you would design a rate limiter');
+    expect(h.groundCalls).toHaveLength(2);
   });
 });
 

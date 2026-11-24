@@ -1,5 +1,5 @@
 import { app, BrowserWindow, desktopCapturer, session } from 'electron';
-import { existsSync } from 'node:fs';
+import { appendFile, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { electronApp, is, optimizer } from '@electron-toolkit/utils';
 import { initDb } from './db';
@@ -17,6 +17,10 @@ import { applyContentProtectionToAll, getPrivacy, startProtectionObserver } from
 import { affinityReadable } from './services/session/displayAffinity';
 import { initAutoUpdate } from './services/update/updater';
 import { log } from './services/security/logger';
+import { setLatencySink } from './services/engine/metrics/latencyStore';
+import { installKeyPresence } from './services/openai/models';
+import { providerKeys } from './services/security/providerKeys';
+import { scheduleDiscovery } from './services/models/discovery';
 
 // Escape hatch for hybrid-GPU laptops (e.g. NVIDIA Optimus) where the GPU surface
 // won't display the window: launch with `--disable-gpu` or set `AI_DISABLE_GPU=1`
@@ -163,6 +167,22 @@ app.whenReady().then(() => {
     // its session row 'live' — finalize such strays before any UI reads counts.
     sparringManager.healStrays();
     registerIpc();
+    // Live latency evidence: one JSON line per finished question — answered,
+    // failed, aborted, superseded or missed (ids, timestamps, counts and
+    // outcome codes only, never text) in <userData>/metrics/latency.jsonl.
+    try {
+      const dir = join(app.getPath('userData'), 'metrics');
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, 'latency.jsonl');
+      setLatencySink((t) => appendFile(file, `${JSON.stringify(t)}
+`, () => {}));
+    } catch (e) {
+      log.warn('latency sink unavailable', e);
+    }
+    // Model selection sees the real key presence (env key + encrypted
+    // store), and learns what each key can use — in the background.
+    installKeyPresence(() => providerKeys.presence());
+    scheduleDiscovery();
     // Point the realtimeStt capability at the chosen engine (cloud or the
     // on-device model) before the first session can open.
     applySttSelection();

@@ -27,3 +27,7 @@ scripts/privacy-affinity/.out/
 # .gif/.mp4 in docs/media/ are committed. See e2e/README.md.
 docs/media/frames/
 
+
+# PERF-01 benchmark evidence (offline simulation and live runs). Kept outside
+# test-results/, which Playwright clears on every run. See docs/benchmarks/.
+bench-results/

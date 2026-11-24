@@ -1,5 +1,6 @@
 import type { AnswerFormat } from '@shared/types';
 import type { ModelKey } from '../services/openai/models';
+import type { TaskRoute } from './taskRoute';
 
 /**
  * Provider capability interfaces (PRD §6.7). The engine and service modules
@@ -18,7 +19,7 @@ export type Capability = 'chat' | 'embedding' | 'realtimeStt' | 'batchStt' | 'sp
  *  after the stream) — deliberately not part of the transport contract. */
 export type ChatStreamEvent =
   | { type: 'delta'; token: string }
-  | { type: 'usage'; prompt: number; completion: number };
+  | { type: 'usage'; prompt: number; completion: number; requestedServiceTier?: string; serviceTier?: string; cachedPromptTokens?: number };
 
 export interface ChatStreamRequest {
   /** Task key — the provider resolves the model through the app's preset +
@@ -30,6 +31,14 @@ export interface ChatStreamRequest {
    *  headroom on OpenAI reasoning models) are added by the provider. */
   maxOutputTokens?: number;
   signal?: AbortSignal;
+  /** The exact provider + model this ATTEMPT uses, resolved once by the
+   *  caller (taskRoute) — the routed provider and the adapter both obey it,
+   *  so a failure is attributed to the route that actually failed and a
+   *  retry can be pinned to its provider. Absent: resolved at dispatch. */
+  route?: TaskRoute;
+  /** Explicit opt-in for a latency-sensitive live cue. Only a supported
+   * OpenAI adapter applies this; other providers keep their own defaults. */
+  processing?: 'fast';
 }
 
 export interface ChatJsonRequest {
@@ -37,6 +46,11 @@ export interface ChatJsonRequest {
   system: string;
   user: string;
   maxOutputTokens?: number;
+  /** Cancels the request (the interview classifier's timeout). Optional —
+   *  callers that never time out keep the old shape. */
+  signal?: AbortSignal;
+  /** See ChatStreamRequest.route. */
+  route?: TaskRoute;
 }
 
 export interface ChatProvider {
@@ -62,13 +76,18 @@ export interface EmbeddingIdentity {
 
 export interface EmbeddingProvider {
   embed(texts: string[]): Promise<Float32Array[]>;
-  embedOne(text: string): Promise<Float32Array>;
+  /** `signal` aborts the request (the live answer path bounds it — see
+   *  rag/liveEmbed.ts). */
+  embedOne(text: string, opts?: { signal?: AbortSignal }): Promise<Float32Array>;
   identity(): EmbeddingIdentity;
 }
 
 export interface RealtimeSttCallbacks {
   onDelta: (text: string) => void;
   onFinal: (text: string) => void;
+  /** Voice activity ended (server VAD). Optional — engines without it are
+   *  timed from their last interim delta instead (metrics/latency.ts). */
+  onSpeechStop?: () => void;
   onError?: (message: string) => void;
   onStatus?: (status: 'reconnecting' | 'connected' | 'disconnected') => void;
 }
@@ -98,6 +117,8 @@ export interface VisionProvider {
     language: string;
     format: AnswerFormat;
     signal?: AbortSignal;
+    /** The solve's captured route (see ChatStreamRequest.route). */
+    route?: TaskRoute;
   }): AsyncGenerator<ChatStreamEvent | { type: 'meta'; riskWarning: string | null }>;
 }
 

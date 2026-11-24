@@ -1,27 +1,26 @@
-import { classifyQuestion } from '../../openai/questions';
+import { detectQuestion } from '../interview/detector';
 import type { TriggerPolicy } from './triggerPolicy';
 
-/** The v1 gate, unchanged: only classifier-confirmed questions at or above
- *  this confidence get an automatic answer. */
-export const QUESTION_CONFIDENCE_FLOOR = 0.4;
+export { QUESTION_CONFIDENCE_FLOOR } from '../interview/detector';
 
 /**
- * Interview Copilot's trigger: react when the remote speaker asks a question.
- * Wraps the classifier (an LLM call) in the deterministic confidence floor —
- * exactly the v1 behavior, now expressed as a policy the engine can swap.
+ * Interview Copilot's trigger: react when the interviewer asks for an answer.
+ * Delegates to the interview detector (engine/interview/detector.ts):
+ * reliable rules first ("Tell me about yourself." needs no model call), the
+ * classifier — with recent context, a timeout, and validated output — for
+ * the ambiguous rest, and the v1 0.4 confidence floor on whatever the model
+ * says. The model may score, code decides.
  */
 export const reactiveQuestionPolicy: TriggerPolicy = {
-  async evaluate(text) {
-    const c = await classifyQuestion(text);
-    if (!c.isQuestion) return { act: false, kind: null, reason: 'not-a-question' };
-    if (c.confidence < QUESTION_CONFIDENCE_FLOOR) {
-      return { act: false, kind: null, reason: 'confidence-below-floor' };
-    }
+  async evaluate(text, ctx) {
+    const d = await detectQuestion(text, { recent: ctx?.recent });
+    if (!d.act) return { act: false, kind: null, reason: d.reason, detection: d };
     return {
       act: true,
       kind: 'answer',
-      question: { type: c.type, confidence: c.confidence, strategy: c.strategy },
-      reason: 'question-detected',
+      question: { type: d.type, confidence: d.confidence, strategy: d.strategy },
+      reason: d.source === 'model' ? 'question-detected' : d.reason,
+      detection: d,
     };
   },
 };

@@ -80,8 +80,33 @@ describe('classifyQuestion', () => {
   // Documents a known gap: output_text is parsed without a guard. json_object format
   // makes this unlikely, but malformed JSON currently rejects (caught upstream in
   // processFinalTranscript). If this is ever hardened, update this test.
-  it('rejects on malformed JSON (current unguarded behavior)', async () => {
+  // Malformed JSON still rejects — the interview detector catches it and
+  // falls back to the heuristic decision (engine/interview/detector.ts).
+  it('rejects on malformed JSON (the detector owns the fallback)', async () => {
     h.output = 'not json at all';
     await expect(classifyQuestion('x')).rejects.toThrow();
+  });
+
+  it('rejects a JSON value that is not an object', async () => {
+    h.output = '[true]';
+    await expect(classifyQuestion('x')).rejects.toThrow(/JSON object/);
+  });
+
+  it('a wrongly-typed field fails closed instead of passing through', async () => {
+    h.output = JSON.stringify({ isQuestion: 'yes', confidence: 'high', type: 'weird' });
+    const r = await classifyQuestion('x');
+    expect(r.isQuestion).toBe(false);
+    expect(r.confidence).toBe(0);
+    expect(r.type).toBe('behavioral');
+  });
+
+  it('an out-of-range confidence is not trusted', async () => {
+    h.output = JSON.stringify({ isQuestion: true, confidence: 7 });
+    expect((await classifyQuestion('x')).confidence).toBe(0);
+  });
+
+  it('surfaces continuesPrevious only when the model says so', async () => {
+    h.output = JSON.stringify({ isQuestion: true, confidence: 0.8, continuesPrevious: true });
+    expect((await classifyQuestion('and how you tested it')).continuesPrevious).toBe(true);
   });
 });

@@ -397,7 +397,7 @@ export default function TailorPage() {
 
           {!settings?.apiKeyPresent && (
             <p className="mt-3 text-xs text-amber-400">
-              ⚠ No OpenAI key —{' '}
+              ⚠ Tailoring runs on OpenAI only for now, and no OpenAI key is set —{' '}
               <Link to="/settings/models" className="underline">
                 add it in Settings
               </Link>

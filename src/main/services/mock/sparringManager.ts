@@ -8,6 +8,7 @@ import { speak, type TtsVoice } from '../openai/tts';
 import { transcribeChunk } from '../openai/transcription';
 import { evaluateAnswer } from '../openai/feedback';
 import { apiKeyStore } from '../security/apiKey';
+import { chatTaskProblem, chatTaskReady } from '../readiness';
 import { QUESTION_TYPE_BY_INTERVIEW } from './mockManager';
 import type { InterviewType, SparringFeedback } from '@shared/types';
 
@@ -187,8 +188,12 @@ export const sparringManager = {
   ) {
     const profile = profilesRepo.get(profileId);
     if (!profile) throw new Error('Profile not found.');
+    // Sparring speaks (OpenAI voice) and transcribes (OpenAI) the answer, so
+    // it needs an OpenAI key; questions and feedback run on the mock task's
+    // own provider.
     if (!apiKeyStore.isPresent())
-      throw new Error('Add your OpenAI API key in Settings to start a sparring session.');
+      throw new Error('Sparring speaks and listens through OpenAI, so it needs an OpenAI key — add one in Settings → Language Models.');
+    if (!chatTaskReady('mock')) throw new Error(chatTaskProblem('mock', 'start a sparring session'));
 
     this.healStrays();
 

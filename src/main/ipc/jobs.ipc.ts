@@ -1,14 +1,15 @@
+import { chatTaskProblem, chatTaskReady } from '../services/readiness';
 import { z } from 'zod';
 import { IPC } from '@shared/ipc';
 import { isInterviewSpace } from '@shared/activities';
 import { handle, zId, zSpaceKind } from './helpers';
 import { jobsRepo } from '../db/repositories/jobs.repo';
 import { profilesRepo } from '../db/repositories/profiles.repo';
-import { parseCompany, parseJobDescription } from '../services/openai/parsing';
+import { parseCompany, parseJobDescription, parseResume } from '../services/openai/parsing';
 import { generateBrief } from '../services/openai/brief';
 import { tailorApplication } from '../services/openai/tailor';
 import { fetchCompanySite } from '../services/documents/companyResearch';
-import { indexJob } from '../services/rag/indexProfile';
+import { indexJob, JobEmbeddingError } from '../services/rag/indexProfile';
 import { apiKeyStore } from '../services/security/apiKey';
 import { log } from '../services/security/logger';
 
@@ -24,8 +25,10 @@ export function registerJobsIpc(): void {
       query: z.string().default(''),
       limit: z.number().int().min(1).max(100).default(5),
       offset: z.number().int().min(0).default(0),
+      /** Only Spaces of this activity (server-side, so paging stays exact). */
+      activity: zSpaceKind.optional(),
     }),
-    ({ profileId, query, limit, offset }) => jobsRepo.page({ profileId, query, limit, offset }),
+    ({ profileId, query, limit, offset, activity }) => jobsRepo.page({ profileId, query, limit, offset, activity }),
   );
 
   handle(IPC.jobs.get, zId, ({ id }) => {
@@ -48,19 +51,33 @@ export function registerJobsIpc(): void {
       jdText: z.string().nullable().default(null),
       companyUrl: z.string().nullable().default(null),
       notes: z.string().nullable().default(null),
+      resumeText: z.string().max(200_000).nullable().optional(),
+      tailoredResume: z.null().optional(),
     }),
-    async ({ id, profileId, kind, title, company, jdUrl, jdText, companyUrl, notes }) => {
+    async ({ id, profileId, kind, title, company, jdUrl, jdText, companyUrl, notes, resumeText, tailoredResume }) => {
+      const previous = id ? jobsRepo.get(id) : null;
+      if (id && !previous) throw new Error('Space not found.');
+      if (previous && previous.profileId !== profileId) throw new Error('This role belongs to another profile. Choose a role for the current profile.');
       const job = id
-        ? jobsRepo.update(id, { kind, title, company, jdUrl, jdText, companyUrl, notes })
-        : jobsRepo.create({ profileId, kind, title, company, jdUrl, jdText, companyUrl, notes });
+        ? jobsRepo.update(id, { kind, title, company, jdUrl, jdText, companyUrl, notes, resumeText, tailoredResume })
+        : jobsRepo.create({ profileId, kind, title, company, jdUrl, jdText, companyUrl, notes, resumeText });
 
-      const hasKey = apiKeyStore.isPresent();
+      // JD parsing runs on the 'parsing' task's provider (any chat key).
+      const hasKey = chatTaskReady('parsing');
+      let processingError: string | null = null;
       // Structured JD parsing extracts requirements, responsibilities, and
       // seniority — an interview artifact. Run over a standup agenda it invents
       // all three, so non-job Spaces index their document as plain text.
       const interviewSpace = isInterviewSpace(jobsRepo.get(job.id)?.kind);
       if (jdText?.trim() && interviewSpace) {
-        if (hasKey) jobsRepo.update(job.id, { parsedJd: await parseJobDescription(jdText) });
+        if (jdText !== previous?.jdText) jobsRepo.update(job.id, { parsedJd: null });
+        if (hasKey && (jdText !== previous?.jdText || !previous?.parsedJd)) {
+          try {
+            jobsRepo.update(job.id, { parsedJd: await parseJobDescription(jdText) });
+          } catch {
+            processingError = 'The job description could not be parsed. Its saved text is still used for answers.';
+          }
+        }
       } else {
         // JD cleared, or not an interview → drop any parsed structure (chunks
         // are cleared by indexJob either way).
@@ -91,13 +108,23 @@ export function registerJobsIpc(): void {
 
       // Always reindex: clears stale JD/company chunks (+ embeddings) even with no
       // key, and re-embeds when a key + text are present.
-      const { embedded } = await indexJob(job.id);
+      let embedded = 0;
+      try {
+        ({ embedded } = await indexJob(job.id));
+      } catch (e) {
+        if (!(e instanceof JobEmbeddingError)) throw e;
+        // indexJob writes the current chunks before embedding. Keeping the
+        // saved role and using local matching is preferable to creating a
+        // duplicate on retry or retaining its old résumé after a model error.
+        processingError = 'Semantic indexing failed. Your saved documents are matched by keywords; save again to retry indexing.';
+      }
       return {
         job: jobsRepo.get(job.id)!,
         keyMissing: !hasKey,
         embedded,
         companyResearched,
         companyError,
+        processingError,
       };
     },
   );
@@ -136,18 +163,22 @@ export function registerJobsIpc(): void {
     // It has no meaning for a standup or a project.
     if (!isInterviewSpace(job.kind))
       throw new Error('Prep briefs are for interview Spaces.');
-    if (!apiKeyStore.isPresent())
-      throw new Error('Add your OpenAI API key in Settings to generate a brief.');
+    // Runs on the parsing task's provider (any chat key), not only OpenAI.
+    if (!chatTaskReady('parsing')) throw new Error(chatTaskProblem('parsing', 'generate a brief'));
     if (!job.parsedJd)
       throw new Error('This interview needs a parsed job description first — add a JD in Detail.');
     const profile = profilesRepo.get(job.profileId);
-    if (!profile?.parsedResume)
+    if (!profile)
+      throw new Error('Profile not found.');
+    const ownResume = job.tailoredResume?.trim() || job.resumeText?.trim();
+    const resume = ownResume ? await parseResume(ownResume) : profile.parsedResume;
+    if (!resume)
       throw new Error('This profile needs a parsed résumé first — add & parse one on the profile.');
 
     return generateBrief({
       targetRole: profile.targetRole,
       company: job.company,
-      resume: profile.parsedResume,
+      resume,
       jd: job.parsedJd,
       companyResearch: job.parsedCompany,
     });
@@ -172,15 +203,16 @@ export function registerJobsIpc(): void {
     if (!isInterviewSpace(job.kind))
       throw new Error('Tailoring a résumé only applies to interview Spaces.');
     if (!apiKeyStore.isPresent())
-      throw new Error('Add your OpenAI API key in Settings to tailor a résumé.');
+      throw new Error('Tailoring runs on OpenAI only for now — add an OpenAI key in Settings → Language Models to tailor a résumé.');
     if (!job.jdText?.trim())
       throw new Error('Add this Space’s job description first — there is nothing to tailor to.');
     const profile = profilesRepo.get(job.profileId);
-    if (!profile?.resumeText?.trim())
+    const baseResume = job.resumeText?.trim() || profile?.resumeText?.trim();
+    if (!baseResume)
       throw new Error('This profile has no résumé yet — add one on the profile first.');
 
     const result = await tailorApplication({
-      baseResume: profile.resumeText,
+      baseResume,
       jdText: job.jdText,
       questions: [],
     });

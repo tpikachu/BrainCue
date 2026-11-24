@@ -34,8 +34,9 @@ export function createRouted(lookup: Lookup): {
   routedChat: ChatProvider;
   routedVision: VisionProvider;
 } {
-  function pick<C extends 'chat' | 'vision'>(task: ModelKey, capability: C): CapabilityMap[C] {
-    const provider = taskProvider(task);
+  function pick<C extends 'chat' | 'vision'>(task: ModelKey, capability: C, route?: { provider: string }): CapabilityMap[C] {
+    // A request that carries its route goes exactly there (see types.ts).
+    const provider = route?.provider ?? taskProvider(task);
     const impl = lookup(provider, capability);
     if (!impl) {
       throw new CapabilityUnavailableError(capability, provider, gapHint(capability, provider));
@@ -47,10 +48,10 @@ export function createRouted(lookup: Lookup): {
     // Async generator (not a plain delegate) so a routing failure surfaces on
     // the first `next()` inside the caller's for-await, like a transport error.
     async *stream(req) {
-      yield* pick(req.task, 'chat').stream(req);
+      yield* pick(req.task, 'chat', req.route).stream(req);
     },
     json<T>(req: ChatJsonRequest): Promise<T> {
-      return pick(req.task, 'chat').json<T>(req);
+      return pick(req.task, 'chat', req.route).json<T>(req);
     },
     async warm(task) {
       try {
@@ -63,7 +64,7 @@ export function createRouted(lookup: Lookup): {
 
   const routedVision: VisionProvider = {
     async *streamSolve(input) {
-      yield* pick('coding', 'vision').streamSolve(input);
+      yield* pick('coding', 'vision', input.route).streamSolve(input);
     },
   };
 

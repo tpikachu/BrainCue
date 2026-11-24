@@ -24,6 +24,9 @@ export function TranscriptPanel({
 }) {
   const interimEntries = Object.entries(interims).filter(([, t]) => t);
   const [height, setHeight] = useState(150);
+  // Compact by default: the last line + what is being said now. The full,
+  // resizable transcript is one tap away.
+  const [compact, setCompact] = useState(true);
   const [atBottom, setAtBottom] = useState(true);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -62,11 +65,18 @@ export function TranscriptPanel({
       <div
         data-ct-interactive
         className="relative flex shrink-0 flex-col overflow-hidden rounded-lg border border-neutral-700 bg-neutral-950/50"
-        style={{ ...noDrag, height }}
+        style={{ ...noDrag, height: compact ? 'auto' : height, maxHeight: compact ? 76 : undefined }}
       >
         <div className="flex items-center justify-between px-2 py-1 text-[10px] uppercase tracking-wide text-neutral-500">
-          <span>Transcript</span>
-          {lines.length > MAX_LINES && <span>last {MAX_LINES}</span>}
+          <button
+            type="button"
+            onClick={() => setCompact((c) => !c)}
+            className="uppercase tracking-wide hover:text-neutral-300"
+            title={compact ? 'Show the full transcript' : 'Show only the latest line'}
+          >
+            Transcript {compact ? '▸' : '▾'}
+          </button>
+          {!compact && lines.length > MAX_LINES && <span>last {MAX_LINES}</span>}
         </div>
         <div
           ref={scrollRef}
@@ -77,7 +87,7 @@ export function TranscriptPanel({
             <p className="text-neutral-600">Listening… the conversation will appear here.</p>
           ) : (
             <>
-              {lines.slice(-MAX_LINES).map((l) => (
+              {lines.slice(compact ? -1 : -MAX_LINES).map((l) => (
                 <p key={l.id}>
                   <span
                     className={
@@ -112,14 +122,18 @@ export function TranscriptPanel({
           </button>
         )}
       </div>
-      {/* Resize handle — drag to change the transcript height. */}
-      <div
-        data-ct-interactive
-        onMouseDown={startResize}
-        title="Drag to resize the transcript"
-        className="mb-2 mt-0.5 h-1.5 shrink-0 cursor-row-resize rounded bg-neutral-800 transition-colors hover:bg-neutral-600"
-        style={noDrag}
-      />
+      {/* Resize handle — drag to change the transcript height (expanded only). */}
+      {compact ? (
+        <div className="mb-2 shrink-0" />
+      ) : (
+        <div
+          data-ct-interactive
+          onMouseDown={startResize}
+          title="Drag to resize the transcript"
+          className="mb-2 mt-0.5 h-1.5 shrink-0 cursor-row-resize rounded bg-neutral-800 transition-colors hover:bg-neutral-600"
+          style={noDrag}
+        />
+      )}
     </>
   );
 }

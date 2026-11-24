@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { modelOption, type CloudProviderInfo } from '@shared/providers';
 import { visionSolvePrompt } from '../../services/openai/codingPrompt';
 import { resolveModel, type ModelKey } from '../../services/openai/models';
+import { effortFor } from '../effort';
 import { STRICT_JSON_INSTRUCTION, parseJsonText } from '../jsonText';
 import type { ChatJsonRequest, ChatProvider, ChatStreamEvent, VisionProvider } from '../types';
 import { compatClient } from './client';
@@ -51,15 +52,24 @@ export function openaiCompatibleProvider(info: CloudProviderInfo): {
           max_tokens:
             ceiling + (modelOption(info.id, modelId)?.reasoning ? REASONING_HEADROOM : 0),
         };
+  /** `reasoning_effort` for catalogued reasoning models (Gemini accepts
+   *  "minimal" as its lowest; Groq's GPT-OSS "low"). Unknown ids get none —
+   *  a vendor that rejects the field would fail the whole request. */
+  const effort = (task: ModelKey, modelId: string) => {
+    if (!modelOption(info.id, modelId)?.efforts) return {};
+    const e = effortFor(task, info.id, modelId);
+    return e ? ({ reasoning_effort: e } as unknown as Record<string, never>) : {};
+  };
 
   async function* run(
     task: ModelKey,
     messages: OpenAI.ChatCompletionMessageParam[],
     ceiling: number | undefined,
     signal: AbortSignal | undefined,
+    pinnedModel?: string,
   ): AsyncGenerator<ChatStreamEvent> {
     const client = await compatClient(info);
-    const { model } = resolveModel(task);
+    const model = pinnedModel ?? resolveModel(task).model;
     try {
       const stream = await client.chat.completions.create(
         {
@@ -68,6 +78,7 @@ export function openaiCompatibleProvider(info: CloudProviderInfo): {
           stream: true,
           stream_options: { include_usage: true },
           ...maxTokens(model, ceiling),
+          ...effort(task, model),
         },
         { signal },
       );
@@ -99,6 +110,7 @@ export function openaiCompatibleProvider(info: CloudProviderInfo): {
         ],
         req.maxOutputTokens,
         req.signal,
+        req.route?.model,
       );
     },
 
@@ -111,7 +123,7 @@ export function openaiCompatibleProvider(info: CloudProviderInfo): {
     },
     async json<T>(req: ChatJsonRequest): Promise<T> {
       const client = await compatClient(info);
-      const { model } = resolveModel(req.task);
+      const model = req.route?.model ?? resolveModel(req.task).model;
       const base: OpenAI.ChatCompletionCreateParamsNonStreaming = {
         model,
         messages: [
@@ -119,20 +131,21 @@ export function openaiCompatibleProvider(info: CloudProviderInfo): {
           { role: 'user', content: req.user },
         ],
         ...maxTokens(model, req.maxOutputTokens),
+        ...effort(req.task, model),
       };
       let text: string;
       try {
-        const res = await client.chat.completions.create({
-          ...base,
-          response_format: { type: 'json_object' },
-        });
+        const res = await client.chat.completions.create(
+          { ...base, response_format: { type: 'json_object' } },
+          req.signal ? { signal: req.signal } : undefined,
+        );
         text = res.choices[0]?.message?.content ?? '';
       } catch (e) {
         // A model/vendor that rejects `response_format` says so with a 400 —
         // the prompt already demands strict JSON, so retry without it.
         if (!(e instanceof OpenAI.APIError && e.status === 400)) throw vendorError(info, e);
         try {
-          const res = await client.chat.completions.create(base);
+          const res = await client.chat.completions.create(base, req.signal ? { signal: req.signal } : undefined);
           text = res.choices[0]?.message?.content ?? '';
         } catch (e2) {
           throw vendorError(info, e2);
@@ -166,6 +179,7 @@ export function openaiCompatibleProvider(info: CloudProviderInfo): {
             ],
             undefined,
             input.signal,
+            input.route?.model,
           );
           yield { type: 'meta', riskWarning: null };
         },

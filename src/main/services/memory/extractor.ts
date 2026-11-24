@@ -1,12 +1,13 @@
 import { z } from 'zod';
-import { asc, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db, schema } from '../../db';
+import { transcriptOrder } from '../../db/transcriptOrder';
 import { memoriesRepo } from '../../db/repositories/memories.repo';
 import { contextPacksRepo } from '../../db/repositories/jobs.repo';
 import { SETTINGS_KEYS, settingsRepo } from '../../db/repositories/settings.repo';
 import { providerFor } from '../../providers/registry';
 import { checkSensitive } from './sensitiveFilter';
-import type { MemoryItem } from '@shared/types';
+import type { KeepStep, MemoryItem } from '@shared/types';
 
 /**
  * Post-session memory extraction — CONSERVATIVE by contract:
@@ -142,28 +143,47 @@ function alreadyKnown(known: MemoryItem[], content: string, packId: string | nul
  *  everywhere. Where a conversation is kept and how far what it taught reaches
  *  are two different questions. */
 export async function extractMemoryCandidates(sessionId: string): Promise<number> {
-  if (settingsRepo.get(SETTINGS_KEYS.memoryEnabled) !== '1') return 0; // no capture before consent
+  return (await extractMemoryOutcome(sessionId)).count;
+}
+
+/** {@link extractMemoryCandidates}, saying what happened: suggestions saved,
+ *  nothing new, declined (no consent, no Space, the Space opted out, too
+ *  short) or failed (the provider call or its result). Never throws. */
+export async function extractMemoryOutcome(sessionId: string): Promise<KeepStep> {
+  try {
+    const r = await extract(sessionId);
+    if (typeof r === 'number') return { status: r > 0 ? 'done' : 'nothing-new', count: r };
+    return { status: r.status, count: 0, ...(r.error ? { error: r.error } : {}) };
+  } catch (e) {
+    return { status: 'failed', count: 0, error: (e as Error)?.message || String(e) };
+  }
+}
+
+type Declined = { status: KeepStep['status']; error?: string };
+
+async function extract(sessionId: string): Promise<number | Declined> {
+  if (settingsRepo.get(SETTINGS_KEYS.memoryEnabled) !== '1') return { status: 'off' }; // no capture before consent
   const session = db()
     .select()
     .from(schema.sessions)
     .where(eq(schema.sessions.id, sessionId))
     .get();
-  if (!session) return 0;
+  if (!session) return { status: 'failed', error: 'Session not found' };
   // A Space is where a conversation is kept — with none, this session is a
   // one-off and leaves nothing behind, the same rule the archive follows. It is
   // stated in the start modal and offered again at the save prompt, so "no
   // Space" is a choice the user made twice rather than something lost quietly.
-  if (!session.packId) return 0;
+  if (!session.packId) return { status: 'no-space' };
   const pack = contextPacksRepo.get(session.packId);
-  if (pack && !pack.memoryEnabled) return 0; // Space opted out
+  if (pack && !pack.memoryEnabled) return { status: 'space-off' }; // Space opted out
 
   const turns = db()
     .select()
     .from(schema.transcriptChunks)
     .where(eq(schema.transcriptChunks.sessionId, sessionId))
-    .orderBy(asc(schema.transcriptChunks.createdAt))
+    .orderBy(...transcriptOrder())
     .all();
-  if (turns.length < 2) return 0; // nothing durable comes out of a one-liner
+  if (turns.length < 2) return { status: 'too-short' }; // nothing durable comes out of a one-liner
 
   const transcript = turns.map((t) => `${t.speaker}: ${t.text}`).join('\n');
 
@@ -180,10 +200,12 @@ export async function extractMemoryCandidates(sessionId: string): Promise<number
       maxOutputTokens: 600,
     });
     const result = extractionSchema.safeParse(raw);
-    if (!result.success) return 0; // invalid shape → extract nothing
+    // Invalid shape → extract nothing.
+    if (!result.success) return { status: 'failed', error: 'the suggestions came back in an unusable shape' };
     parsed = result.data;
-  } catch {
-    return 0; // extraction failure → nothing (never a partial guess)
+  } catch (e) {
+    // Extraction failure → nothing (never a partial guess), and said so.
+    return { status: 'failed', error: (e as Error)?.message || String(e) };
   }
 
   let saved = 0;
